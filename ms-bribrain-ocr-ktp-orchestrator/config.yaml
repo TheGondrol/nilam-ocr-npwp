@@ -1,0 +1,170 @@
+# Service URLs
+services:
+  ocr:
+    url: "${OCR_SERVICE_URL}"
+    api_key: "${OCR_SERVICE_API}"
+    timeout: 30
+  lamination:
+    url: "${LAMINATION_SERVICE_URL}"
+    api_key: "${LAMINATION_SERVICE_API}"
+    timeout: 30
+  recapture:
+    url: "${RECAPTURE_SERVICE_URL}"
+    api_key: "${RECAPTURE_SERVICE_API}"
+    timeout: 30
+  graycopy:
+    url: "${GRAYCOPY_SERVICE_URL}"
+    api_key: "${GRAYCOPY_SERVICE_API}"
+    timeout: 30
+  temper:
+    url: "${TEMPER_SERVICE_URL}"
+    api_key: "${TEMPER_SERVICE_API}"
+    timeout: 30
+  classifier:
+    url: "${CLASSIFIER_SERVICE_URL}"
+    api_key: "${CLASSIFIER_SERVICE_API}"
+    timeout: 30
+  quality:
+    url: "${QUALITY_SERVICE_URL}"
+    api_key: "${QUALITY_SERVICE_API}"
+    timeout: 30
+  qualitydl:
+    url: "${QUALITYDL_SERVICE_URL}"
+    api_key: "${QUALITYDL_SERVICE_API}"
+    timeout: 90
+  postprocess:
+    url: "${POSTPROCESS_SERVICE_URL}"
+    api_key: "${POSTPROCESS_SERVICE_API}"
+    timeout: 30
+  orchestrator:
+    url: "${ORCHESTRATOR_SERVICE_URL}"
+    api_key: "${ORCHESTRATOR_SERVICE_API}"
+    timeout: 30
+    overall_timeout: 60 # Maximum time for entire OCR pipeline
+
+# Application settings
+app:
+  name: "OCR KTP Orchestrator"
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 8000
+  health_check_timeout: 5 # Timeout (seconds) for downstream service health probes
+
+# HTTP Client Connection Pool
+http_client:
+  limit: 100 # Maximum total concurrent connections
+  limit_per_host: 30 # Maximum connections per host
+  ttl_dns_cache: 300 # DNS cache TTL in seconds
+  keepalive_timeout: 30 # Keep-alive timeout in seconds
+
+# CORS Configuration
+cors:
+  # Allowed origins (use ["*"] to allow all)
+  allow_origins:
+    - "https://api-bribrain.dev.example.com"
+    - "https://api-brispot.dev.example.com"
+    - "https://api-brispot-testing.dev.example.com"
+    - "https://api-brispot-staging.dev.example.com"
+    - "https://api-staging.example.com"
+  # Allow credentials (cookies, authorization headers)
+  allow_credentials: true
+  # Allowed HTTP methods (use ["*"] to allow all)
+  allow_methods:
+    - "POST"
+    - "GET"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  # Allowed headers (use ["*"] to allow all)
+  allow_headers:
+    - "*"
+
+# Logging configuration
+logging:
+  log_images: false
+  log_to_database: true
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/ocr_ktp_orchestrator.log"
+  max_bytes: 10485760 # 10MB
+  backup_count: 5
+  console: true
+
+# Device configuration
+device:
+  prefer_gpu: false
+  fallback_to_cpu: true
+
+run_services:
+  ocr: true
+  lamination: true
+  recapture: true
+  graycopy: true
+  temper: true
+  classifier: true
+  quality: true
+  qualitydl: true
+  postprocess: true
+  orchestrator: true
+
+# MinIO configuration
+minio:
+  bucket: "bribrain-webviewasset-dev"
+  path: "ocr_ktp_image_log"
+  max_size: 1048576 # 1MB in bytes
+  pool_size: 100
+  pool_timeout: 30
+  ttl_dns_cache: 300
+  image:
+    format: "JPEG"
+    content_type: "image/jpeg"
+    initial_quality: 95
+    min_quality: 20
+    quality_step: 10
+    scale_step: 0.1
+    min_scale: 0.1
+
+database:
+  table_name: "bribrain_ocr_ktp_orchestrator"
+  result_table_name: "bribrain_ocr_ktp_result"
+  schema: "public"
+  pool_size: 5
+  max_overflow: 10
+  pool_pre_ping: true
+  pool_recycle: 3600
+  pool_timeout: 10
+  connect_timeout: 5
+
+# Rate Limiting Configuration
+rate_limit:
+  # Enable/disable rate limiting
+  enabled: false
+  # Maximum requests per minute per client
+  requests_per_minute: 60
+  # Maximum requests per second per client (burst protection)
+  requests_per_second: 10
+  # Maximum burst size allowed
+  burst_size: 20
+  # Paths excluded from rate limiting
+  # Cleanup interval for expired request history (seconds)
+  cleanup_interval: 60
+  # Paths excluded from rate limiting
+  exclude_paths:
+    - "/health"
+    - "/"
+    - "/docs"
+    - "/openapi.json"
+    - "/redoc"
+
+# Elastic APM Configuration
+elastic_apm:
+  enabled: true
+  server_url: "${ELASTIC_APM_SERVER_URL}"
+  service_name: "${ELASTIC_APM_SERVICE_NAME:-ocr-ktp-orchestrator}"
+  environment: "${ELASTIC_APM_ENVIRONMENT:-dev}"
+  secret_token: "${ELASTIC_APM_SECRET_TOKEN}"
+  verify_server_cert: false
+
+gcs:
+  bucket_name: "gc-bribrain-dev-gcs-iguru-01"
+  path: "ocr_ktp/image_logs/"

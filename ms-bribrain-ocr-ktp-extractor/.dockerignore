@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Build artifacts
+build/
+dist/
+
+# Notebooks
+*.ipynb
+
+# E2E test data
+tests/e2e/data/
+
+# Env files (secrets injected separately)
+.env
+.env.*
+!.env.template
+
+# Deploy scripts (not needed in image)
+deploy_*.sh
+
+# Docs
+*.md
+LICENSE
+
+# Large model cache (downloaded at runtime)
+.paddleocr/
+.paddlex/
+
+# PaddleOCR2Pytorch: exclude git/docs, keep code
+PaddleOCR2Pytorch/.git/
+PaddleOCR2Pytorch/doc/
+PaddleOCR2Pytorch/README.md
+
+# Autokernel: strip dev-only artifacts from image (keep .pth weights!)
+autokernel/__pycache__/
+autokernel/kernels/__pycache__/
+autokernel/models/__pycache__/
+autokernel/workspace/__pycache__/
+autokernel/workspace/ppocrv5/*.pth.bak-*

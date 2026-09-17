@@ -1,0 +1,304 @@
+{
+  "current_kernel_idx": 32,
+  "current_kernel_file": "workspace/kernel_graph_capture_930.py",
+  "started_at": "2026-03-21T13:00:00Z",
+  "kernels": [
+    {
+      "rank": 1,
+      "file": "workspace/kernel_layout_transform_1.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_layout_transform_1_optimized.py",
+      "op_type": "layout_transform",
+      "status": "done",
+      "end_to_end_speedup": 1.057,
+      "speedup": 1.057
+    },
+    {
+      "rank": 900,
+      "file": "workspace/kernel_graph_capture_900.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_graph_capture_900_optimized.py",
+      "op_type": "graph_capture",
+      "status": "done",
+      "end_to_end_speedup": 6.998,
+      "speedup": 6.998
+    },
+    {
+      "rank": 23,
+      "file": "workspace/kernel_conv2d_23.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_conv2d_23_optimized.py",
+      "op_type": "conv2d",
+      "status": "done",
+      "end_to_end_speedup": 1.008,
+      "speedup": 1.008
+    },
+    {
+      "rank": 20,
+      "file": "workspace/kernel_conv2d_20.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_conv2d_20_graph_optimized.py",
+      "op_type": "conv2d",
+      "status": "done",
+      "end_to_end_speedup": 1.038,
+      "speedup": 1.038
+    },
+    {
+      "rank": 901,
+      "file": "workspace/kernel_block_fusion_901.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_901_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.053,
+      "speedup": 1.053
+    },
+    {
+      "rank": 902,
+      "file": "workspace/kernel_block_fusion_902.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_902_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.039,
+      "speedup": 1.039
+    },
+    {
+      "rank": 903,
+      "file": "workspace/kernel_block_fusion_903.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_903_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 904,
+      "file": "workspace/kernel_block_fusion_904.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_904_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.025,
+      "speedup": 1.025
+    },
+    {
+      "rank": 905,
+      "file": "workspace/kernel_block_fusion_905.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_905_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.012,
+      "speedup": 1.012
+    },
+    {
+      "rank": 906,
+      "file": "workspace/kernel_block_fusion_906.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_906_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.015,
+      "speedup": 1.015
+    },
+    {
+      "rank": 908,
+      "file": "workspace/kernel_block_fusion_908.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_908_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.082,
+      "speedup": 1.082
+    },
+    {
+      "rank": 909,
+      "file": "workspace/kernel_block_fusion_909.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_909_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.029,
+      "speedup": 1.029
+    },
+    {
+      "rank": 910,
+      "file": "workspace/kernel_block_fusion_910.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_910_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.024,
+      "speedup": 1.024
+    },
+    {
+      "rank": 911,
+      "file": "workspace/kernel_block_fusion_911.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_911_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.051,
+      "speedup": 1.051
+    },
+    {
+      "rank": 912,
+      "file": "workspace/kernel_block_fusion_912.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_912_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 913,
+      "file": "workspace/kernel_block_fusion_913.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_913_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 914,
+      "file": "workspace/kernel_graph_capture_914.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_graph_capture_914_optimized.py",
+      "op_type": "graph_capture",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 915,
+      "file": "workspace/kernel_block_fusion_915.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_915_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 916,
+      "file": "workspace/kernel_block_fusion_916.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_916_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 917,
+      "file": "workspace/kernel_block_fusion_917.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_917_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 0.99,
+      "speedup": 0.99
+    },
+    {
+      "rank": 918,
+      "file": "workspace/kernel_block_fusion_918.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_918_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 919,
+      "file": "workspace/kernel_block_fusion_919.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_919_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 0.996,
+      "speedup": 0.996
+    },
+    {
+      "rank": 920,
+      "file": "workspace/kernel_block_fusion_920.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_920_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 0.993,
+      "speedup": 0.993
+    },
+    {
+      "rank": 921,
+      "file": "workspace/kernel_block_fusion_921.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_921_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.031,
+      "speedup": 1.031
+    },
+    {
+      "rank": 922,
+      "file": "workspace/kernel_block_fusion_922.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_922_optimized.py",
+      "op_type": "block_fusion",
+      "status": "done",
+      "end_to_end_speedup": 1.025,
+      "speedup": 1.025
+    },
+    {
+      "rank": 923,
+      "file": "workspace/kernel_block_fusion_923.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_923_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.006,
+      "speedup": 1.006
+    },
+    {
+      "rank": 924,
+      "file": "workspace/kernel_block_fusion_924.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_924_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 0.918,
+      "speedup": 0.918
+    },
+    {
+      "rank": 925,
+      "file": "workspace/kernel_block_fusion_925.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_925_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.002,
+      "speedup": 1.002
+    },
+    {
+      "rank": 926,
+      "file": "workspace/kernel_block_fusion_926.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_926_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 927,
+      "file": "workspace/kernel_block_fusion_927.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_927_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.008,
+      "speedup": 1.008
+    },
+    {
+      "rank": 928,
+      "file": "workspace/kernel_block_fusion_928.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_928_optimized.py",
+      "op_type": "block_fusion",
+      "status": "reverted",
+      "end_to_end_speedup": 1.006,
+      "speedup": 1.006
+    },
+    {
+      "rank": 929,
+      "file": "workspace/kernel_graph_capture_929.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_graph_capture_929_optimized.py",
+      "op_type": "graph_capture",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    },
+    {
+      "rank": 930,
+      "file": "workspace/kernel_graph_capture_930.py",
+      "optimized_path": "/workspace/ppocr-triton/autokernel/workspace/kernel_graph_capture_930_optimized.py",
+      "op_type": "graph_capture",
+      "status": "reverted",
+      "end_to_end_speedup": 1.0,
+      "speedup": 1.0
+    }
+  ]
+}

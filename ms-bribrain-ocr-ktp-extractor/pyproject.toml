@@ -1,0 +1,59 @@
+[project]
+name = "ms-bribrain-ocr-extract"
+version = "0.1.0"
+description = "Application for OCR on KTP documents using PaddleOCR and FastAPI."
+readme = "README.md"
+requires-python = ">3.11,<3.12"
+dependencies = [
+    "fastapi[standard]>=0.115.6",
+    "ipykernel>=6.29.5",
+    "networkx>=3.4.2",
+    "paddlepaddle-gpu==3.2.0",
+    "paddleocr>=3.1.0",
+    "pip>=24.3.1",
+    "pyyaml>=6.0.0",
+    "requests>=2.32.3",
+    "psycopg>=3.3.2",
+    "psycopg-binary>=3.3.2",
+    "setuptools>=75.8.0",
+    "asyncpg>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.45",
+    "google-auth>=2.48.0",
+    "google-cloud-storage>=3.9.0",
+    "elastic-apm>=6.20.0",
+    "cryptography>=46.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pillow>=10.0.0",
+    "httpx>=0.24.0,<0.27.0",
+]
+
+
+[tool.uv.sources]
+"paddlepaddle-gpu" = { index = "paddle" }
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests",
+    "unit: unit tests",
+    "integration: integration tests",
+]
+asyncio_mode = "auto"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "paddle"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu118/"
+
+

@@ -1,0 +1,139 @@
+"""
+Configuration validation module.
+Validates required environment variables and config values before application startup.
+"""
+
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import List, Tuple
+
+from src.core.config import config
+
+logger = logging.getLogger(__name__)
+
+
+def validate_environment_variables() -> Tuple[bool, List[str]]:
+    """
+    Validate required environment variables are set.
+    Checks MinIO or GCS variables depending on APP_ENVIRO.
+
+    Returns:
+        Tuple of (is_valid, missing_vars)
+    """
+    app_enviro = os.getenv("APP_ENVIRO", "onprem")
+
+    required_env_vars = [
+        "DATABASE_URL",
+        "API_KEY",
+    ]
+
+    if app_enviro == "onprem":
+        required_env_vars += [
+            "MINIO_ENDPOINT",
+            "MINIO_ACCESS_KEY",
+            "MINIO_SECRET_KEY",
+        ]
+    # GCS credentials come from ADC (the VM's attached service account) or
+    # optional SA_* env vars (see gcs_service._load_credentials); not required
+    # at startup.
+
+    missing_vars = []
+
+    for var in required_env_vars:
+        value = os.getenv(var)
+        if not value:
+            missing_vars.append(f"  - {var}")
+
+    is_valid = len(missing_vars) == 0
+    return is_valid, missing_vars
+
+
+def validate_config_values() -> Tuple[bool, List[str]]:
+    """
+    Validate required config values are set.
+    
+    Returns:
+        Tuple of (is_valid, missing_configs)
+    """
+    missing_configs = []
+    
+    # Validate model path
+    if not config.model_path or not config.model_path.strip():
+        missing_configs.append("  - model.path (Model path)")
+    else:
+        # Check if model file exists (will be downloaded if not)
+        model_path = Path(config.model_path)
+        if not model_path.exists():
+            logger.warning(f"Model file not found at {config.model_path}, will be downloaded from MinIO")
+    
+    # Validate server settings
+    if not config.server_host or not config.server_host.strip():
+        missing_configs.append("  - server.host (Server host)")
+    
+    if not config.server_port:
+        missing_configs.append("  - server.port (Server port)")
+    
+    # Validate MinIO settings (only required for on-prem)
+    app_enviro = os.getenv("APP_ENVIRO", "onprem")
+    if app_enviro == "onprem":
+        minio_bucket = config.get("minio.bucket")
+        minio_object = config.get("minio.object")
+
+        if not minio_bucket or not minio_bucket.strip():
+            missing_configs.append("  - minio.bucket (MinIO bucket for model)")
+
+        if not minio_object or not minio_object.strip():
+            missing_configs.append("  - minio.object (MinIO object path for model)")
+    
+    # Validate model dimensions
+    if config.img_height <= 0:
+        missing_configs.append("  - model.img_height (Must be > 0)")
+    
+    if config.img_width <= 0:
+        missing_configs.append("  - model.img_width (Must be > 0)")
+    
+    # Validate compile mode if compilation is enabled
+    if config.use_compile:
+        valid_modes = ["default", "reduce-overhead", "max-autotune"]
+        if config.compile_mode not in valid_modes:
+            missing_configs.append(f"  - model.compile_mode (Invalid mode: '{config.compile_mode}', must be one of {valid_modes})")
+    
+    is_valid = len(missing_configs) == 0
+    return is_valid, missing_configs
+
+
+def validate_startup_configuration() -> None:
+    """
+    Validate all required environment variables and config values.
+    Exits with sys.exit(1) if validation fails.
+    """
+    logger.info("Validating startup configuration...")
+    
+    # Validate environment variables
+    env_valid, missing_env_vars = validate_environment_variables()
+    
+    # Validate config values
+    config_valid, missing_configs = validate_config_values()
+    
+    # Check if validation passed
+    if env_valid and config_valid:
+        logger.info("Configuration validation passed ✓")
+        return
+    
+    # Log errors
+    logger.error("Configuration validation failed:")
+    
+    if not env_valid:
+        logger.error("Missing required environment variables:")
+        for var in missing_env_vars:
+            logger.error(var)
+    
+    if not config_valid:
+        logger.error("Missing required configuration values:")
+        for config_item in missing_configs:
+            logger.error(config_item)
+    
+    logger.error("Please set all required environment variables and config values before starting the application.")
+    sys.exit(1)

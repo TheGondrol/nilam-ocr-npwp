@@ -1,0 +1,120 @@
+# Application Configuration
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8010
+  reload: false
+
+# CORS Configuration
+cors:
+  # Allowed origins (use ["*"] to allow all)
+  allow_origins:
+    - "https://api-bribrain.dev.example.com"
+    - "https://api-brispot.dev.example.com"
+    - "https://api-brispot-testing.dev.example.com"
+    - "https://api-brispot-staging.dev.example.com"
+    - "https://api-staging.example.com"
+  # Allow credentials (cookies, authorization headers)
+  allow_credentials: true
+  # Allowed HTTP methods (use ["*"] to allow all)
+  allow_methods:
+    - "*"
+  # Allowed headers (use ["*"] to allow all)
+  allow_headers:
+    - "*"
+
+# OCR Configuration
+ocr:
+  # Path to PaddleOCR configuration file
+  mobile_config_path: "PaddleOCR_mobile.yaml"
+  server_config_path: "PaddleOCR_hybrid.yaml"
+
+  # Image processing settings
+  image:
+    max_size_mb: 1
+    allowed_types:
+      - "image/jpeg"
+      - "image/png"
+
+  # OCR filtering settings
+  filter:
+    # Threshold ratio for filtering results (width/5)*4
+    width_threshold_ratio: 0.8
+
+# Device Configuration
+device:
+  # Preferred device: "auto", "gpu", or "cpu"
+  # "auto" will use GPU if available, otherwise CPU
+  preferred: "auto"
+
+  # Force CPU even if GPU is available
+  force_cpu: false
+
+# Logging Configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  insert_to_database: true
+  level: "INFO"
+
+  # Console logging
+  console:
+    enabled: true
+    level: "INFO"
+
+  # File logging
+  file:
+    enabled: true
+    level: "DEBUG"
+    path: "logs/ocr_extract.log"
+
+    # Rotation settings
+    max_bytes: 10485760 # 10MB
+    backup_count: 5
+
+  # Format
+  format: "%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+database:
+  # Connection pooling settings
+  pool_size: 5
+  max_overflow: 10
+  pool_pre_ping: true
+  pool_recycle: 3600
+  pool_timeout: 10
+  connect_timeout: 5
+
+# Elastic APM Configuration
+elastic_apm:
+  enabled: true
+  server_url: "${ELASTIC_APM_SERVER_URL}"
+  service_name: "${ELASTIC_APM_SERVICE_NAME:-ocr-ktp-extractor}"
+  environment: "${ELASTIC_APM_ENVIRONMENT:-dev}"
+  secret_token: "${ELASTIC_APM_SECRET_TOKEN}"
+  verify_server_cert: false
+
+gcs:
+  bucket_name: "gc-bribrain-dev-gcs-iguru-01"
+  # Mobile / CPU flow (legacy PaddleOCR pdiparams, single file)
+  model_prefix: "inference"
+  mobile_prefix: "ocr_models/paddle_models/mobile/"
+  mobile_model_path: "./src/models/mobile_models/mobile_261125/inference.pdiparams"
+  # Server / GPU flow (PyTorch .pth, det + rec downloaded separately)
+  server_det_prefix: "ocr_models/paddle_models/server/detection_models/"
+  server_rec_prefix: "ocr_models/paddle_models/server/recognition_models/"
+  server_det_filename_prefix: "server_det" # matches server_det_v1.pth, server_det_v2.pth, ...
+  server_rec_filename_prefix: "server_rec" # matches server_rec_v1.pth, server_rec_v2.pth, ...
+  server_det_local_path: "./autokernel/workspace/ppocrv5/server_det.pth"
+  server_rec_local_path: "./autokernel/workspace/ppocrv5/server_rec.pth"
+
+# Threshold provider — periodically refreshes thresholds from
+# `ms-bribrain-manage-thservice` so model thresholds can be updated
+# centrally without redeploying this service.
+threshold_provider:
+  refresh_interval_seconds: 3600 # how often to re-read from DB (seconds)
+  table_name: "bribrain_model_thresholds"
+  schema: "public"
+  pool_size: 2
+  max_overflow: 2
+  pool_recycle: 3600

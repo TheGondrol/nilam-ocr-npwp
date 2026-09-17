@@ -1,0 +1,61 @@
+[project]
+name = "ocr-tamper-detection"
+version = "1.0.0"
+description = "Document Tamper Detection API using fine-tuned ViT model"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "OCR Team" }
+]
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.6",
+    "torch>=2.1.2",
+    "torchvision>=0.16.2",
+    "transformers>=4.36.2",
+    "Pillow>=10.2.0",
+    "numpy>=1.24.3",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0.1",
+    "psycopg-binary>=3.3.2",
+    "sqlalchemy>=2.0.45",
+    "psycopg>=3.3.2",
+    "minio>=7.2.20",
+    "asyncpg>=0.29.0",
+    "mypy>=1.19.1",
+    "pytest-cov>=7.0.0",
+    "httpx>=0.28.1",
+    "ty>=0.0.15",
+    "google-auth>=2.48.0",
+    "google-cloud-storage>=3.9.0",
+    "elastic-apm>=6.20.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "httpx>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["test"]
+markers = [
+    "e2e: end-to-end tests",
+    "unit: unit tests",
+]
+asyncio_mode = "auto"
+
+[tool.mypy]
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true

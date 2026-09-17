@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# PaddleOCR
+inference/
+*.pdparams
+*.pdiparams
+
+# Server model weights (too large for git, deployed separately)
+src/models/server_models/pth_models/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Test fixture images may contain PII — keep out of git
+tests/data/*.png
+tests/data/*.jpg
+tests/data/*.jpeg
+
+uv.lock
+
+# Internalized autokernel — regenerable / developer-only artifacts
+autokernel/__pycache__/
+autokernel/kernels/__pycache__/
+autokernel/models/__pycache__/
+autokernel/workspace/__pycache__/
+autokernel/workspace/ppocrv5/*.pth
+autokernel/workspace/ppocrv5/*.pth.bak-*

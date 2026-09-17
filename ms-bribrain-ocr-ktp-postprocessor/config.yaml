@@ -1,0 +1,429 @@
+# OCR Postprocess Configuration
+
+# Threshold values for fuzzy matching and confidence
+thresholds:
+  partial: 75
+  ratio: 80
+  confidence: 0.8
+
+# Regex patterns for text extraction
+regex:
+  AMBIL_DIGIT: "\\d+"
+  AMBIL_HURUF: "[A-Za-z]+"
+  AMBIL_KATA_KAPITAL: "([A-Z]{2,}.*)"
+  AMBIL_KOMA_TITIK: "[,.]"
+  AMBIL_SATU_DIGIT: "\\d"
+  AMBIL_NON_ALFANUMERIK: "[^a-zA-Z0-9]"
+  AMBIL_KAPITAL_DENGAN_KHUSUS: "[A-Z][A-Z\\.\\- ]+"
+  AMBIL_TITIK_SEBELUM_KAPITAL: "\\.(?=[A-Z])"
+  AMBIL_DUA_DIGIT_ALFANUMERIK_DASH: "\\b\\d{2}[A-Za-z0-9\\-]*"
+  AMBIL_NON_HURUF_AWAL: "^[^A-Za-z]+"
+  AMBIL_KONTEN_SETELAH_COLON: "[：:]\\s*(\\S+)"
+  AMBIL_HURUF_SPASI: "([A-Za-z\\s]+)"
+  AMBIL_HURUF_LALU_DIGIT: "([A-Za-z]+)(\\d+)"
+  AMBIL_HURUF_LALU_TANGGAL: "([A-Za-z]+)([\\d\\-\\/\\.]+)"
+  AMBIL_FORMAT_TANGGAL1: "([A-Za-z]+)(\\d{2})[\\/\\-.](\\d{2})[\\/\\-.](\\d{4})"
+  AMBIL_FORMAT_TANGGAL2: "([A-Za-z]+)[\\s\\.\\-]?(\\d{2})(\\d{2})[\\/\\-.](\\d{4})"
+  AMBIL_COLON_SPASI_AWAL: "^[:\\s]+"
+  AMBIL_NON_ALFANUMERIK_SPASI: "[^A-Za-z0-9\\s]"
+  AMBIL_KATA_KAPITAL_BATAS: "\\b([A-Z][A-Z]+.*)"
+  AMBIL_PEMISAH: "[ /,\\-\\.]+"
+  AMBIL_NON_DIGIT: "\\D"
+  AMBIL_SPASI: "\\s+"
+  AMBIL_KAPITAL_KHUSUS: "[A-Z][A-Z\\.\\- ]+"
+  AMBIL_COLON_APAPUN: "[：:]\\s*(.*)"
+  AMBIL_TANDA_BACA: "[,.-]"
+  AMBIL_MINIMAL_DUA_KAPITAL: "[A-Z]{2,}"
+  AMBIL_DUA_KAPITAL_LALU_HURUF: "[A-Z]{2}[A-Za-z]+"
+  AMBIL_KAPITAL_LOOKAHEAD: "[A-Z]{2,}.*?(?=\\s+Jen|$)"
+  AMBIL_BUKAN_DIGIT_SLASH_SEBELUM_DIGIT: "[^0-9/](?=\\d)"
+  AMBIL_KAPITAL_HURUF_TITIK: "([A-Z]{2,}[A-Za-z\\.]*)"
+  AMBIL_DUA_DIGIT_ALFANUMERIK: "\\b\\d{2}[A-Za-z0-9]*"
+  AMBIL_KAPITAL_QUOTES: "([A-Z]{2,}[A-Za-z\\.'\\\"]*)"
+
+# CORS Configuration
+cors:
+  # Allowed origins (use ["*"] to allow all)
+  allow_origins:
+    - "https://api-bribrain.dev.example.com"
+    - "https://api-brispot.dev.example.com"
+    - "https://api-brispot-testing.dev.example.com"
+    - "https://api-brispot-staging.dev.example.com"
+    - "https://api-staging.example.com"
+  # Allow credentials (cookies, authorization headers)
+  allow_credentials: true
+  # Allowed HTTP methods (use ["*"] to allow all)
+  allow_methods:
+    - "POST"
+    - "GET"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  # Allowed headers (use ["*"] to allow all)
+  allow_headers:
+    - "*"
+
+# Logging configuration
+logging:
+  insert_to_database: true
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  file:
+    enabled: true
+    path: "logs/ocr_postprocess.log"
+    max_bytes: 10485760
+    backup_count: 5
+  console:
+    enabled: true
+    level: INFO
+
+# API configuration
+api:
+  title: "OCR Postprocess API"
+  description: "API for post-processing OCR text extraction from KTP"
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 8000
+  timeout_keep_alive: 60
+database:
+  table_name: "bribrain_ocr_ktp_postprocessor"
+  schema: "public"
+  pool_size: 5
+  max_overflow: 10
+  pool_pre_ping: true
+  pool_recycle: 3600
+  pool_timeout: 10
+  connect_timeout: 5
+
+# KTP Field Constants
+constants:
+  # Key data for field identification
+  keydata:
+    - "nik"
+    - "nama"
+    - "tempat/tgl lahir"
+    - "jenis kelamin"
+    - "alamat"
+    - "rt/rw"
+    - "kel/desa"
+    - "kecamatan"
+    - "agama"
+    - "status perkawinan"
+    - "pekerjaan"
+    - "perempuan"
+    - "laki-laki"
+    - "belum kawin"
+    - "kawin"
+    - "cerai hidup"
+    - "cerai mati"
+    - "married"
+    - "islam"
+    - "kristen"
+    - "katholik"
+    - "hindu"
+    - "buddha"
+    - "konghucu"
+    - "christian"
+
+  keyid:
+    - "nik"
+    - "nama"
+    - "tempat/tgl lahir"
+    - "jenis kelamin"
+    - "alamat"
+    - "rt/rw"
+    - "kel/desa"
+    - "kecamatan"
+    - "agama"
+    - "status perkawinan"
+    - "pekerjaan"
+
+  keydata_repeat:
+    - "rt/rw"
+    - "kel/desa"
+    - "kecamatan"
+    - "tempat/tgl lahir"
+    - "status perkawinan"
+    - "belum kawin"
+    - "kawin"
+    - "cerai hidup"
+    - "cerai mati"
+    - "married"
+
+  keydata_status:
+    - "status perkawinan"
+    - "belum kawin"
+    - "kawin"
+    - "cerai hidup"
+    - "cerai mati"
+    - "married"
+
+  keydata_agama:
+    - "agama"
+    - "islam"
+    - "kristen"
+    - "katholik"
+    - "hindu"
+    - "buddha"
+    - "konghucu"
+    - "christian"
+
+  keydata_jeniskelamin:
+    - "jenis kelamin"
+    - "perempuan"
+    - "laki-laki"
+
+  data_key_unittest:
+    - "nik"
+    - "jenis_kelamin"
+    - "nama"
+    - "tempat_lahir"
+    - "tanggal_lahir"
+    - "alamat"
+    - "rt"
+    - "rw"
+    - "kel_desa"
+    - "kecamatan"
+    - "agama"
+    - "status_perkawinan"
+    - "pekerjaan"
+
+# Mapping values for field normalization
+mappings:
+  pekerjaan:
+    - "PELAJAR/MAHASISWA"
+    - "KARYAWAN SWASTA"
+    - "PNS"
+    - "PEGAWAI NEGERI SIPIL"
+    - "TNI"
+    - "POLRI"
+    - "PETANI/PEKEBUN"
+    - "NELAYAN"
+    - "WIRASWASTA"
+    - "GURU"
+    - "DOKTER"
+    - "PERAWAT"
+    - "PENSIUNAN"
+    - "IBU RUMAH TANGGA"
+    - "BURUH"
+    - "SOPIR"
+    - "PEDAGANG"
+    - "NOTARIS"
+    - "PENGACARA"
+    - "DOSEN"
+    - "USTADZ"
+    - "PENDIDIK"
+    - "WARTAWAN"
+    - "JURNALIS"
+    - "KARYAWAN BUMN"
+    - "KARYAWAN BUMD"
+    - "KARYAWAN HONORER"
+    - "KARYAWAN"
+    - "OTHERS"
+    - "PERDAGANGAN"
+    - "MENGURUS RUMAH TANGGA"
+    - "BELUM/TIDAK BEKERJA"
+    - "SWASTA"
+    - "PEGAWAI SWASTA"
+    - "BURUH HARIAN LEPAS"
+    - "BURUH TANI/PERKEBUNAN"
+    - "PENDETA"
+    - "TRANSPORTASI"
+    # Daftar resmi 106 jenis pekerjaan KTP (Dukcapil) — entry yang belum ada di atas
+    - "APARATUR SIPIL NEGARA (ASN)"
+    - "TENTARA NASIONAL INDONESIA"
+    - "KEPOLISIAN RI (POLRI)"
+    - "PETERNAK"
+    - "NELAYAN/PERIKANAN"
+    - "INDUSTRI"
+    - "KONSTRUKSI"
+    - "BURUH NELAYAN/PERIKANAN"
+    - "BURUH PETERNAKAN"
+    - "PEMBANTU RUMAH TANGGA"
+    - "TUKANG CUKUR"
+    - "TUKANG LISTRIK"
+    - "TUKANG BATU"
+    - "TUKANG KAYU"
+    - "TUKANG SOL SEPATU"
+    - "TUKANG LAS/PANDAI BESI"
+    - "TUKANG JAHIT"
+    - "TUKANG GIGI"
+    - "PENATA RIAS"
+    - "PENATA BUSANA"
+    - "PENATA RAMBUT"
+    - "MEKANIK"
+    - "SENIMAN"
+    - "TABIB"
+    - "PARAJI"
+    - "PERANCANG BUSANA"
+    - "PENERJEMAH"
+    - "IMAM MASJID"
+    - "PASTOR"
+    - "USTADZ/MUBALIGH"
+    - "JURU MASAK"
+    - "PROMOTOR ACARA"
+    - "ANGGOTA DPR-RI"
+    - "ANGGOTA DPD"
+    - "ANGGOTA BPK"
+    - "PRESIDEN"
+    - "WAKIL PRESIDEN"
+    - "ANGGOTA MAHKAMAH KONSTITUSI"
+    - "ANGGOTA KABINET/KEMENTERIAN"
+    - "DUTA BESAR/KEPALA PERWAKILAN"
+    - "GUBERNUR"
+    - "WAKIL GUBERNUR"
+    - "BUPATI"
+    - "WAKIL BUPATI"
+    - "WALIKOTA"
+    - "WAKIL WALIKOTA"
+    - "ANGGOTA DPRD PROVINSI"
+    - "ANGGOTA DPRD KAB/KOTA"
+    - "PILOT"
+    - "ARSITEK"
+    - "AKUNTAN"
+    - "KONSULTAN"
+    - "BIDAN"
+    - "APOTEKER"
+    - "PSIKIATER/PSIKOLOG"
+    - "PENYIAR TELEVISI"
+    - "PENYIAR RADIO"
+    - "PELAUT"
+    - "PENELITI"
+    - "PIALANG"
+    - "PARANORMAL"
+    - "PERANGKAT DESA"
+    - "KEPALA DESA"
+    - "BIARAWATI"
+    - "ARTIS"
+    - "ATLET"
+    - "CHEF"
+    - "MANAJER"
+    - "TENAGA TATA USAHA"
+    - "OPERATOR"
+    - "PEKERJA PENGOLAHAN, KERAJINAN"
+    - "TEKNISI"
+    - "ASISTEN AHLI"
+    - "GEMBALA"
+    - "USKUP"
+    - "BIARAWAN"
+    - "PANDITA"
+    - "PINANDITA"
+    - "BHIKKHU"
+    - "XUESHI"
+    - "WENSHI"
+    - "JIAOSHENG"
+
+  status:
+    - "BELUM KAWIN"
+    - "KAWIN"
+    - "CERAI HIDUP"
+    - "CERAI MATI"
+    - "MARRIED"
+
+  agama:
+    - "ISLAM"
+    - "KRISTEN"
+    - "KATHOLIK"
+    - "HINDU"
+    - "BUDDHA"
+    - "KONGHUCU"
+    - "CHRISTIAN"
+
+  jenis_kelamin:
+    - "LAKI-LAKI"
+    - "PEREMPUAN"
+
+# Month mapping
+bulan_dict:
+  "01": "Jan"
+  "02": "Feb"
+  "03": "Mar"
+  "04": "Apr"
+  "05": "May"
+  "06": "Jun"
+  "07": "Jul"
+  "08": "Aug"
+  "09": "Sep"
+  "10": "Oct"
+  "11": "Nov"
+  "12": "Dec"
+
+# Error messages
+messages:
+  glare: "glare"
+  blur: "blur"
+  rotated: "tidak sejajar"
+
+# Character correction mappings for OCR
+character_mappings:
+  # Alphabet to digit corrections (when between digits)
+  alphabet_to_digit:
+    "O": "0"
+    "o": "0"
+    "A": "4"
+    "q": "9"
+    "l": "1"
+    "z": "2"
+    "Z": "2"
+    "I": "1"
+    "B": "8"
+    "S": "5"
+    "s": "5"
+    "G": "6"
+    "g": "9"
+    "E": "3"
+    "e": "3"
+    "b": "6"
+    "P": "9"
+    "D": "0"
+    "Q": "9"
+    "C": "0"
+    "c": "0"
+    "L": "1"
+    "T": "7"
+
+  # Digit to alphabet corrections (when between letters)
+  digit_to_alphabet:
+    "0": "O"
+    "4": "A"
+    "9": "P"
+    "1": "I"
+    "2": "Z"
+    "8": "B"
+    "5": "S"
+    "6": "G"
+    "3": "e"
+    "7": "T"
+
+  # Symbol corrections (when between digits)
+  symbol_to_digit:
+    "+": "7"
+    "[": "1"
+    "]": "1"
+    "!": "1"
+    "|": "1"
+    "/": "1"
+    "\\": "1"
+    "&": "8"
+    "?": "7"
+
+# Elastic APM Configuration
+elastic_apm:
+  enabled: true
+  server_url: "${ELASTIC_APM_SERVER_URL}"
+  service_name: "${ELASTIC_APM_SERVICE_NAME:-ocr-ktp-postprocessor}"
+  environment: "${ELASTIC_APM_ENVIRONMENT:-dev}"
+  secret_token: "${ELASTIC_APM_SECRET_TOKEN}"
+  verify_server_cert: false
+
+# Threshold provider — periodically refreshes thresholds from
+# `ms-bribrain-manage-thservice` so model thresholds can be updated
+# centrally without redeploying this service.
+threshold_provider:
+  refresh_interval_seconds: 3600 # how often to re-read from DB (seconds)
+  table_name: "bribrain_model_thresholds"
+  schema: "public"
+  pool_size: 2
+  max_overflow: 2
+  pool_recycle: 3600

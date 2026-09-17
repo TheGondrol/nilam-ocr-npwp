@@ -1,0 +1,137 @@
+{
+  "model": "PPOCRv5ServerRecModel",
+  "input_shape": "1,3,48,320",
+  "dtype": "float16",
+  "gpu": "NVIDIA GeForce RTX 2080 Ti",
+  "reference": {
+    "output_shape": "[1, 40, 18385]",
+    "latency_ms": 14.84
+  },
+  "optimized": {
+    "output_shape": "[1, 40, 18385]",
+    "latency_ms": 1.33,
+    "kernels_replaced": [
+      {
+        "type": "layout_transform",
+        "rank": 1,
+        "speedup": 1.057,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_layout_transform_1_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "graph_capture",
+        "rank": 900,
+        "speedup": 6.998,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_graph_capture_900_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "conv2d",
+        "rank": 23,
+        "speedup": 1.008,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_conv2d_23_optimized.py",
+        "modules_replaced": 21
+      },
+      {
+        "type": "conv2d",
+        "rank": 20,
+        "speedup": 1.038,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_conv2d_20_graph_optimized.py",
+        "modules_replaced": 21
+      },
+      {
+        "type": "block_fusion",
+        "rank": 902,
+        "speedup": 1.039,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_902_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 904,
+        "speedup": 1.025,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_904_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 908,
+        "speedup": 1.082,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_908_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 909,
+        "speedup": 1.029,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_909_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 910,
+        "speedup": 1.024,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_910_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 911,
+        "speedup": 1.051,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_911_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 921,
+        "speedup": 1.031,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_921_optimized.py",
+        "modules_replaced": 1
+      },
+      {
+        "type": "block_fusion",
+        "rank": 922,
+        "speedup": 1.025,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_922_optimized.py",
+        "modules_replaced": 1
+      }
+    ],
+    "kernels_skipped": [
+      {
+        "type": "block_fusion",
+        "rank": 901,
+        "speedup": 1.053,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_901_optimized.py",
+        "reason": "Superseded by a higher-priority block fusion candidate for net.backbone.stages.2."
+      },
+      {
+        "type": "block_fusion",
+        "rank": 905,
+        "speedup": 1.012,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_905_optimized.py",
+        "reason": "Superseded by a higher-priority block fusion candidate for net.backbone.stem."
+      },
+      {
+        "type": "block_fusion",
+        "rank": 906,
+        "speedup": 1.015,
+        "path": "/workspace/ppocr-triton/autokernel/workspace/kernel_block_fusion_906_optimized.py",
+        "reason": "Superseded by a higher-priority block fusion candidate for net.head.ctc_encoder.encoder."
+      }
+    ]
+  },
+  "verification": {
+    "correctness": "PASS",
+    "max_abs_error": 0.00341796875,
+    "mean_abs_error": 1.443293200509288e-07,
+    "has_nan": false,
+    "has_inf": false
+  },
+  "summary": {
+    "original_latency_ms": 14.84,
+    "optimized_latency_ms": 1.33,
+    "end_to_end_speedup": 11.133,
+    "kernels_replaced": 12,
+    "kernels_skipped": 3
+  }
+}

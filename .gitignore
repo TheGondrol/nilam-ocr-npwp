@@ -1,0 +1,11 @@
+.DS_Store
+
+# Secrets: only templates are committed
+.env
+.env.*
+!.env.template
+
+# Real KTP images (PII) used by local tests
+**/tests/data/*.png
+**/tests/data/*.jpg
+**/tests/data/*.jpeg

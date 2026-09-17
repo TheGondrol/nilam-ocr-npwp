@@ -1,0 +1,26 @@
+[project]
+name = "ms-bribrain-ocr-ktp"
+version = "0.1.0"
+description = "Application for OCR on KTP documents using PaddleOCR and FastAPI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.115.6",
+    "google-cloud-storage>=2.19.0",
+    "ipykernel>=6.29.5",
+    "networkx>=3.4.2",
+    "paddleocr>=3.0.1",
+    "pip>=24.3.1",
+    "requests>=2.32.3",
+    "setuptools>=75.8.0",
+    "mediapipe==0.10.5",
+    "rapidfuzz==3.11.0",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "--cov=utils --cov-report=term-missing"
+testpaths = [
+    "test",
+]
