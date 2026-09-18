@@ -1,0 +1,23 @@
+# Secrets — jangan pernah masuk repo
+.env
+*.env
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# Bobot model: terlalu besar untuk git, taruh di storage terpisah
+weights/*
+!weights/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

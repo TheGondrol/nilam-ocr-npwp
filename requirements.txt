@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+pydantic-settings==2.5.2
+sqlalchemy==2.0.52
+# 3.2.4, bukan 3.2.5 seperti ocr-orchestration: 3.2.5 tidak menyediakan wheel
+# Windows untuk Python 3.12, jadi dev lokal harus compile dari source.
+greenlet==3.2.4
+asyncpg==0.31.0

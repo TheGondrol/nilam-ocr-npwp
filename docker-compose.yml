@@ -1,0 +1,17 @@
+services:
+  nilam-ocr-npwp:
+    build: .
+    container_name: nilam-ocr-npwp
+    ports:
+      # Hanya dari host, sama seperti ocr-*: orchestrator di VM yang sama
+      # memanggil lewat host.docker.internal, tidak perlu terbuka ke luar.
+      - "127.0.0.1:8030:8030"
+    env_file:
+      - .env
+    environment:
+      PORT: "8030"
+      SERVICE_BASE_URL: ${SERVICE_BASE_URL:-}
+    volumes:
+      # Bobot model tidak ikut ke image (lihat .gitignore); mount dari host.
+      - ./weights:/app/weights:ro
+    restart: unless-stopped

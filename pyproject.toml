@@ -1,0 +1,40 @@
+[project]
+name = "nilam-ocr-npwp"
+version = "1.0.0"
+description = "OCR NPWP service: guardrails, ekstraksi, structuring, scoring dalam satu FastAPI app"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Gaya `file: UploadFile = File(...)` dan `raise HTTPException(...)` di dalam except
+# disamakan dengan nilam-ocr-orchestration.
+"src/api/**" = ["B008", "B904"]
+"src/core/fetch_url.py" = ["B904", "UP"]  # disalin apa adanya dari ocr-*
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+# Modul di-import sebagai `src.<...>` (sama seperti nilam-ocr-orchestration),
+# jadi root import adalah folder proyek, bukan folder src/ yang ditebak otomatis.
+# `extra-paths` dipahami semua versi ty; `root` hanya versi baru.
+[tool.ty.environment]
+root = ["."]
+extra-paths = ["."]
+
+[tool.ty.src]
+# Disalin apa adanya dari ocr-*; self-check di blok __main__-nya tidak perlu dicek tipe.
+exclude = ["src/core/fetch_url.py"]
+
+# Untuk rekan yang memakai Pylance/pyright, bukan ty.
+[tool.pyright]
+extraPaths = ["."]

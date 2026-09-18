@@ -1,0 +1,1279 @@
+openapi: 3.1.0
+info:
+  title: OCR NPWP API
+  description: 'OCR service for Indonesian NPWP (tax ID card) documents. Implements the generate-request-id
+    -> extract-ocr -> get-ocr-result contract used by ocr-orchestration: mint a request_id, submit a file
+    against it, then poll for the result. The pipeline behind extract-ocr is also exposed step by step
+    (guardrails -> ekstraksi -> structuring -> scoring) for debugging and evaluation. All endpoints except
+    /health require an X-API-Key header.'
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Health check
+      description: Reports service liveness and the active model backend per app. Does not require an
+        API key.
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/generate-request-id:
+    post:
+      tags:
+      - NPWP OCR
+      summary: Generate a request_id
+      description: Mints a request_id that must be used in a subsequent call to /v1/extract-ocr.
+      operationId: generate_request_id_v1_generate_request_id_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateRequestIdResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+      security:
+      - APIKeyHeader: []
+  /v1/extract-ocr:
+    post:
+      tags:
+      - NPWP OCR
+      summary: Extract data from an NPWP image
+      description: 'Runs the full pipeline (guardrails -> ekstraksi -> structuring -> scoring) on the
+        uploaded NPWP image for the given request_id (from /v1/generate-request-id). A request_id can
+        only be submitted once.
+
+
+        Send the image as `file`, or send `file_url` and this service fetches it itself; exactly one of
+        the two.'
+      operationId: extract_ocr_v1_extract_ocr_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_extract_ocr_v1_extract_ocr_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '400':
+          description: Unknown request_id, bad file, or low image quality
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Uploaded image is not recognized as an NPWP
+                errors: Uploaded image is not recognized as an NPWP
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '409':
+          description: request_id was already processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 409
+                status_desc: Conflict
+                message: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
+                errors: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
+        '500':
+          description: OCR engine failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: Internal server error while processing OCR
+                errors: Internal server error while processing OCR
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.request_id: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/get-ocr-result/{request_id}:
+    get:
+      tags:
+      - NPWP OCR
+      summary: Get OCR result / status
+      description: Fetches the current status and (if completed) the result for a previously generated
+        request_id.
+      operationId: get_ocr_result_v1_get_ocr_result__request_id__get
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Request Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetOcrResultResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: request_id was never generated by this service
+          content:
+            application/json:
+              example:
+                status_code: 404
+                status_desc: Not Found
+                message: 'No data found for request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0'
+                errors: 'No data found for request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0'
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'path.request_id: Field required'
+                errors: VALIDATION_ERROR
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/guardrails/check:
+    post:
+      tags:
+      - Guardrails
+      summary: Run guardrail checks on a document image
+      description: Checks image quality and whether the image is the expected document type. Always returns
+        200 with a report; `data.passed` tells whether the image should proceed to OCR. Send the image
+        as `file` or `file_url`; exactly one of the two.
+      operationId: check_v1_guardrails_check_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_check_v1_guardrails_check_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailCheckResponse'
+        '400':
+          description: Bad file (empty, too large, unsupported type) or bad intake
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Uploaded file is empty
+                errors: Uploaded file is empty
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.file: Expected UploadFile, received: str'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/ekstraksi/extract:
+    post:
+      tags:
+      - Ekstraksi
+      summary: Extract raw text from a document image
+      description: Runs the OCR engine and returns raw text blocks with confidence and bounding boxes.
+        Send the image as `file` or `file_url`; exactly one of the two.
+      operationId: extract_v1_ekstraksi_extract_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_extract_v1_ekstraksi_extract_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractResponse'
+        '400':
+          description: Bad file (empty, too large, unsupported type) or bad intake
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Uploaded file is empty
+                errors: Uploaded file is empty
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '500':
+          description: OCR engine failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: Internal server error while processing OCR
+                errors: Internal server error while processing OCR
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.file: Expected UploadFile, received: str'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/structuring/structure:
+    post:
+      tags:
+      - Structuring
+      summary: Turn raw OCR lines into named fields
+      description: Maps raw text lines (e.g. from /v1/ekstraksi/extract) to named document fields with
+        per-field confidence.
+      operationId: structure_v1_structuring_structure_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StructureRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StructureResponse'
+        '400':
+          description: No usable text lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: No text lines to structure
+                errors: No text lines to structure
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.lines: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/scoring/score:
+    post:
+      tags:
+      - Scoring
+      summary: Score a structured document
+      description: Combines per-field confidence and format validation into one document score (the `guardrails`
+        value of /v1/extract-ocr), then applies the configured thresholds to decide approve / review /
+        reject.
+      operationId: score_v1_scoring_score_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreResponse'
+        '400':
+          description: Unsupported document_type or no fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: No fields to score
+                errors: No fields to score
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.fields: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+components:
+  schemas:
+    Body_check_v1_guardrails_check_post:
+      properties:
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      title: Body_check_v1_guardrails_check_post
+    Body_extract_ocr_v1_extract_ocr_post:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id from /v1/generate-request-id
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      required:
+      - request_id
+      title: Body_extract_ocr_v1_extract_ocr_post
+    Body_extract_v1_ekstraksi_extract_post:
+      properties:
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      title: Body_extract_v1_ekstraksi_extract_post
+    BoundingBox:
+      properties:
+        x1:
+          type: integer
+          title: X1
+        y1:
+          type: integer
+          title: Y1
+        x2:
+          type: integer
+          title: X2
+        y2:
+          type: integer
+          title: Y2
+      type: object
+      required:
+      - x1
+      - y1
+      - x2
+      - y2
+      title: BoundingBox
+    CheckResult:
+      properties:
+        name:
+          type: string
+          title: Name
+          examples:
+          - image_quality
+        passed:
+          type: boolean
+          title: Passed
+          examples:
+          - true
+        score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Score
+          examples:
+          - 0.92
+        message:
+          type: string
+          title: Message
+          examples:
+          - Image quality is acceptable
+      type: object
+      required:
+      - name
+      - passed
+      - message
+      title: CheckResult
+    Confidence:
+      properties:
+        value:
+          title: Value
+          description: Nilai yang terbaca; null kalau field tidak ditemukan
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+          examples:
+          - 0.87
+      type: object
+      required:
+      - value
+      title: Confidence
+      description: 'Satu field hasil OCR beserta seberapa yakin mesin membacanya.
+
+
+        Nilainya selalu terbungkus, juga saat confidence-nya tinggi: bentuk yang
+
+        berubah-ubah menuntut tiap konsumen memeriksa dulu ini dict atau skalar,
+
+        dan yang lupa memeriksa baru ketahuan di produksi.'
+    ErrorResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          examples:
+          - 400
+        status_desc:
+          type: string
+          title: Status Desc
+          examples:
+          - Bad Request
+        message:
+          type: string
+          title: Message
+          examples:
+          - Uploaded image is not recognized as an NPWP
+        data:
+          type: 'null'
+          title: Data
+        errors:
+          type: string
+          title: Errors
+          examples:
+          - Uploaded image is not recognized as an NPWP
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Present when the error is tied to a known request_id
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      - errors
+      title: ErrorResponse
+    ExtractOcrResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/NpwpFields'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        guardrails:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrails
+          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung app scoring dari
+            confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
+            batas role pemanggil.
+          examples:
+          - 0.72
+      type: object
+      required:
+      - data
+      - request_id
+      title: ExtractOcrResponse
+    ExtractResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/OcrResult'
+      type: object
+      required:
+      - data
+      title: ExtractResponse
+    FieldScore:
+      properties:
+        name:
+          type: string
+          title: Name
+          examples:
+          - nomor_npwp
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+          examples:
+          - 0.96
+        issues:
+          items:
+            type: string
+          type: array
+          title: Issues
+          examples:
+          - - missing
+      type: object
+      required:
+      - name
+      - score
+      title: FieldScore
+    FieldValue:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          default: 1.0
+          examples:
+          - 0.96
+      type: object
+      title: FieldValue
+    GenerateRequestIdData:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - request_id
+      title: GenerateRequestIdData
+    GenerateRequestIdResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/GenerateRequestIdData'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - data
+      - request_id
+      title: GenerateRequestIdResponse
+    GetOcrResultData:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        status:
+          type: string
+          title: Status
+          description: pending | completed | failed
+          examples:
+          - completed
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/NpwpFields'
+          - type: 'null'
+          description: Present once status is 'completed'
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Present once status is 'failed'
+        created_at:
+          type: string
+          title: Created At
+          examples:
+          - '2026-03-06T07:01:59.976912+00:00'
+        updated_at:
+          type: string
+          title: Updated At
+          examples:
+          - '2026-03-06T07:07:04.809697+00:00'
+      type: object
+      required:
+      - request_id
+      - status
+      - created_at
+      - updated_at
+      title: GetOcrResultData
+    GetOcrResultResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/GetOcrResultData'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        guardrails:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrails
+          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung app scoring dari
+            confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
+            batas role pemanggil. Null selama status belum completed.
+          examples:
+          - 0.72
+      type: object
+      required:
+      - data
+      - request_id
+      title: GetOcrResultResponse
+    GuardrailCheckResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/GuardrailReport'
+      type: object
+      required:
+      - data
+      title: GuardrailCheckResponse
+    GuardrailReport:
+      properties:
+        passed:
+          type: boolean
+          title: Passed
+          description: True hanya jika semua check lolos
+          examples:
+          - true
+        document_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Document Type
+          examples:
+          - npwp
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+          examples:
+          - 0.97
+        checks:
+          items:
+            $ref: '#/components/schemas/CheckResult'
+          type: array
+          title: Checks
+      type: object
+      required:
+      - passed
+      - checks
+      title: GuardrailReport
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          examples:
+          - healthy
+        version:
+          type: string
+          title: Version
+          examples:
+          - 1.0.0
+        device:
+          type: string
+          title: Device
+          examples:
+          - cpu
+        backends:
+          additionalProperties:
+            type: string
+          type: object
+          title: Backends
+          description: Backend model aktif per app
+          examples:
+          - guardrails: mock
+      type: object
+      required:
+      - status
+      - version
+      - device
+      - backends
+      title: HealthResponse
+    NpwpFields:
+      properties:
+        nomor_npwp:
+          $ref: '#/components/schemas/Confidence'
+          examples:
+          - confidence: 0.87
+            value: 12.345.678.9-012.345
+        nama:
+          $ref: '#/components/schemas/Confidence'
+          description: Nama wajib pajak orang pribadi
+          examples:
+          - confidence: 0.87
+            value: RIAN DERMAWAN
+        nama_badan:
+          $ref: '#/components/schemas/Confidence'
+          description: Nama badan usaha pemilik NPWP
+          examples:
+          - confidence: 0.87
+            value: PT NUSANTARA DIGITAL TEKNOLOGI
+      type: object
+      required:
+      - nomor_npwp
+      - nama
+      - nama_badan
+      title: NpwpFields
+    OcrResult:
+      properties:
+        engine:
+          type: string
+          title: Engine
+          examples:
+          - mock
+        elapsed_ms:
+          type: number
+          title: Elapsed Ms
+          examples:
+          - 12.5
+        full_text:
+          type: string
+          title: Full Text
+          description: Semua blok digabung dengan newline
+        blocks:
+          items:
+            $ref: '#/components/schemas/TextBlock'
+          type: array
+          title: Blocks
+      type: object
+      required:
+      - engine
+      - elapsed_ms
+      - full_text
+      - blocks
+      title: OcrResult
+    ScoreReport:
+      properties:
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+          examples:
+          - 0.91
+        decision:
+          type: string
+          enum:
+          - approve
+          - review
+          - reject
+          title: Decision
+          examples:
+          - approve
+        field_scores:
+          items:
+            $ref: '#/components/schemas/FieldScore'
+          type: array
+          title: Field Scores
+        reasons:
+          items:
+            type: string
+          type: array
+          title: Reasons
+      type: object
+      required:
+      - score
+      - decision
+      - field_scores
+      title: ScoreReport
+    ScoreRequest:
+      properties:
+        document_type:
+          type: string
+          title: Document Type
+          default: npwp
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/FieldValue'
+          type: object
+          title: Fields
+          description: Field terstruktur (mis. `data.fields` dari /v1/structuring/structure)
+          examples:
+          - nomor_npwp:
+              confidence: 0.96
+              value: 12.345.678.9-012.345
+      type: object
+      required:
+      - fields
+      title: ScoreRequest
+    ScoreResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/ScoreReport'
+      type: object
+      required:
+      - data
+      title: ScoreResponse
+    StructureRequest:
+      properties:
+        lines:
+          items:
+            $ref: '#/components/schemas/TextLine'
+          type: array
+          minItems: 1
+          title: Lines
+          description: Baris teks hasil OCR, urut atas ke bawah
+      type: object
+      required:
+      - lines
+      title: StructureRequest
+    StructureResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/StructuredDocument'
+      type: object
+      required:
+      - data
+      title: StructureResponse
+    StructuredDocument:
+      properties:
+        document_type:
+          type: string
+          title: Document Type
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/StructuredField'
+          type: object
+          title: Fields
+          description: Selalu berisi semua field dokumen (nomor_npwp, nama, nama_badan); yang tidak ditemukan
+            bernilai null
+      type: object
+      required:
+      - document_type
+      - fields
+      title: StructuredDocument
+    StructuredField:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: null kalau field tidak ditemukan
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          examples:
+          - 0.96
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+          description: Baris mentah asal nilai ini
+          examples:
+          - 'NPWP : 12.345.678.9-012.345'
+      type: object
+      required:
+      - confidence
+      title: StructuredField
+    TextBlock:
+      properties:
+        text:
+          type: string
+          title: Text
+          examples:
+          - 'NPWP : 12.345.678.9-012.345'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          examples:
+          - 0.96
+        bbox:
+          anyOf:
+          - $ref: '#/components/schemas/BoundingBox'
+          - type: 'null'
+      type: object
+      required:
+      - text
+      - confidence
+      title: TextBlock
+    TextLine:
+      properties:
+        text:
+          type: string
+          title: Text
+          examples:
+          - 'NPWP : 12.345.678.9-012.345'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          default: 1.0
+          examples:
+          - 0.96
+      type: object
+      required:
+      - text
+      title: TextLine
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      description: API key for this service
+      in: header
+      name: X-API-Key
+tags:
+- name: Health
+  description: Liveness check
+- name: NPWP OCR
+  description: Endpoints for extracting data from NPWP images (contract used by ocr-orchestration)
+- name: Guardrails
+  description: 'Pipeline step 1: image quality & document type'
+- name: Ekstraksi
+  description: 'Pipeline step 2: raw OCR text'
+- name: Structuring
+  description: 'Pipeline step 3: raw text -> named fields'
+- name: Scoring
+  description: 'Pipeline step 4: document score & approve/review/reject'
