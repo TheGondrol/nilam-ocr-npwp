@@ -1,0 +1,376 @@
+openapi: 3.1.0
+info:
+  title: OCR NPWP Guardrails API
+  description: 'Pipeline step 1 for Indonesian NPWP documents: classifies every page of the uploaded document
+    (image or PDF) as accepted / reject with the guardrails model and aggregates a document verdict. Called
+    synchronously by ocr-orchestration; always answers 200 with `data.passed` / `data.reason`. The model
+    runs in this process (`efficientnet`) or in the ML team''s model service (`remote`). All endpoints
+    except /health require an X-API-Key header.'
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Health check
+      description: Reports service liveness and the active model backend. Does not require an API key.
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/guardrails/check:
+    post:
+      tags:
+      - Guardrails
+      summary: Classify every page of a document as accepted / reject
+      description: 'Runs the guardrails model on each page (a PDF is rendered page by page; an image is
+        one page) and aggregates a document verdict. The model is either in this process (`efficientnet`)
+        or the ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either
+        way. Always returns 200 with a report; `data.passed` tells whether the document should proceed
+        to OCR, and `data.reason` says why not (the orchestrator answers 422 with it). The orchestrator
+        forwards `data` to the OCR service as the guardrails result.
+
+
+        Send `request_id` plus the document as `file`, or as `file_url` and this service fetches it itself;
+        exactly one of the two.'
+      operationId: check_v1_guardrails_check_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_check_v1_guardrails_check_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailCheckResponse'
+        '400':
+          description: Bad file (empty, too large, unsupported type, unreadable) or bad intake
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Uploaded file is empty
+                errors: Uploaded file is empty
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.request_id: Field required'
+                errors: VALIDATION_ERROR
+        '500':
+          description: Guardrails model service failed or answered in an unexpected shape (backend `remote`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: guardrails model returned an unexpected response
+                errors: guardrails model returned an unexpected response
+        '503':
+          description: Guardrails model service unreachable (backend `remote`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 503
+                status_desc: Service Unavailable
+                message: guardrails model is unavailable
+                errors: guardrails model is unavailable
+        '504':
+          description: Guardrails model service did not answer in time (backend `remote`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: guardrails model timed out after 30.0s
+                errors: guardrails model timed out after 30.0s
+      security:
+      - APIKeyHeader: []
+components:
+  schemas:
+    Body_check_v1_guardrails_check_post:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id from the orchestrator
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      required:
+      - request_id
+      title: Body_check_v1_guardrails_check_post
+    DocumentResult:
+      properties:
+        verdict:
+          type: string
+          enum:
+          - accepted
+          - reject
+          title: Verdict
+          description: accepted hanya kalau lolos kebijakan dokumen (GUARDRAILS_DOCUMENT_POLICY)
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: 'Keyakinan pada vonis: accepted -> proba_approve halaman terlemah; reject -> proba_reject
+            tertinggi'
+          examples:
+          - 0.9821
+        n_pages:
+          type: integer
+          minimum: 0.0
+          title: N Pages
+          examples:
+          - 2
+        n_approve:
+          type: integer
+          minimum: 0.0
+          title: N Approve
+          examples:
+          - 2
+        n_reject:
+          type: integer
+          minimum: 0.0
+          title: N Reject
+          examples:
+          - 0
+      type: object
+      required:
+      - verdict
+      - confidence
+      - n_pages
+      - n_approve
+      - n_reject
+      title: DocumentResult
+    ErrorResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          examples:
+          - 400
+        status_desc:
+          type: string
+          title: Status Desc
+          examples:
+          - Bad Request
+        message:
+          type: string
+          title: Message
+          examples:
+          - Uploaded file is empty
+        data:
+          type: 'null'
+          title: Data
+        errors:
+          type: string
+          title: Errors
+          examples:
+          - Uploaded file is empty
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Present when the error is tied to a known request_id
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      - errors
+      title: ErrorResponse
+    GuardrailCheckResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: OK
+          examples:
+          - OK
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/GuardrailReport'
+      type: object
+      required:
+      - data
+      title: GuardrailCheckResponse
+    GuardrailReport:
+      properties:
+        passed:
+          type: boolean
+          title: Passed
+          description: true -> dokumen boleh lanjut ke OCR; false -> orkestrator menolak (422) dengan
+            `reason`
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+          description: Alasan penolakan; null kalau passed
+          examples:
+          - 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+        document:
+          $ref: '#/components/schemas/DocumentResult'
+        pages:
+          items:
+            $ref: '#/components/schemas/PageResult'
+          type: array
+          title: Pages
+      type: object
+      required:
+      - passed
+      - document
+      - pages
+      title: GuardrailReport
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          examples:
+          - healthy
+        version:
+          type: string
+          title: Version
+          examples:
+          - 1.0.0
+        device:
+          type: string
+          title: Device
+          examples:
+          - cpu
+        backends:
+          additionalProperties:
+            type: string
+          type: object
+          title: Backends
+          description: Backend model aktif di service ini
+          examples:
+          - ekstraksi: paddle
+      type: object
+      required:
+      - status
+      - version
+      - device
+      - backends
+      title: HealthResponse
+    PageResult:
+      properties:
+        page_index:
+          type: integer
+          minimum: 0.0
+          title: Page Index
+          examples:
+          - 0
+        proba_approve:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Proba Approve
+          examples:
+          - 0.9821
+        proba_reject:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Proba Reject
+          examples:
+          - 0.0179
+        verdict:
+          type: string
+          enum:
+          - accepted
+          - reject
+          title: Verdict
+          examples:
+          - accepted
+      type: object
+      required:
+      - page_index
+      - proba_approve
+      - proba_reject
+      - verdict
+      title: PageResult
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      description: API key for this service
+      in: header
+      name: X-API-Key
+tags:
+- name: Health
+  description: Liveness check
+- name: Guardrails
+  description: Page-level accepted/reject classification
