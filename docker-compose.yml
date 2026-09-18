@@ -1,17 +1,87 @@
+# Empat image, empat container, satu network. Build context = root repo
+# karena tiap image butuh libs/ocr_common.
+#
+#   make up            build + jalankan semuanya
+#   make up-scoring    satu service saja
+#   make smoke         uji pipeline async (dan kontrak lama) lewat container
+#
+# Tiap service membaca .env-nya sendiri (services/<nama>/.env, salin dari
+# .env.example). Port hanya dibuka ke 127.0.0.1, sama seperti ocr-*.
+# Orkestrator di VM yang sama memanggil guardrails/ekstraksi lewat
+# host.docker.internal:8031/8030, dan menerima callback tahap di
+# ORCHESTRATION_URL (isi di .env ekstraksi, structuring, dan scoring).
+#
+# Alur async: orkestrator -> guardrails (sinkron) -> ekstraksi /jobs (202)
+#   -> structuring /jobs (202) -> scoring /jobs (202), tiap tahap callback ke orkestrator.
+
+x-common: &common
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
-  nilam-ocr-npwp:
-    build: .
-    container_name: nilam-ocr-npwp
+  guardrails:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/guardrails/Dockerfile
+    image: nilam-ocr-guardrails:latest
+    container_name: nilam-ocr-guardrails
+    env_file: services/guardrails/.env
+    environment:
+      PORT: "8031"
     ports:
-      # Hanya dari host, sama seperti ocr-*: orchestrator di VM yang sama
-      # memanggil lewat host.docker.internal, tidak perlu terbuka ke luar.
-      - "127.0.0.1:8030:8030"
-    env_file:
-      - .env
+      - "127.0.0.1:8031:8031"
+    # Bobot model sudah di dalam image (COPY saat build); tidak ada volume.
+
+  structuring:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/structuring/Dockerfile
+    image: nilam-ocr-structuring:latest
+    container_name: nilam-ocr-structuring
+    env_file: services/structuring/.env
+    environment:
+      PORT: "8032"
+      # Tahap berikutnya di pipeline async; 127.0.0.1 di .env hanya benar untuk proses bare.
+      SCORING_SERVICE_URL: http://scoring:8033
+    ports:
+      - "127.0.0.1:8032:8032"
+    depends_on:
+      - scoring
+
+  scoring:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/scoring/Dockerfile
+    image: nilam-ocr-scoring:latest
+    container_name: nilam-ocr-scoring
+    env_file: services/scoring/.env
+    environment:
+      PORT: "8033"
+    ports:
+      - "127.0.0.1:8033:8033"
+
+  ekstraksi:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/ekstraksi/Dockerfile
+    image: nilam-ocr-ekstraksi:latest
+    container_name: nilam-ocr-ekstraksi
+    env_file: services/ekstraksi/.env
     environment:
       PORT: "8030"
-      SERVICE_BASE_URL: ${SERVICE_BASE_URL:-}
-    volumes:
-      # Bobot model tidak ikut ke image (lihat .gitignore); mount dari host.
-      - ./weights:/app/weights:ro
-    restart: unless-stopped
+      # Di dalam network compose, service lain dijangkau lewat nama service-nya;
+      # nilai 127.0.0.1 di .env hanya benar untuk proses bare di host.
+      GUARDRAILS_SERVICE_URL: http://guardrails:8031
+      STRUCTURING_SERVICE_URL: http://structuring:8032
+      SCORING_SERVICE_URL: http://scoring:8033
+    ports:
+      - "127.0.0.1:8030:8030"
+    depends_on:
+      - guardrails
+      - structuring
+      - scoring

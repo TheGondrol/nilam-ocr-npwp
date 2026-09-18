@@ -1,8 +1,20 @@
--r requirements.txt
-httpx==0.27.2
+# Semua yang dibutuhkan untuk mengembangkan & menguji seluruh monorepo di satu
+# environment. Lib bersama dipasang editable supaya perubahannya langsung terlihat
+# di semua service. Image Docker tiap service hanya memasang requirements.txt
+# miliknya + libs/ocr_common (lihat services/<nama>/Dockerfile).
+# torch/torchvision (service guardrails): wheel CPU dari index PyTorch, bukan wheel CUDA dari PyPI.
+--extra-index-url https://download.pytorch.org/whl/cpu
+-e libs/ocr_common[db]
+-r services/guardrails/requirements.txt
+-r services/ekstraksi/requirements.txt
+-r services/structuring/requirements.txt
+-r services/scoring/requirements.txt
+
 pytest==8.3.4
 pytest-asyncio==0.24.0
 aiosqlite==0.21.0
 pyyaml==6.0.2
 ruff==0.6.8
 ty==0.0.81
+# Hanya untuk test live ke model PaddleOCR dan scripts/smoke_e2e.py (gambar NPWP sintetis).
+Pillow==12.3.0

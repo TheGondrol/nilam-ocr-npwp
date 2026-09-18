@@ -21,3 +21,10 @@ weights/*
 .DS_Store
 .vscode/
 .idea/
+
+# Metadata editable install lib bersama
+*.egg-info/
+
+# Bobot model per service: terlalu besar untuk git, mount ke container
+services/*/weights/*
+!services/*/weights/.gitkeep

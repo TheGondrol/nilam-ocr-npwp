@@ -1,48 +1,71 @@
-.PHONY: install dev run test lint typecheck format openapi docker-up docker-up-db docker-down db-schema
-
+# Monorepo: libs/ocr_common (lib bersama) + services/<nama> (empat deployable).
+#
+#   make dev                pasang semua dependency + lib bersama (editable)
+#   make test / lint / typecheck / openapi     semua service (+ lib)
+#   make test-ekstraksi     satu service saja (juga lint-, typecheck-, openapi-, run-)
+#   make run-guardrails     uvicorn --reload untuk satu service di port defaultnya
+#   make weights            unduh bobot model dari GUARDRAILS_MODEL_URI (GCS/MinIO/https) sebelum build
+#   make build              build keempat image
+#   make up / down / ps / logs-<nama>          docker compose
+#   make up-db              sama, plus PostgreSQL lokal (jobs/results ketiga tahap pipeline)
+#   make smoke              uji pipeline async + kontrak lama lewat container yang jalan
+#
+# Package tiap service bernama `src` (sama seperti ocr-*), jadi pytest/ty
+# harus dijalankan dari folder service masing-masing, bukan dari root.
+SERVICES := guardrails ekstraksi structuring scoring
 PY ?= python
-
-install:
-	$(PY) -m pip install -r requirements.txt
+PORT_guardrails := 8031
+PORT_ekstraksi := 8030
+PORT_structuring := 8032
+PORT_scoring := 8033
 
 dev:
 	$(PY) -m pip install -r requirements-dev.txt
 
-run:
-	$(PY) -m uvicorn src.main:app --reload --port 8030
-
-test:
-	$(PY) -m pytest -q
-
+test: test-lib $(SERVICES:%=test-%)
 lint:
 	$(PY) -m ruff check .
-
-typecheck:
-	$(PY) -m ty check src tests scripts
-
 format:
 	$(PY) -m ruff format . && $(PY) -m ruff check --fix .
+typecheck: typecheck-lib $(SERVICES:%=typecheck-%)
+openapi: $(SERVICES:%=openapi-%)
 
-# openapi.yaml adalah turunan dari kode; jalankan setelah mengubah route/schema.
-openapi:
-	API_KEY=x $(PY) -m scripts.export_openapi
+test-lib:
+	cd libs/ocr_common && $(PY) -m pytest -q
+typecheck-lib:
+	cd libs/ocr_common && $(PY) -m ty check ocr_common tests
 
-docker-up:
+# Target per-service sengaja TIDAK di-.PHONY: make melewatkan pencarian
+# implicit rule untuk target phony (lihat Makefile root nilam-ocr-orchestration).
+test-%:
+	cd services/$* && $(PY) -m pytest -q
+typecheck-%:
+	cd services/$* && $(PY) -m ty check src tests
+openapi-%:
+	cd services/$* && API_KEY=x $(PY) -m ocr_common.openapi
+run-%:
+	cd services/$* && $(PY) -m uvicorn src.main:app --reload --port $(PORT_$*)
+
+# Sumber bobot dibaca dari env (lihat scripts/fetch_weights.py). Tanpa env: lewati.
+weights:
+	$(PY) scripts/fetch_weights.py || [ $$? -eq 2 ]
+
+build:
+	docker compose build
+up:
 	docker compose up -d --build
-
-docker-up-db:
+up-%:
+	docker compose up -d --build $*
+up-db:
 	docker compose -f docker-compose.yml -f docker-compose.db.yml up -d --build
-
-docker-down:
+down:
 	docker compose -f docker-compose.yml -f docker-compose.db.yml down
+ps:
+	@docker ps --filter name=nilam-ocr- --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+logs-%:
+	docker compose logs -f $*
 
-# Pasang skema ke PostgreSQL yang ditunjuk DATABASE_URL_PSQL (format psql, bukan
-# +asyncpg), atau ke container postgres overlay kalau sedang jalan. Aman diulang.
-DATABASE_URL_PSQL ?= postgresql://postgres:changeme@localhost:5433/bribrain_ocr_nilam
-db-schema:
-	@if docker ps --format '{{.Names}}' | grep -qx nilam-ocr-npwp-postgres; then \
-		docker exec -i nilam-ocr-npwp-postgres psql -U "$${POSTGRES_USER:-postgres}" \
-			-d "$${POSTGRES_DB:-bribrain_ocr_nilam}" -v ON_ERROR_STOP=1 < db/schema.sql; \
-	else \
-		psql "$(DATABASE_URL_PSQL)" -v ON_ERROR_STOP=1 -f db/schema.sql; \
-	fi
+smoke:
+	$(PY) scripts/smoke_e2e.py
+
+.PHONY: dev test lint format typecheck openapi test-lib typecheck-lib weights build up up-db down ps smoke
