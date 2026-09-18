@@ -1,0 +1,1125 @@
+openapi: 3.1.0
+info:
+  title: OCR NPWP API
+  description: OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. **Async
+    pipeline:** the orchestrator POSTs /v1/ekstraksi/jobs after guardrails passed and gets 202; this service
+    runs OCR in the background, stores the result, POSTs a stage callback to the orchestrator, and hands
+    the job to the structuring service. **Legacy contract:** generate-request-id -> extract-ocr -> get-ocr-result
+    runs the whole chain synchronously and stays until the orchestrator has moved to the async flow. The
+    raw OCR step is also exposed as /v1/ekstraksi/extract. All endpoints except /health require an X-API-Key
+    header.
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Health check
+      description: Reports service liveness and the active model backend. Does not require an API key.
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/ekstraksi/jobs:
+    post:
+      tags:
+      - Pipeline
+      summary: Submit a document to the async pipeline (OCR stage)
+      description: 'Called by the orchestrator after guardrails passed. Records the job (`ocr.jobs`, idempotent
+        per request_id), answers **202 immediately**, then in the background: reads the document (`file`,
+        or downloads `file_url` from MinIO), runs OCR, stores the result (`ocr.results`), POSTs the stage
+        callback to the orchestrator, and hands the job to the structuring service.
+
+
+        Sending the same request_id again does not run OCR twice (`duplicate: true`), unless the previous
+        attempt FAILED.
+
+
+        Send the document as `file` or `file_url`; exactly one of the two.'
+      operationId: submit_job_v1_ekstraksi_jobs_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_submit_job_v1_ekstraksi_jobs_post'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAcceptedResponse'
+        '400':
+          description: Bad intake or malformed guardrails JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Send exactly one of file or file_url
+                errors: Send exactly one of file or file_url
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.request_id: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/ekstraksi/jobs/{request_id}:
+    get:
+      tags:
+      - Pipeline
+      summary: Get the OCR stage status / result of a request_id
+      description: Status of this stage only (PROCESSING / DONE / FAILED) and its raw OCR result. For
+        debugging and reconciliation; the orchestrator normally learns the status from the callback.
+      operationId: get_job_v1_ekstraksi_jobs__request_id__get
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Request Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No OCR job for this request_id
+          content:
+            application/json:
+              example:
+                status_code: 404
+                status_desc: Not Found
+                message: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
+                errors: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
+                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'path.request_id: Field required'
+                errors: VALIDATION_ERROR
+                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/generate-request-id:
+    post:
+      tags:
+      - NPWP OCR
+      summary: Generate a request_id
+      description: Mints a request_id that must be used in a subsequent call to /v1/extract-ocr.
+      operationId: generate_request_id_v1_generate_request_id_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateRequestIdResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+      security:
+      - APIKeyHeader: []
+  /v1/extract-ocr:
+    post:
+      tags:
+      - NPWP OCR
+      summary: Extract data from an NPWP image
+      description: 'Runs the full pipeline (guardrails service -> this service''s OCR -> structuring service
+        -> scoring service) on the uploaded NPWP image for the given request_id (from /v1/generate-request-id).
+        A request_id can only be submitted once.
+
+
+        Send the image as `file`, or send `file_url` and this service fetches it itself; exactly one of
+        the two.'
+      operationId: extract_ocr_v1_extract_ocr_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_extract_ocr_v1_extract_ocr_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '400':
+          description: Unknown request_id, bad file, or rejected by guardrails
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+                errors: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '409':
+          description: request_id was already processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 409
+                status_desc: Conflict
+                message: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
+                errors: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
+        '500':
+          description: OCR engine or a downstream stage failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: Internal server error while processing OCR
+                errors: Internal server error while processing OCR
+        '503':
+          description: OCR model or a downstream stage unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 503
+                status_desc: Service Unavailable
+                message: ekstraksi OCR model is unavailable
+                errors: ekstraksi OCR model is unavailable
+        '504':
+          description: OCR model or a downstream stage did not answer in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: ekstraksi OCR model timed out after 30.0s
+                errors: ekstraksi OCR model timed out after 30.0s
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.request_id: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/get-ocr-result/{request_id}:
+    get:
+      tags:
+      - NPWP OCR
+      summary: Get OCR result / status
+      description: Fetches the current status and (if completed) the result for a previously generated
+        request_id.
+      operationId: get_ocr_result_v1_get_ocr_result__request_id__get
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Request Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetOcrResultResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: request_id was never generated by this service
+          content:
+            application/json:
+              example:
+                status_code: 404
+                status_desc: Not Found
+                message: 'No data found for request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0'
+                errors: 'No data found for request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0'
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'path.request_id: Field required'
+                errors: VALIDATION_ERROR
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/ekstraksi/extract:
+    post:
+      tags:
+      - Ekstraksi
+      summary: Extract raw text from a document image
+      description: Runs the OCR engine and returns raw text blocks with confidence and bounding boxes.
+        Send the image as `file` or `file_url`; exactly one of the two.
+      operationId: extract_v1_ekstraksi_extract_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_extract_v1_ekstraksi_extract_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractResponse'
+        '400':
+          description: Bad file (empty, too large, unsupported type) or bad intake
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Uploaded file is empty
+                errors: Uploaded file is empty
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '500':
+          description: OCR engine failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: 'ekstraksi OCR model error (500): error: OpenCV ...'
+                errors: 'ekstraksi OCR model error (500): error: OpenCV ...'
+        '503':
+          description: OCR model unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 503
+                status_desc: Service Unavailable
+                message: ekstraksi OCR model is unavailable
+                errors: ekstraksi OCR model is unavailable
+        '504':
+          description: OCR model did not answer in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: ekstraksi OCR model timed out after 30.0s
+                errors: ekstraksi OCR model timed out after 30.0s
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.file: Expected UploadFile, received: str'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+components:
+  schemas:
+    Body_extract_ocr_v1_extract_ocr_post:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id from /v1/generate-request-id
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      required:
+      - request_id
+      title: Body_extract_ocr_v1_extract_ocr_post
+    Body_extract_v1_ekstraksi_extract_post:
+      properties:
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      title: Body_extract_v1_ekstraksi_extract_post
+    Body_submit_job_v1_ekstraksi_jobs_post:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id minted by the orchestrator
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type chosen by the client
+          default: npwp
+          examples:
+          - npwp
+        guardrails:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Guardrails
+          description: Guardrails result (`data` of /v1/guardrails/check) as a JSON object; forwarded
+            down the chain
+          examples:
+          - '{"passed": true, "reason": null}'
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file.
+      type: object
+      required:
+      - request_id
+      title: Body_submit_job_v1_ekstraksi_jobs_post
+    BoundingBox:
+      properties:
+        x1:
+          type: integer
+          title: X1
+        y1:
+          type: integer
+          title: Y1
+        x2:
+          type: integer
+          title: X2
+        y2:
+          type: integer
+          title: Y2
+      type: object
+      required:
+      - x1
+      - y1
+      - x2
+      - y2
+      title: BoundingBox
+    Confidence:
+      properties:
+        value:
+          title: Value
+          description: Nilai yang terbaca; null kalau field tidak ditemukan
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+          examples:
+          - 0.87
+      type: object
+      required:
+      - value
+      title: Confidence
+      description: 'Satu field hasil OCR beserta seberapa yakin mesin membacanya.
+
+
+        Nilainya selalu terbungkus, juga saat confidence-nya tinggi: bentuk yang
+
+        berubah-ubah menuntut tiap konsumen memeriksa dulu ini dict atau skalar,
+
+        dan yang lupa memeriksa baru ketahuan di produksi.'
+    ErrorResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          examples:
+          - 400
+        status_desc:
+          type: string
+          title: Status Desc
+          examples:
+          - Bad Request
+        message:
+          type: string
+          title: Message
+          examples:
+          - Uploaded file is empty
+        data:
+          type: 'null'
+          title: Data
+        errors:
+          type: string
+          title: Errors
+          examples:
+          - Uploaded file is empty
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Present when the error is tied to a known request_id
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      - errors
+      title: ErrorResponse
+    ExtractOcrResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/NpwpFields'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        guardrails:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrails
+          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung service scoring
+            dari confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
+            batas role pemanggil.
+          examples:
+          - 0.72
+      type: object
+      required:
+      - data
+      - request_id
+      title: ExtractOcrResponse
+    ExtractResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/OcrResult'
+      type: object
+      required:
+      - data
+      title: ExtractResponse
+    GenerateRequestIdData:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - request_id
+      title: GenerateRequestIdData
+    GenerateRequestIdResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/GenerateRequestIdData'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - data
+      - request_id
+      title: GenerateRequestIdResponse
+    GetOcrResultData:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        status:
+          type: string
+          title: Status
+          description: pending | completed | failed
+          examples:
+          - completed
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/NpwpFields'
+          - type: 'null'
+          description: Present once status is 'completed'
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Present once status is 'failed'
+        created_at:
+          type: string
+          title: Created At
+          examples:
+          - '2026-03-06T07:01:59.976912+00:00'
+        updated_at:
+          type: string
+          title: Updated At
+          examples:
+          - '2026-03-06T07:07:04.809697+00:00'
+      type: object
+      required:
+      - request_id
+      - status
+      - created_at
+      - updated_at
+      title: GetOcrResultData
+    GetOcrResultResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        data:
+          $ref: '#/components/schemas/GetOcrResultData'
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        guardrails:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrails
+          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung service scoring
+            dari confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
+            batas role pemanggil. Null selama status belum completed.
+          examples:
+          - 0.72
+      type: object
+      required:
+      - data
+      - request_id
+      title: GetOcrResultResponse
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          examples:
+          - healthy
+        version:
+          type: string
+          title: Version
+          examples:
+          - 1.0.0
+        device:
+          type: string
+          title: Device
+          examples:
+          - cpu
+        backends:
+          additionalProperties:
+            type: string
+          type: object
+          title: Backends
+          description: Backend model aktif di service ini
+          examples:
+          - ekstraksi: paddle
+      type: object
+      required:
+      - status
+      - version
+      - device
+      - backends
+      title: HealthResponse
+    JobAccepted:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          examples:
+          - OCR
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          description: PROCESSING untuk job baru; status terkini kalau request_id ini sudah pernah dikirim
+        duplicate:
+          type: boolean
+          title: Duplicate
+          description: 'true: request_id ini sudah pernah diterima, kerja TIDAK dijalankan ulang (idempoten)'
+          default: false
+      type: object
+      required:
+      - request_id
+      - stage
+      - status
+      title: JobAccepted
+    JobAcceptedResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 202
+          examples:
+          - 202
+        status_desc:
+          type: string
+          title: Status Desc
+          default: Accepted
+          examples:
+          - Accepted
+        message:
+          type: string
+          title: Message
+          default: Accepted
+          examples:
+          - Accepted
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/JobAccepted'
+      type: object
+      required:
+      - data
+      title: JobAcceptedResponse
+    JobStatus:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          examples:
+          - OCR
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          examples:
+          - DONE
+        result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Result
+          description: Hasil tahap ini saat DONE; null selain itu
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Pesan kegagalan saat FAILED; null selain itu
+        created_at:
+          type: string
+          title: Created At
+          examples:
+          - '2026-09-18T04:00:00+00:00'
+        updated_at:
+          type: string
+          title: Updated At
+          examples:
+          - '2026-09-18T04:00:01+00:00'
+      type: object
+      required:
+      - request_id
+      - stage
+      - status
+      - created_at
+      - updated_at
+      title: JobStatus
+    JobStatusResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/JobStatus'
+      type: object
+      required:
+      - data
+      title: JobStatusResponse
+    NpwpFields:
+      properties:
+        nomor_npwp:
+          $ref: '#/components/schemas/Confidence'
+          examples:
+          - confidence: 0.87
+            value: 12.345.678.9-012.345
+        nama:
+          $ref: '#/components/schemas/Confidence'
+          description: Nama wajib pajak orang pribadi
+          examples:
+          - confidence: 0.87
+            value: RIAN DERMAWAN
+        nama_badan:
+          $ref: '#/components/schemas/Confidence'
+          description: Nama badan usaha pemilik NPWP
+          examples:
+          - confidence: 0.87
+            value: PT NUSANTARA DIGITAL TEKNOLOGI
+      type: object
+      required:
+      - nomor_npwp
+      - nama
+      - nama_badan
+      title: NpwpFields
+    OcrResult:
+      properties:
+        engine:
+          type: string
+          title: Engine
+          description: Backend yang dipakai (EKSTRAKSI_BACKEND)
+          examples:
+          - paddle
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Identitas model yang membaca, dari response model
+          examples:
+          - PP-OCRv6_medium_det+PP-OCRv6_medium_rec
+        elapsed_ms:
+          type: number
+          title: Elapsed Ms
+          examples:
+          - 412.5
+        full_text:
+          type: string
+          title: Full Text
+          description: Semua blok digabung dengan newline
+        blocks:
+          items:
+            $ref: '#/components/schemas/TextBlock'
+          type: array
+          title: Blocks
+      type: object
+      required:
+      - engine
+      - elapsed_ms
+      - full_text
+      - blocks
+      title: OcrResult
+    TextBlock:
+      properties:
+        text:
+          type: string
+          title: Text
+          examples:
+          - 'NPWP : 12.345.678.9-012.345'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          examples:
+          - 0.96
+        bbox:
+          anyOf:
+          - $ref: '#/components/schemas/BoundingBox'
+          - type: 'null'
+          description: Kotak tegak yang melingkupi teks, piksel
+        page:
+          type: integer
+          minimum: 0.0
+          title: Page
+          description: Indeks halaman 0-based (PDF multi-halaman)
+          default: 0
+          examples:
+          - 0
+      type: object
+      required:
+      - text
+      - confidence
+      title: TextBlock
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      description: API key for this service
+      in: header
+      name: X-API-Key
+tags:
+- name: Health
+  description: Liveness check
+- name: Pipeline
+  description: 'Async pipeline stage: 202 + background work + callback + handoff'
+- name: NPWP OCR
+  description: Legacy synchronous contract used by ocr-orchestration
+- name: Ekstraksi
+  description: Raw OCR text, synchronous
