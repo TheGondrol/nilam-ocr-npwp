@@ -1,86 +1,207 @@
 openapi: 3.1.0
 info:
   title: OCR NPWP API
-  description: OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. **Async
+  description: 'OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. **Async
     pipeline:** the orchestrator POSTs /v1/ekstraksi/jobs after guardrails passed and gets 202; this service
     runs OCR in the background, stores the result, POSTs a stage callback to the orchestrator, and hands
     the job to the structuring service. **Legacy contract:** generate-request-id -> extract-ocr -> get-ocr-result
     runs the whole chain synchronously and stays until the orchestrator has moved to the async flow. The
     raw OCR step is also exposed as /v1/ekstraksi/extract. All endpoints except /health require an X-API-Key
     header.
+
+
+    ## Conventions (the same for every nilam-ocr service)
+
+
+    **Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+
+    A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
+
+
+    **Envelope.** Every JSON response, success or error, has the same shape:
+
+    `{status_code, status_desc, message, data, errors, request_id}`. `status_code` always equals the HTTP
+
+    status. On success `errors` is null; on error `data` is null.
+
+
+    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+
+    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+
+    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+
+    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+
+    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+
+
+    **request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has
+    no
+
+    request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+
+    without it the service generates one.
+
+
+    **Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
+
+    background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
+
+    read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
+
+    `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED`. Because
+
+    the request was already answered `202`, a problem with the document itself (unreadable file, no text,
+
+    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.
+
+    '
   version: 1.0.0
+servers:
+- url: /
+  description: This host (where this page is served)
+- url: http://ekstraksi.nilam-ocr-{environment}.svc.cluster.local:8030
+  description: GKE, from another namespace (e.g. the orchestrator / gateway)
+  variables:
+    environment:
+      enum:
+      - dev
+      - staging
+      - production
+      default: dev
+      description: 'One namespace per environment: nilam-ocr-<environment>'
+- url: http://ekstraksi:8030
+  description: GKE from the same namespace, or the Docker Compose network
+- url: http://127.0.0.1:8030
+  description: Local development
 paths:
   /health:
     get:
       tags:
       - Health
-      summary: Health check
-      description: Reports service liveness and the active model backend. Does not require an API key.
-      operationId: health_health_get
+      summary: Liveness probe
+      description: Says the process is alive and which implementations are active. Never touches a dependency.
+        Does not require an API key.
+      operationId: getHealth
       responses:
         '200':
-          description: Successful Response
+          description: The process is alive
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy
+                  value:
+                    status: healthy
+                    version: 1.0.0
+                    device: cpu
+                    backends:
+                      ekstraksi: paddle
+                      storage: postgres
   /ready:
     get:
       tags:
       - Health
-      summary: Readiness check
+      summary: Readiness probe
       description: 'Liveness vs readiness: /health only says the process is alive and never touches a
         dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
         pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
         otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
         services are deliberately not checked: their outage is reported per job, not by refusing traffic.
         Does not require an API key.'
-      operationId: ready_ready_get
+      operationId: getReadiness
       responses:
         '200':
-          description: Successful Response
+          description: Every required dependency answers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
+              examples:
+                ready:
+                  summary: Ready
+                  value:
+                    status: ready
+                    checks:
+                      database: ok
         '503':
-          description: A required dependency is unavailable
+          description: A required dependency is unavailable; the pod is taken out of the Service
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: not_ready
+                checks:
+                  database: failed
   /v1/ekstraksi/jobs:
     post:
       tags:
       - Pipeline
-      summary: Submit a document to the async pipeline (OCR stage)
-      description: 'Called by the orchestrator after guardrails passed. Records the job (`ocr.jobs`, idempotent
-        per request_id), answers **202 immediately**, then in the background: reads the document (`file`,
-        or downloads `file_url` from MinIO), runs OCR, stores the result (`ocr.results`), POSTs the stage
-        callback to the orchestrator, and hands the job to the structuring service.
+      summary: Start the pipeline for a document (OCR stage)
+      description: '**Step 2 of the pipeline, asynchronous: the entry point of the OCR -> structuring
+        -> scoring chain.** Call it after `POST /v1/guardrails/check` answered `passed: true`.
 
 
-        Sending the same request_id again does not run OCR twice (`duplicate: true`), unless the previous
-        attempt FAILED.
+        Records the job (`ocr.jobs`, idempotent per request_id), answers **202 immediately**, then in
+        the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result
+        (`ocr.results`), POSTs the `OCR` callback, and hands the job to the structuring service, which
+        hands it to scoring. The caller does nothing more: it receives one callback per stage, and the
+        final result in the `SCORING` callback (see *Webhooks*).
 
 
-        Send the document as `file` or `file_url`; exactly one of the two.'
-      operationId: submit_job_v1_ekstraksi_jobs_post
+        **Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most 5
+        MB. `file_url` is downloaded in the background, so make a presigned URL live longer than the worst
+        queueing time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.
+
+
+        **Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run
+        OCR twice, unless the earlier attempt `FAILED`, in which case it is run again.'
+      operationId: submitOcrJob
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_submit_job_v1_ekstraksi_jobs_post'
+              $ref: '#/components/schemas/Body_submitOcrJob'
         required: true
       responses:
         '202':
-          description: Successful Response
+          description: The job was accepted (or already existed)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobAcceptedResponse'
+              examples:
+                accepted:
+                  summary: New job
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: OCR
+                      status: PROCESSING
+                      duplicate: false
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                duplicate:
+                  summary: 'Same request_id sent again: nothing is re-run, `status` is the existing job''s
+                    status'
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: OCR
+                      status: DONE
+                      duplicate: true
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad intake or malformed guardrails JSON
+          description: Neither or both of file / file_url, or `guardrails` is not a JSON object
           content:
             application/json:
               schema:
@@ -118,10 +239,12 @@ paths:
     get:
       tags:
       - Pipeline
-      summary: Get the OCR stage status / result of a request_id
-      description: Status of this stage only (PROCESSING / DONE / FAILED) and its raw OCR result. For
-        debugging and reconciliation; the orchestrator normally learns the status from the callback.
-      operationId: get_job_v1_ekstraksi_jobs__request_id__get
+      summary: Status and result of the OCR stage
+      description: Status of this stage only, and its raw OCR result once `DONE`. The orchestrator normally
+        learns the status from the callback; use this to reconcile after a missed callback, or to debug.
+        The later stages have the same endpoint on their own service (`/v1/structuring/jobs/{request_id}`,
+        `/v1/scoring/jobs/{request_id}`).
+      operationId: getOcrJob
       security:
       - APIKeyHeader: []
       parameters:
@@ -133,11 +256,87 @@ paths:
           title: Request Id
       responses:
         '200':
-          description: Successful Response
+          description: The job exists
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobStatusResponse'
+                $ref: '#/components/schemas/OcrJobStatusResponse'
+              examples:
+                processing:
+                  summary: Still running
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: OCR
+                      created_at: '2026-09-18T04:00:00+00:00'
+                      status: PROCESSING
+                      updated_at: '2026-09-18T04:00:00+00:00'
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                done:
+                  summary: Finished
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: OCR
+                      created_at: '2026-09-18T04:00:00+00:00'
+                      status: DONE
+                      result:
+                        engine: paddle
+                        model: PP-OCRv6_medium_det+PP-OCRv6_medium_rec
+                        elapsed_ms: 412.5
+                        full_text: 'DIREKTORAT JENDERAL PAJAK
+
+                          NPWP : 12.345.678.9-012.345
+
+                          BUDI SANTOSO'
+                        blocks:
+                        - text: DIREKTORAT JENDERAL PAJAK
+                          confidence: 0.9985
+                          bbox:
+                            x1: 175
+                            y1: 247
+                            x2: 887
+                            y2: 308
+                          page: 0
+                        - text: 'NPWP : 12.345.678.9-012.345'
+                          confidence: 0.9992
+                          bbox:
+                            x1: 35
+                            y1: 389
+                            x2: 637
+                            y2: 437
+                          page: 0
+                        - text: BUDI SANTOSO
+                          confidence: 0.9773
+                          bbox:
+                            x1: 33
+                            y1: 480
+                            x2: 483
+                            y2: 523
+                          page: 0
+                      updated_at: '2026-09-18T04:00:01+00:00'
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                failed:
+                  summary: 'Failed: same `error_message` as the FAILED callback. Resubmitting the request_id
+                    runs it again'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: OCR
+                      created_at: '2026-09-18T04:00:00+00:00'
+                      status: FAILED
+                      error_message: ekstraksi OCR model is unavailable
+                      updated_at: '2026-09-18T04:00:03+00:00'
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -177,16 +376,28 @@ paths:
     post:
       tags:
       - NPWP OCR
-      summary: Generate a request_id
-      description: Mints a request_id that must be used in a subsequent call to /v1/extract-ocr.
-      operationId: generate_request_id_v1_generate_request_id_post
+      summary: 'Legacy: mint a request_id'
+      description: '**Legacy synchronous contract**, kept until the orchestrator has moved to the asynchronous
+        pipeline (`POST /v1/ekstraksi/jobs`). Mints a request_id that must be used once in POST /v1/extract-ocr.
+        In the asynchronous pipeline the orchestrator mints the request_id itself.'
+      operationId: generateRequestId
       responses:
         '200':
-          description: Successful Response
+          description: A new request_id
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenerateRequestIdResponse'
+              examples:
+                minted:
+                  summary: Use it once in POST /v1/extract-ocr
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -198,34 +409,54 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
+      deprecated: true
       security:
       - APIKeyHeader: []
   /v1/extract-ocr:
     post:
       tags:
       - NPWP OCR
-      summary: Extract data from an NPWP image
-      description: 'Runs the full pipeline (guardrails service -> this service''s OCR -> structuring service
-        -> scoring service) on the uploaded NPWP image for the given request_id (from /v1/generate-request-id).
-        A request_id can only be submitted once.
+      summary: 'Legacy: run the whole chain synchronously'
+      description: '**Legacy synchronous contract**, kept until the orchestrator has moved to the asynchronous
+        pipeline (`POST /v1/ekstraksi/jobs`). Runs the full pipeline (guardrails service -> this service''s
+        OCR -> structuring service -> scoring service) on the uploaded NPWP image for the given request_id
+        (from /v1/generate-request-id). A request_id can only be submitted once.
 
 
         Send the image as `file`, or send `file_url` and this service fetches it itself; exactly one of
         the two.'
-      operationId: extract_ocr_v1_extract_ocr_post
+      operationId: extractOcr
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_extract_ocr_v1_extract_ocr_post'
+              $ref: '#/components/schemas/Body_extractOcr'
         required: true
       responses:
         '200':
-          description: Successful Response
+          description: The document was read
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
+              examples:
+                person:
+                  summary: A person's card
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      nomor_npwp:
+                        value: 12.345.678.9-012.345
+                        confidence: 0.9992
+                      nama:
+                        value: BUDI SANTOSO
+                        confidence: 0.9773
+                      nama_badan:
+                        confidence: 0.0
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    guardrails: 0.9904
         '400':
           description: Unknown request_id, bad file, or rejected by guardrails
           content:
@@ -303,16 +534,19 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
+      deprecated: true
       security:
       - APIKeyHeader: []
   /v1/get-ocr-result/{request_id}:
     get:
       tags:
       - NPWP OCR
-      summary: Get OCR result / status
-      description: Fetches the current status and (if completed) the result for a previously generated
-        request_id.
-      operationId: get_ocr_result_v1_get_ocr_result__request_id__get
+      summary: 'Legacy: status and result of an extract-ocr request'
+      description: '**Legacy synchronous contract**, kept until the orchestrator has moved to the asynchronous
+        pipeline (`POST /v1/ekstraksi/jobs`). Current status and, once completed, the result of a request_id
+        minted by this service.'
+      operationId: getOcrResult
+      deprecated: true
       security:
       - APIKeyHeader: []
       parameters:
@@ -324,11 +558,46 @@ paths:
           title: Request Id
       responses:
         '200':
-          description: Successful Response
+          description: The request_id exists
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetOcrResultResponse'
+              examples:
+                completed:
+                  summary: Finished
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                      status: completed
+                      result:
+                        nomor_npwp:
+                          value: 12.345.678.9-012.345
+                          confidence: 0.9992
+                        nama:
+                          value: BUDI SANTOSO
+                          confidence: 0.9773
+                        nama_badan:
+                          confidence: 0.0
+                      created_at: '2026-03-06T07:01:59.976912+00:00'
+                      updated_at: '2026-03-06T07:07:04.809697+00:00'
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    guardrails: 0.9904
+                pending:
+                  summary: Minted, but extract-ocr has not been called (or is still running)
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                      status: pending
+                      created_at: '2026-03-06T07:01:59.976912+00:00'
+                      updated_at: '2026-03-06T07:01:59.976912+00:00'
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -369,22 +638,64 @@ paths:
     post:
       tags:
       - Ekstraksi
-      summary: Extract raw text from a document image
+      summary: Raw OCR of a document, synchronous (no job, no callback)
       description: Runs the OCR engine and returns raw text blocks with confidence and bounding boxes.
         Send the image as `file` or `file_url`; exactly one of the two.
-      operationId: extract_v1_ekstraksi_extract_post
+      operationId: extractText
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_extract_v1_ekstraksi_extract_post'
+              $ref: '#/components/schemas/Body_extractText'
       responses:
         '200':
-          description: Successful Response
+          description: Text lines found in the document
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExtractResponse'
+              examples:
+                npwp_card:
+                  summary: An NPWP card
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      engine: paddle
+                      model: PP-OCRv6_medium_det+PP-OCRv6_medium_rec
+                      elapsed_ms: 412.5
+                      full_text: 'DIREKTORAT JENDERAL PAJAK
+
+                        NPWP : 12.345.678.9-012.345
+
+                        BUDI SANTOSO'
+                      blocks:
+                      - text: DIREKTORAT JENDERAL PAJAK
+                        confidence: 0.9985
+                        bbox:
+                          x1: 175
+                          y1: 247
+                          x2: 887
+                          y2: 308
+                        page: 0
+                      - text: 'NPWP : 12.345.678.9-012.345'
+                        confidence: 0.9992
+                        bbox:
+                          x1: 35
+                          y1: 389
+                          x2: 637
+                          y2: 437
+                        page: 0
+                      - text: BUDI SANTOSO
+                        confidence: 0.9773
+                        bbox:
+                          x1: 33
+                          y1: 480
+                          x2: 483
+                          y2: 523
+                        page: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
           description: Bad file (empty, too large, unsupported type) or bad intake
           content:
@@ -453,9 +764,63 @@ paths:
                 errors: VALIDATION_ERROR
       security:
       - APIKeyHeader: []
+webhooks:
+  stageCallback:
+    post:
+      tags:
+      - Callbacks
+      summary: Stage status callback (implemented by the orchestrator / gateway)
+      description: '**This is a request this service SENDS, not one it accepts.** The orchestrator must
+        expose it.
+
+
+        `POST {ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}` (default path `/v1/callbacks/stage`),
+        `Content-Type: application/json`.
+
+
+        **When.** Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` after the
+        OCR result is stored and BEFORE the job is handed to structuring, or `status: FAILED` with `error_message`
+        when the document could not be read (the chain stops there). Additionally `stage: STRUCTURING`,
+        `status: FAILED` when OCR succeeded but the structuring service could not be reached after retries.
+
+
+        **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
+        retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
+        that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
+        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own.
+
+
+        **What the receiver must tolerate.** The same callback may arrive more than once (treat it as
+        idempotent), and callbacks of different stages come from different services, so they may arrive
+        out of order: only ever move a request''s status forward. Reject callbacks whose `X-API-Key` is
+        wrong.'
+      operationId: stageCallback
+      parameters:
+      - description: '`ORCHESTRATION_API_KEY` of the sending service; when unset, that service''s own
+          `API_KEY`'
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+          description: '`ORCHESTRATION_API_KEY` of the sending service; when unset, that service''s own
+            `API_KEY`'
+        name: x-api-key
+        in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StageCallback'
+        required: true
+      responses:
+        '200':
+          description: Acknowledged. Any 2xx is accepted and the body is ignored.
+          content:
+            application/json:
+              schema: {}
 components:
   schemas:
-    Body_extract_ocr_v1_extract_ocr_post:
+    Body_extractOcr:
       properties:
         request_id:
           type: string
@@ -479,8 +844,8 @@ components:
       type: object
       required:
       - request_id
-      title: Body_extract_ocr_v1_extract_ocr_post
-    Body_extract_v1_ekstraksi_extract_post:
+      title: Body_extractOcr
+    Body_extractText:
       properties:
         file:
           anyOf:
@@ -498,8 +863,8 @@ components:
           description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
             Omit when uploading file.
       type: object
-      title: Body_extract_v1_ekstraksi_extract_post
-    Body_submit_job_v1_ekstraksi_jobs_post:
+      title: Body_extractText
+    Body_submitOcrJob:
       properties:
         request_id:
           type: string
@@ -510,7 +875,7 @@ components:
         document_type:
           type: string
           title: Document Type
-          description: Document type chosen by the client
+          description: Document type chosen by the client. Only `npwp` is supported
           default: npwp
           examples:
           - npwp
@@ -519,10 +884,13 @@ components:
           - type: string
           - type: 'null'
           title: Guardrails
-          description: Guardrails result (`data` of /v1/guardrails/check) as a JSON object; forwarded
-            down the chain
+          description: 'The `data` object of `POST /v1/guardrails/check`, serialised as a JSON string.
+            Forwarded down the chain: scoring uses `document.confidence`, and the final result returns
+            it unchanged. Optional, but without it the scoring model works with one input missing'
           examples:
-          - '{"passed": true, "reason": null}'
+          - '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821,
+            "n_pages": 1, "n_approve": 1, "n_reject": 0}, "pages": [{"page_index": 0, "proba_approve":
+            0.9821, "proba_reject": 0.0179, "verdict": "accepted"}]}'
         file:
           anyOf:
           - type: string
@@ -541,21 +909,33 @@ components:
       type: object
       required:
       - request_id
-      title: Body_submit_job_v1_ekstraksi_jobs_post
+      title: Body_submitOcrJob
     BoundingBox:
       properties:
         x1:
           type: integer
           title: X1
+          description: Left
+          examples:
+          - 190
         y1:
           type: integer
           title: Y1
+          description: Top
+          examples:
+          - 320
         x2:
           type: integer
           title: X2
+          description: Right
+          examples:
+          - 760
         y2:
           type: integer
           title: Y2
+          description: Bottom
+          examples:
+          - 366
       type: object
       required:
       - x1
@@ -567,7 +947,9 @@ components:
       properties:
         value:
           title: Value
-          description: Nilai yang terbaca; null kalau field tidak ditemukan
+          description: The value read; null when the field was not found
+          examples:
+          - BUDI SANTOSO
         confidence:
           anyOf:
           - type: number
@@ -575,8 +957,9 @@ components:
             minimum: 0.0
           - type: 'null'
           title: Confidence
+          description: OCR score of the line the value came from; 0 when not found
           examples:
-          - 0.87
+          - 0.97
       type: object
       required:
       - value
@@ -594,24 +977,30 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           examples:
           - 400
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           examples:
           - Bad Request
         message:
           type: string
           title: Message
+          description: Human-readable cause; safe to log
           examples:
           - Uploaded file is empty
         data:
           type: 'null'
           title: Data
+          description: Always null on error
         errors:
           type: string
           title: Errors
+          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
+            names a different field every time); for every other status it repeats `message`
           examples:
           - Uploaded file is empty
         request_id:
@@ -620,6 +1009,8 @@ components:
           - type: 'null'
           title: Request Id
           description: Present when the error is tied to a known request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
       type: object
       required:
       - status_code
@@ -632,31 +1023,36 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Success
           examples:
           - Success
-        data:
-          $ref: '#/components/schemas/NpwpFields'
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           type: string
           title: Request Id
+          description: The request_id this response belongs to
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/NpwpFields'
         guardrails:
           anyOf:
           - type: number
@@ -664,44 +1060,50 @@ components:
             minimum: 0.0
           - type: 'null'
           title: Guardrails
-          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung service scoring
-            dari confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
-            batas role pemanggil.
+          description: 'Overall document score (0..1) from the legacy heuristic: OCR confidence per field
+            combined with format checks. NOT produced by the ML team''s trust model; the async pipeline
+            reports per-field confidences instead.'
           examples:
-          - 0.72
+          - 0.98
       type: object
       required:
-      - data
       - request_id
+      - data
       title: ExtractOcrResponse
     ExtractResponse:
       properties:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Success
           examples:
           - Success
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
@@ -715,6 +1117,7 @@ components:
         request_id:
           type: string
           title: Request Id
+          description: Use it once in POST /v1/extract-ocr
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
       type: object
@@ -726,68 +1129,82 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Success
           examples:
           - Success
-        data:
-          $ref: '#/components/schemas/GenerateRequestIdData'
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           type: string
           title: Request Id
+          description: The request_id this response belongs to
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/GenerateRequestIdData'
       type: object
       required:
-      - data
       - request_id
+      - data
       title: GenerateRequestIdResponse
     GetOcrResultData:
       properties:
         request_id:
           type: string
           title: Request Id
+          description: request_id from /v1/generate-request-id
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
         status:
           type: string
+          enum:
+          - pending
+          - completed
+          - failed
           title: Status
-          description: pending | completed | failed
+          description: '`pending` -> `completed` | `failed`'
           examples:
           - completed
         result:
           anyOf:
           - $ref: '#/components/schemas/NpwpFields'
           - type: 'null'
-          description: Present once status is 'completed'
+          description: Present once `status` is `completed`
         error_message:
           anyOf:
           - type: string
           - type: 'null'
           title: Error Message
-          description: Present once status is 'failed'
+          description: Present once `status` is `failed`
+          examples:
+          - null
         created_at:
           type: string
           title: Created At
+          description: ISO 8601, UTC
           examples:
           - '2026-03-06T07:01:59.976912+00:00'
         updated_at:
           type: string
           title: Updated At
+          description: ISO 8601, UTC
           examples:
           - '2026-03-06T07:07:04.809697+00:00'
       type: object
@@ -802,31 +1219,36 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Success
           examples:
           - Success
-        data:
-          $ref: '#/components/schemas/GetOcrResultData'
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           type: string
           title: Request Id
+          description: The request_id this response belongs to
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/GetOcrResultData'
         guardrails:
           anyOf:
           - type: number
@@ -834,31 +1256,34 @@ components:
             minimum: 0.0
           - type: 'null'
           title: Guardrails
-          description: Skor kepercayaan dokumen ini secara keseluruhan (0..1), dihitung service scoring
-            dari confidence tiap field dan validasi formatnya. Orchestrator membandingkannya dengan ambang
-            batas role pemanggil. Null selama status belum completed.
+          description: 'Overall document score (0..1) from the legacy heuristic: OCR confidence per field
+            combined with format checks. NOT produced by the ML team''s trust model; the async pipeline
+            reports per-field confidences instead. Null until `status` is `completed`.'
           examples:
-          - 0.72
+          - 0.98
       type: object
       required:
-      - data
       - request_id
+      - data
       title: GetOcrResultResponse
     HealthResponse:
       properties:
         status:
           type: string
           title: Status
+          description: Always `healthy` while the process is alive
           examples:
           - healthy
         version:
           type: string
           title: Version
+          description: Service version
           examples:
           - 1.0.0
         device:
           type: string
           title: Device
+          description: Where this service computes
           examples:
           - cpu
         backends:
@@ -866,9 +1291,11 @@ components:
             type: string
           type: object
           title: Backends
-          description: Backend model aktif di service ini
+          description: Active implementation per concern (model backend, storage). Useful to confirm a
+            deployment
           examples:
           - ekstraksi: paddle
+            storage: postgres
       type: object
       required:
       - status
@@ -881,6 +1308,7 @@ components:
         request_id:
           type: string
           title: Request Id
+          description: Echo of the submitted request_id
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
@@ -890,6 +1318,7 @@ components:
           - STRUCTURING
           - SCORING
           title: Stage
+          description: Pipeline stage that accepted the job
           examples:
           - OCR
         status:
@@ -899,12 +1328,19 @@ components:
           - DONE
           - FAILED
           title: Status
-          description: PROCESSING untuk job baru; status terkini kalau request_id ini sudah pernah dikirim
+          description: '`PROCESSING` for a newly accepted job. When `duplicate` is true: the current status
+            of the job that already exists for this request_id'
+          examples:
+          - PROCESSING
         duplicate:
           type: boolean
           title: Duplicate
-          description: 'true: request_id ini sudah pernah diterima, kerja TIDAK dijalankan ulang (idempoten)'
+          description: 'true: this request_id was already accepted before and the work is NOT run again
+            (idempotent). Exception: a job whose status is `FAILED` is re-claimed and run again, and answers
+            `duplicate: false`'
           default: false
+          examples:
+          - false
       type: object
       required:
       - request_id
@@ -916,29 +1352,35 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 202
           examples:
           - 202
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: Accepted
           examples:
           - Accepted
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Accepted
           examples:
           - Accepted
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
@@ -947,20 +1389,46 @@ components:
       required:
       - data
       title: JobAcceptedResponse
-    JobStatus:
+    NpwpFields:
+      properties:
+        nomor_npwp:
+          $ref: '#/components/schemas/Confidence'
+          description: 15-digit number as `XX.XXX.XXX.X-XXX.XXX`, or a 16-digit NIK-based number as 16
+            plain digits
+          examples:
+          - confidence: 0.99
+            value: 12.345.678.9-012.345
+        nama:
+          $ref: '#/components/schemas/Confidence'
+          description: Taxpayer name on a person's card
+          examples:
+          - confidence: 0.97
+            value: BUDI SANTOSO
+        nama_badan:
+          $ref: '#/components/schemas/Confidence'
+          description: Registered name on a company's card (PT, CV, ...); null on a person's card
+          examples:
+          - confidence: 0.0
+      type: object
+      required:
+      - nomor_npwp
+      - nama
+      - nama_badan
+      title: NpwpFields
+    OcrJobStatus:
       properties:
         request_id:
           type: string
           title: Request Id
+          description: request_id of the pipeline run
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
           type: string
-          enum:
-          - OCR
-          - STRUCTURING
-          - SCORING
+          const: OCR
           title: Stage
+          description: Always `OCR` on this service
+          default: OCR
           examples:
           - OCR
         status:
@@ -970,106 +1438,91 @@ components:
           - DONE
           - FAILED
           title: Status
+          description: '`PROCESSING` -> `DONE` | `FAILED`. A `FAILED` job may go back to `PROCESSING`
+            when resubmitted'
           examples:
           - DONE
-        result:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Result
-          description: Hasil tahap ini saat DONE; null selain itu
         error_message:
           anyOf:
           - type: string
           - type: 'null'
           title: Error Message
-          description: Pesan kegagalan saat FAILED; null selain itu
+          description: Why the stage failed; null unless `status` is `FAILED`. Same text as the FAILED
+            callback
+          examples:
+          - null
         created_at:
           type: string
           title: Created At
+          description: When the job was first accepted (ISO 8601, UTC)
           examples:
           - '2026-09-18T04:00:00+00:00'
         updated_at:
           type: string
           title: Updated At
+          description: Last status change (ISO 8601, UTC)
           examples:
           - '2026-09-18T04:00:01+00:00'
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/OcrResult'
+          - type: 'null'
+          description: Raw OCR result once `status` is `DONE`; null otherwise
       type: object
       required:
       - request_id
-      - stage
       - status
       - created_at
       - updated_at
-      title: JobStatus
-    JobStatusResponse:
+      title: OcrJobStatus
+    OcrJobStatusResponse:
       properties:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: Success
           examples:
           - Success
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
-          $ref: '#/components/schemas/JobStatus'
+          $ref: '#/components/schemas/OcrJobStatus'
       type: object
       required:
       - data
-      title: JobStatusResponse
-    NpwpFields:
-      properties:
-        nomor_npwp:
-          $ref: '#/components/schemas/Confidence'
-          examples:
-          - confidence: 0.87
-            value: 12.345.678.9-012.345
-        nama:
-          $ref: '#/components/schemas/Confidence'
-          description: Nama wajib pajak orang pribadi
-          examples:
-          - confidence: 0.87
-            value: RIAN DERMAWAN
-        nama_badan:
-          $ref: '#/components/schemas/Confidence'
-          description: Nama badan usaha pemilik NPWP
-          examples:
-          - confidence: 0.87
-            value: PT NUSANTARA DIGITAL TEKNOLOGI
-      type: object
-      required:
-      - nomor_npwp
-      - nama
-      - nama_badan
-      title: NpwpFields
+      title: OcrJobStatusResponse
     OcrResult:
       properties:
         engine:
           type: string
           title: Engine
-          description: Backend yang dipakai (EKSTRAKSI_BACKEND)
+          description: OCR backend that read the document (`EKSTRAKSI_BACKEND`)
           examples:
           - paddle
         model:
@@ -1077,23 +1530,32 @@ components:
           - type: string
           - type: 'null'
           title: Model
-          description: Identitas model yang membaca, dari response model
+          description: Model identity reported by the OCR model service; null when it does not report
+            one
           examples:
           - PP-OCRv6_medium_det+PP-OCRv6_medium_rec
         elapsed_ms:
           type: number
           title: Elapsed Ms
+          description: Time spent in the OCR model, milliseconds
           examples:
           - 412.5
         full_text:
           type: string
           title: Full Text
-          description: Semua blok digabung dengan newline
+          description: All blocks joined by newline, in reading order
+          examples:
+          - 'DIREKTORAT JENDERAL PAJAK
+
+            NPWP : 12.345.678.9-012.345
+
+            BUDI SANTOSO'
         blocks:
           items:
             $ref: '#/components/schemas/TextBlock'
           type: array
           title: Blocks
+          description: Text lines in reading order (top to bottom)
       type: object
       required:
       - engine
@@ -1109,6 +1571,7 @@ components:
           - ready
           - not_ready
           title: Status
+          description: '`ready` (HTTP 200) when every check is `ok`, else `not_ready` (HTTP 503)'
           examples:
           - ready
         checks:
@@ -1119,7 +1582,7 @@ components:
             - failed
           type: object
           title: Checks
-          description: Dependensi wajib service ini, satu entri per dependensi
+          description: One entry per REQUIRED dependency of this service; empty when it has none
           examples:
           - database: ok
       type: object
@@ -1127,11 +1590,60 @@ components:
       - status
       - checks
       title: ReadyResponse
+    StageCallback:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: 'Stage the status is about. Usually the sender''s own stage; when the hand-off
+            to the NEXT stage fails after retries, the sender reports `status: FAILED` with the next stage''s
+            name, because that stage never received the job and cannot report for itself'
+          examples:
+          - OCR
+        status:
+          type: string
+          enum:
+          - DONE
+          - FAILED
+          title: Status
+          description: Outcome of the stage. `FAILED` of any stage ends the request
+          examples:
+          - DONE
+        result:
+          type: 'null'
+          title: Result
+          description: Always null for OCR and STRUCTURING; read the stage result from GET .../jobs/{request_id}
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Why it failed; null when `status` is `DONE`
+          examples:
+          - null
+      type: object
+      required:
+      - request_id
+      - stage
+      - status
+      title: StageCallback
+      description: Body of the callback a stage POSTs to the orchestrator when it finishes.
     TextBlock:
       properties:
         text:
           type: string
           title: Text
+          description: One OCR text line, as read
           examples:
           - 'NPWP : 12.345.678.9-012.345'
         confidence:
@@ -1139,18 +1651,21 @@ components:
           maximum: 1.0
           minimum: 0.0
           title: Confidence
+          description: Recognition score of this line
           examples:
-          - 0.96
+          - 0.9992
         bbox:
           anyOf:
           - $ref: '#/components/schemas/BoundingBox'
           - type: 'null'
-          description: Kotak tegak yang melingkupi teks, piksel
+          description: Upright box around the line, in pixels of the ORIENTATION-CORRECTED image the OCR
+            model worked on. The model straightens and unwarps the card first, so these are NOT coordinates
+            in the uploaded photo
         page:
           type: integer
           minimum: 0.0
           title: Page
-          description: Indeks halaman 0-based (PDF multi-halaman)
+          description: 0-based page number (multi-page PDF)
           default: 0
           examples:
           - 0
@@ -1166,11 +1681,13 @@ components:
       in: header
       name: X-API-Key
 tags:
-- name: Health
-  description: Liveness check
 - name: Pipeline
-  description: 'Async pipeline stage: 202 + background work + callback + handoff'
+  description: 'Asynchronous pipeline stage: 202, background work, callback, hand-off'
+- name: Callbacks
+  description: Requests this service SENDS to the orchestrator (see Webhooks)
 - name: NPWP OCR
   description: Legacy synchronous contract used by ocr-orchestration
 - name: Ekstraksi
   description: Raw OCR text, synchronous
+- name: Health
+  description: Liveness and readiness probes; no API key

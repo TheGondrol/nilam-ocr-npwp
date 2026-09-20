@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from ocr_common.envelope import envelope
 from ocr_common.errors import ServiceError
 from ocr_common.intake import FileField, FileUrlField, read_image
-from ocr_common.schemas import UNAUTHORIZED, error
+from ocr_common.schemas import UNAUTHORIZED, error, success_examples
 from ocr_common.security import verify_api_key
 from src.api.v1.ekstraksi import get_ekstraksi_service
 from src.clients.stages import get_stage_clients
@@ -19,6 +19,11 @@ from src.services.ocr_service import OcrService
 
 router = APIRouter(tags=["NPWP OCR"], dependencies=[Depends(verify_api_key)])
 
+LEGACY_NOTE = (
+    "**Legacy synchronous contract**, kept until the orchestrator has moved to the asynchronous pipeline "
+    "(`POST /v1/ekstraksi/jobs`). "
+)
+
 
 def get_ocr_service() -> OcrService:
     return OcrService(get_request_repository(), get_ekstraksi_service(), get_stage_clients())
@@ -27,9 +32,21 @@ def get_ocr_service() -> OcrService:
 @router.post(
     "/v1/generate-request-id",
     response_model=GenerateRequestIdResponse,
-    summary="Generate a request_id",
-    description="Mints a request_id that must be used in a subsequent call to /v1/extract-ocr.",
-    responses={401: UNAUTHORIZED},
+    operation_id="generateRequestId",
+    deprecated=True,
+    summary="Legacy: mint a request_id",
+    description=(
+        LEGACY_NOTE
+        + "Mints a request_id that must be used once in POST /v1/extract-ocr. In the asynchronous pipeline the "
+        "orchestrator mints the request_id itself."
+    ),
+    responses={
+        200: success_examples(
+            "A new request_id",
+            minted=("Use it once in POST /v1/extract-ocr", envelope(200, "Success", {"request_id": RID}, RID)),
+        ),
+        401: UNAUTHORIZED,
+    },
 )
 async def generate_request_id(service: OcrService = Depends(get_ocr_service)):
     request_id = await service.generate_request_id()
@@ -39,15 +56,34 @@ async def generate_request_id(service: OcrService = Depends(get_ocr_service)):
 @router.post(
     "/v1/extract-ocr",
     response_model=ExtractOcrResponse,
-    summary="Extract data from an NPWP image",
+    operation_id="extractOcr",
+    deprecated=True,
+    summary="Legacy: run the whole chain synchronously",
     description=(
-        "Runs the full pipeline (guardrails service -> this service's OCR -> structuring service "
+        LEGACY_NOTE + "Runs the full pipeline (guardrails service -> this service's OCR -> structuring service "
         "-> scoring service) on the uploaded NPWP image for the given request_id "
         "(from /v1/generate-request-id). A request_id can only be submitted once.\n\n"
         "Send the image as `file`, or send `file_url` and this service fetches "
         "it itself; exactly one of the two."
     ),
     responses={
+        200: success_examples(
+            "The document was read",
+            person=(
+                "A person's card",
+                envelope(
+                    200,
+                    "Success",
+                    {
+                        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.9992},
+                        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9773},
+                        "nama_badan": {"value": None, "confidence": 0.0},
+                    },
+                    RID,
+                    guardrails=0.9904,
+                ),
+            ),
+        ),
         400: error(
             400,
             "Unknown request_id, bad file, or rejected by guardrails",
@@ -81,9 +117,54 @@ async def extract_ocr(
 @router.get(
     "/v1/get-ocr-result/{request_id}",
     response_model=GetOcrResultResponse,
-    summary="Get OCR result / status",
-    description="Fetches the current status and (if completed) the result for a previously generated request_id.",
+    operation_id="getOcrResult",
+    deprecated=True,
+    summary="Legacy: status and result of an extract-ocr request",
+    description=(
+        LEGACY_NOTE + "Current status and, once completed, the result of a request_id minted by this service."
+    ),
     responses={
+        200: success_examples(
+            "The request_id exists",
+            completed=(
+                "Finished",
+                envelope(
+                    200,
+                    "Success",
+                    {
+                        "request_id": RID,
+                        "status": "completed",
+                        "result": {
+                            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.9992},
+                            "nama": {"value": "BUDI SANTOSO", "confidence": 0.9773},
+                            "nama_badan": {"value": None, "confidence": 0.0},
+                        },
+                        "error_message": None,
+                        "created_at": "2026-03-06T07:01:59.976912+00:00",
+                        "updated_at": "2026-03-06T07:07:04.809697+00:00",
+                    },
+                    RID,
+                    guardrails=0.9904,
+                ),
+            ),
+            pending=(
+                "Minted, but extract-ocr has not been called (or is still running)",
+                envelope(
+                    200,
+                    "Success",
+                    {
+                        "request_id": RID,
+                        "status": "pending",
+                        "result": None,
+                        "error_message": None,
+                        "created_at": "2026-03-06T07:01:59.976912+00:00",
+                        "updated_at": "2026-03-06T07:01:59.976912+00:00",
+                    },
+                    RID,
+                    guardrails=None,
+                ),
+            ),
+        ),
         401: error(401, "Missing or invalid X-API-Key", "Invalid or missing API key", request_id=RID),
         404: error(
             404,

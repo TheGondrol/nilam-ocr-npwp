@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from ocr_common.app import create_app, database_readiness
+from ocr_common.app import add_stage_callback_webhook, create_app, database_readiness
+from ocr_common.pipeline_schemas import ScoringStageCallback
 from src.api.v1 import jobs, scoring
 from src.api.v1.scoring import get_trust_model
 from src.core.config import get_settings
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 app = create_app(
     settings=settings,
     title="OCR NPWP Scoring API",
+    service_name="scoring",
     description=(
         "Pipeline step 4 (last) for Indonesian NPWP documents: combines per-field confidence and "
         "format validation into one document score plus an approve/review/reject decision. "
@@ -45,7 +47,8 @@ app = create_app(
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
-        {"name": "Pipeline", "description": "Async pipeline stage: 202 + background work + callback"},
+        {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback"},
+        {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
         {"name": "Scoring", "description": "Document score & approve/review/reject decision, synchronous"},
     ],
     routers=[jobs.router, scoring.router],
@@ -55,5 +58,17 @@ app = create_app(
         "storage": "postgres" if settings.database_url else "memory",
     },
     readiness=database_readiness(settings.database_url),
+    backends_example={"scoring": "trust_model", "legacy_score": "heuristic", "storage": "postgres"},
+    readiness_example={"database": "ok"},
     lifespan=lifespan,
+)
+
+add_stage_callback_webhook(
+    app,
+    body_model=ScoringStageCallback,
+    sent=(
+        "Once per job of `POST /v1/scoring/jobs`, the last callback of a request: `stage: SCORING` with "
+        "`status: DONE` and `result` = the **final result** (fields, per-field confidences, and the guardrails "
+        "result that was submitted), or `status: FAILED` with `error_message` and `result: null`."
+    ),
 )

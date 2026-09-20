@@ -8,14 +8,16 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ocr_common.envelope import envelope
 from ocr_common.errors import ServiceError
-from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, JobStatusResponse, error
+from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, error, success_examples
 from ocr_common.security import verify_api_key
-from src.api.v1.scoring import get_confidence_service
+from src.api.v1.scoring import CONFIDENCE_PAYLOAD_EXAMPLE, get_confidence_service
 from src.core.pipeline import get_pipeline
-from src.schemas.scoring import ScoringJobRequest
+from src.schemas.scoring import ScoringJobRequest, ScoringJobStatusResponse
 from src.services.job_service import ScoringJobService
 
 router = APIRouter(tags=["Pipeline"], dependencies=[Depends(verify_api_key)])
+
+_JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "created_at": "2026-09-18T04:00:01+00:00"}
 
 
 def get_job_service() -> ScoringJobService:
@@ -26,39 +28,100 @@ def get_job_service() -> ScoringJobService:
     "/v1/scoring/jobs",
     status_code=202,
     response_model=JobAcceptedResponse,
-    summary="Submit a structured document to the async pipeline (scoring stage, last)",
+    operation_id="submitScoringJob",
+    summary="Hand a structured document to the scoring stage (last)",
     description=(
-        "Called by the structuring service. Records the job (`scoring.jobs`, idempotent per request_id), "
-        "answers **202 immediately**, then in the background: builds the ML team's scoring payload from the "
-        "chained guardrails + OCR + structuring results, runs the trust model, stores the result "
-        "(`scoring.results`: npwp_confidence, name_confidence, and the payload that was scored), and POSTs the "
-        "stage callback to the orchestrator. As the last stage, its callback carries the **final result** "
-        "(`result`: document_type, fields, scoring {npwp_confidence, name_confidence}, guardrails). No document "
-        "score and no approve/reject decision: thresholds are the orchestrator's.\n\n"
-        "Sending the same request_id again does not run the work twice (`duplicate: true`), unless the "
-        "previous attempt FAILED."
+        "**Step 4 of the pipeline, asynchronous, the last stage. Called by the structuring service, not by the "
+        "orchestrator.**\n\n"
+        "Records the job (`scoring.jobs`, idempotent per request_id), answers **202 immediately**, then in the "
+        "background: builds the ML team's scoring payload from the chained guardrails + OCR + structuring results, "
+        "runs the trust model, stores the result (`scoring.results`), and POSTs the `SCORING` callback, which "
+        "carries the **final result** of the request.\n\n"
+        "The outcome is two per-field confidences. There is no document-level score and no approve / reject "
+        "decision: thresholds belong to the orchestrator."
     ),
     responses={
+        202: success_examples(
+            "The job was accepted (or already existed)",
+            accepted=(
+                "New job",
+                envelope(
+                    202,
+                    "Accepted",
+                    {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "status": "PROCESSING", "duplicate": False},
+                    REQUEST_ID_EXAMPLE,
+                ),
+            ),
+            duplicate=(
+                "Same request_id sent again: nothing is re-run",
+                envelope(
+                    202,
+                    "Accepted",
+                    {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "status": "DONE", "duplicate": True},
+                    REQUEST_ID_EXAMPLE,
+                ),
+            ),
+        ),
         401: UNAUTHORIZED,
         422: error(422, "Validation Error", "body.structuring: Field required", errors="VALIDATION_ERROR"),
     },
 )
 async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depends(get_job_service)):
-    data = await service.submit(
-        body.request_id, body.document_type, body.guardrails, body.ocr, body.structuring.model_dump()
-    )
+    # exclude_unset: hasil guardrails dikembalikan di hasil akhir PERSIS seperti diterima.
+    guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
+    ocr = body.ocr.model_dump() if body.ocr is not None else None
+    data = await service.submit(body.request_id, body.document_type, guardrails, ocr, body.structuring.model_dump())
     return envelope(202, "Accepted", data, body.request_id)
 
 
 @router.get(
     "/v1/scoring/jobs/{request_id}",
-    response_model=JobStatusResponse,
-    summary="Get the scoring stage status / result of a request_id",
+    response_model=ScoringJobStatusResponse,
+    operation_id="getScoringJob",
+    summary="Status and result of the scoring stage",
     description=(
-        "Status of this stage only (PROCESSING / DONE / FAILED) and its score report. For debugging and "
-        "reconciliation; the orchestrator normally learns the status from the callback."
+        "Status of this stage only and, once `DONE`, the two confidences plus the exact payload that was scored. "
+        "The orchestrator normally receives the final result in the `SCORING` callback; use this to reconcile "
+        "after a missed callback, or to audit a score."
     ),
     responses={
+        200: success_examples(
+            "The job exists",
+            done=(
+                "Finished",
+                envelope(
+                    200,
+                    "Success",
+                    {
+                        **_JOB,
+                        "status": "DONE",
+                        "error_message": None,
+                        "result": {
+                            "npwp_confidence": 0.9806,
+                            "name_confidence": 0.9948,
+                            "payload": CONFIDENCE_PAYLOAD_EXAMPLE,
+                        },
+                        "updated_at": "2026-09-18T04:00:01+00:00",
+                    },
+                    REQUEST_ID_EXAMPLE,
+                ),
+            ),
+            failed=(
+                "Failed",
+                envelope(
+                    200,
+                    "Success",
+                    {
+                        **_JOB,
+                        "status": "FAILED",
+                        "error_message": "Unsupported document_type: ktp. Supported: ['npwp']",
+                        "result": None,
+                        "updated_at": "2026-09-18T04:00:01+00:00",
+                    },
+                    REQUEST_ID_EXAMPLE,
+                ),
+            ),
+        ),
         401: UNAUTHORIZED,
         404: error(
             404,

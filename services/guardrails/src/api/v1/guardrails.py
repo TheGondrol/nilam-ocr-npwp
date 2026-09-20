@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from ocr_common.envelope import envelope
 from ocr_common.errors import ServiceError
 from ocr_common.intake import FileField, FileUrlField, read_image
-from ocr_common.schemas import UNAUTHORIZED, error
+from ocr_common.schemas import UNAUTHORIZED, error, success_examples
 from ocr_common.security import verify_api_key
 from src.core.config import get_settings
 from src.models.guardrails import get_page_classifier
@@ -21,6 +21,58 @@ router = APIRouter(tags=["Guardrails"], dependencies=[Depends(verify_api_key)])
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 
 
+_ACCEPTED_PAGE = {"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}
+_REJECTED_PAGE = {"page_index": 0, "proba_approve": 0.1179, "proba_reject": 0.8821, "verdict": "reject"}
+_EXAMPLES = success_examples(
+    "The document was judged. Always 200, accepted or not: read `data.passed`",
+    accepted=(
+        "Accepted: proceed to OCR",
+        envelope(
+            200,
+            "OK",
+            {
+                "passed": True,
+                "reason": None,
+                "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
+                "pages": [_ACCEPTED_PAGE],
+            },
+            RID,
+        ),
+    ),
+    rejected=(
+        "Rejected: stop and answer the client with `reason`",
+        envelope(
+            200,
+            "OK",
+            {
+                "passed": False,
+                "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
+                "document": {"verdict": "reject", "confidence": 0.8821, "n_pages": 1, "n_approve": 0, "n_reject": 1},
+                "pages": [_REJECTED_PAGE],
+            },
+            RID,
+        ),
+    ),
+    pdf_one_bad_page=(
+        "PDF with one rejected page: the whole document is rejected (policy `all`)",
+        envelope(
+            200,
+            "OK",
+            {
+                "passed": False,
+                "reason": "Document rejected by guardrails: 1/2 page(s) rejected (confidence 0.70)",
+                "document": {"verdict": "reject", "confidence": 0.7, "n_pages": 2, "n_approve": 1, "n_reject": 1},
+                "pages": [
+                    _ACCEPTED_PAGE,
+                    {"page_index": 1, "proba_approve": 0.3, "proba_reject": 0.7, "verdict": "reject"},
+                ],
+            },
+            RID,
+        ),
+    ),
+)
+
+
 def get_guardrails_service() -> GuardrailsService:
     return GuardrailsService(get_page_classifier(), get_settings())
 
@@ -28,8 +80,12 @@ def get_guardrails_service() -> GuardrailsService:
 @router.post(
     "/v1/guardrails/check",
     response_model=GuardrailCheckResponse,
-    summary="Classify every page of a document as accepted / reject",
+    operation_id="checkGuardrails",
+    summary="Decide whether a document may proceed to OCR",
     description=(
+        "**Step 1 of the pipeline, synchronous.** Call this first; submit the OCR job only when `data.passed` "
+        "is true, and pass this response's `data` along as the `guardrails` form field of "
+        "`POST /v1/ekstraksi/jobs`.\n\n"
         "Runs the guardrails model on each page (a PDF is rendered page by page; an image is one page) "
         "and aggregates a document verdict. The model is either in this process (`efficientnet`) or the "
         "ML team's model service (`remote`, POST /v1/predict/json); the response is the same either way. "
@@ -40,6 +96,7 @@ def get_guardrails_service() -> GuardrailsService:
         "itself; exactly one of the two."
     ),
     responses={
+        200: _EXAMPLES,
         400: error(
             400, "Bad file (empty, too large, unsupported type, unreadable) or bad intake", "Uploaded file is empty"
         ),

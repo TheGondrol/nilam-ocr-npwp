@@ -5,77 +5,234 @@ info:
     (image or PDF) as accepted / reject with the guardrails model and aggregates a document verdict. Called
     synchronously by ocr-orchestration; always answers 200 with `data.passed` / `data.reason`. The model
     runs in this process (`efficientnet`) or in the ML team''s model service (`remote`). All endpoints
-    except /health require an X-API-Key header.'
+    except /health require an X-API-Key header.
+
+
+    ## Conventions (the same for every nilam-ocr service)
+
+
+    **Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+
+    A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
+
+
+    **Envelope.** Every JSON response, success or error, has the same shape:
+
+    `{status_code, status_desc, message, data, errors, request_id}`. `status_code` always equals the HTTP
+
+    status. On success `errors` is null; on error `data` is null.
+
+
+    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+
+    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+
+    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+
+    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+
+    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+
+
+    **request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has
+    no
+
+    request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+
+    without it the service generates one.
+
+
+    **Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
+
+    background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
+
+    read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
+
+    `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED`. Because
+
+    the request was already answered `202`, a problem with the document itself (unreadable file, no text,
+
+    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.
+
+    '
   version: 1.0.0
+servers:
+- url: /
+  description: This host (where this page is served)
+- url: http://guardrails.nilam-ocr-{environment}.svc.cluster.local:8031
+  description: GKE, from another namespace (e.g. the orchestrator / gateway)
+  variables:
+    environment:
+      enum:
+      - dev
+      - staging
+      - production
+      default: dev
+      description: 'One namespace per environment: nilam-ocr-<environment>'
+- url: http://guardrails:8031
+  description: GKE from the same namespace, or the Docker Compose network
+- url: http://127.0.0.1:8031
+  description: Local development
 paths:
   /health:
     get:
       tags:
       - Health
-      summary: Health check
-      description: Reports service liveness and the active model backend. Does not require an API key.
-      operationId: health_health_get
+      summary: Liveness probe
+      description: Says the process is alive and which implementations are active. Never touches a dependency.
+        Does not require an API key.
+      operationId: getHealth
       responses:
         '200':
-          description: Successful Response
+          description: The process is alive
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy
+                  value:
+                    status: healthy
+                    version: 1.0.0
+                    device: cpu
+                    backends:
+                      guardrails: efficientnet
   /ready:
     get:
       tags:
       - Health
-      summary: Readiness check
+      summary: Readiness probe
       description: 'Liveness vs readiness: /health only says the process is alive and never touches a
         dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
         pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
         otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
         services are deliberately not checked: their outage is reported per job, not by refusing traffic.
         Does not require an API key.'
-      operationId: ready_ready_get
+      operationId: getReadiness
       responses:
         '200':
-          description: Successful Response
+          description: Every required dependency answers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
+              examples:
+                ready:
+                  summary: Ready
+                  value:
+                    status: ready
+                    checks: {}
         '503':
-          description: A required dependency is unavailable
+          description: A required dependency is unavailable; the pod is taken out of the Service
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: not_ready
+                checks: {}
   /v1/guardrails/check:
     post:
       tags:
       - Guardrails
-      summary: Classify every page of a document as accepted / reject
-      description: 'Runs the guardrails model on each page (a PDF is rendered page by page; an image is
-        one page) and aggregates a document verdict. The model is either in this process (`efficientnet`)
-        or the ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either
-        way. Always returns 200 with a report; `data.passed` tells whether the document should proceed
-        to OCR, and `data.reason` says why not (the orchestrator answers 422 with it). The orchestrator
-        forwards `data` to the OCR service as the guardrails result.
+      summary: Decide whether a document may proceed to OCR
+      description: '**Step 1 of the pipeline, synchronous.** Call this first; submit the OCR job only
+        when `data.passed` is true, and pass this response''s `data` along as the `guardrails` form field
+        of `POST /v1/ekstraksi/jobs`.
+
+
+        Runs the guardrails model on each page (a PDF is rendered page by page; an image is one page)
+        and aggregates a document verdict. The model is either in this process (`efficientnet`) or the
+        ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either way.
+        Always returns 200 with a report; `data.passed` tells whether the document should proceed to OCR,
+        and `data.reason` says why not (the orchestrator answers 422 with it). The orchestrator forwards
+        `data` to the OCR service as the guardrails result.
 
 
         Send `request_id` plus the document as `file`, or as `file_url` and this service fetches it itself;
         exactly one of the two.'
-      operationId: check_v1_guardrails_check_post
+      operationId: checkGuardrails
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_check_v1_guardrails_check_post'
+              $ref: '#/components/schemas/Body_checkGuardrails'
         required: true
       responses:
         '200':
-          description: Successful Response
+          description: 'The document was judged. Always 200, accepted or not: read `data.passed`'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GuardrailCheckResponse'
+              examples:
+                accepted:
+                  summary: 'Accepted: proceed to OCR'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                rejected:
+                  summary: 'Rejected: stop and answer the client with `reason`'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: false
+                      reason: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+                      document:
+                        verdict: reject
+                        confidence: 0.8821
+                        n_pages: 1
+                        n_approve: 0
+                        n_reject: 1
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.1179
+                        proba_reject: 0.8821
+                        verdict: reject
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                pdf_one_bad_page:
+                  summary: 'PDF with one rejected page: the whole document is rejected (policy `all`)'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: false
+                      reason: 'Document rejected by guardrails: 1/2 page(s) rejected (confidence 0.70)'
+                      document:
+                        verdict: reject
+                        confidence: 0.7
+                        n_pages: 2
+                        n_approve: 1
+                        n_reject: 1
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      - page_index: 1
+                        proba_approve: 0.3
+                        proba_reject: 0.7
+                        verdict: reject
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
           description: Bad file (empty, too large, unsupported type, unreadable) or bad intake
           content:
@@ -146,7 +303,7 @@ paths:
       - APIKeyHeader: []
 components:
   schemas:
-    Body_check_v1_guardrails_check_post:
+    Body_checkGuardrails:
       properties:
         request_id:
           type: string
@@ -172,7 +329,7 @@ components:
       type: object
       required:
       - request_id
-      title: Body_check_v1_guardrails_check_post
+      title: Body_checkGuardrails
     DocumentResult:
       properties:
         verdict:
@@ -181,32 +338,37 @@ components:
           - accepted
           - reject
           title: Verdict
-          description: accepted hanya kalau lolos kebijakan dokumen (GUARDRAILS_DOCUMENT_POLICY)
+          description: 'Document verdict. Default policy `all`: accepted only when every page is accepted'
+          examples:
+          - accepted
         confidence:
           type: number
           maximum: 1.0
           minimum: 0.0
           title: Confidence
-          description: 'Keyakinan pada vonis: accepted -> proba_approve halaman terlemah; reject -> proba_reject
-            tertinggi'
+          description: Confidence in the verdict. accepted -> the lowest `proba_approve` over the pages
+            (the weakest page decides); reject -> the highest `proba_reject` among the rejected pages
           examples:
           - 0.9821
         n_pages:
           type: integer
           minimum: 0.0
           title: N Pages
+          description: Pages judged (a PDF is capped at 20)
           examples:
           - 2
         n_approve:
           type: integer
           minimum: 0.0
           title: N Approve
+          description: Pages with verdict `accepted`
           examples:
           - 2
         n_reject:
           type: integer
           minimum: 0.0
           title: N Reject
+          description: Pages with verdict `reject`
           examples:
           - 0
       type: object
@@ -222,24 +384,30 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           examples:
           - 400
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           examples:
           - Bad Request
         message:
           type: string
           title: Message
+          description: Human-readable cause; safe to log
           examples:
           - Uploaded file is empty
         data:
           type: 'null'
           title: Data
+          description: Always null on error
         errors:
           type: string
           title: Errors
+          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
+            names a different field every time); for every other status it repeats `message`
           examples:
           - Uploaded file is empty
         request_id:
@@ -248,6 +416,8 @@ components:
           - type: 'null'
           title: Request Id
           description: Present when the error is tied to a known request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
       type: object
       required:
       - status_code
@@ -260,29 +430,35 @@ components:
         status_code:
           type: integer
           title: Status Code
+          description: Same as the HTTP status code
           default: 200
           examples:
           - 200
         status_desc:
           type: string
           title: Status Desc
+          description: Reason phrase of `status_code`
           default: OK
           examples:
           - OK
         message:
           type: string
           title: Message
+          description: Human-readable outcome
           default: OK
           examples:
           - OK
         errors:
           type: 'null'
           title: Errors
+          description: Always null on success
         request_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
@@ -296,16 +472,20 @@ components:
         passed:
           type: boolean
           title: Passed
-          description: true -> dokumen boleh lanjut ke OCR; false -> orkestrator menolak (422) dengan
-            `reason`
+          description: 'true: send the document on to the OCR stage. false: stop, and answer the client
+            with `reason` (the sequence diagram uses 422 for this)'
+          examples:
+          - true
         reason:
           anyOf:
           - type: string
           - type: 'null'
           title: Reason
-          description: Alasan penolakan; null kalau passed
+          description: Why the document was rejected; null when `passed`. The model is a binary classifier,
+            so the reason can only state how many pages were rejected and how confidently, not *what*
+            is wrong with them
           examples:
-          - 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+          - null
         document:
           $ref: '#/components/schemas/DocumentResult'
         pages:
@@ -313,6 +493,7 @@ components:
             $ref: '#/components/schemas/PageResult'
           type: array
           title: Pages
+          description: One entry per page, in page order
       type: object
       required:
       - passed
@@ -324,16 +505,19 @@ components:
         status:
           type: string
           title: Status
+          description: Always `healthy` while the process is alive
           examples:
           - healthy
         version:
           type: string
           title: Version
+          description: Service version
           examples:
           - 1.0.0
         device:
           type: string
           title: Device
+          description: Where this service computes
           examples:
           - cpu
         backends:
@@ -341,9 +525,11 @@ components:
             type: string
           type: object
           title: Backends
-          description: Backend model aktif di service ini
+          description: Active implementation per concern (model backend, storage). Useful to confirm a
+            deployment
           examples:
           - ekstraksi: paddle
+            storage: postgres
       type: object
       required:
       - status
@@ -357,6 +543,7 @@ components:
           type: integer
           minimum: 0.0
           title: Page Index
+          description: 0-based page number; an image is always page 0
           examples:
           - 0
         proba_approve:
@@ -364,6 +551,7 @@ components:
           maximum: 1.0
           minimum: 0.0
           title: Proba Approve
+          description: Model probability of `accepted`
           examples:
           - 0.9821
         proba_reject:
@@ -371,6 +559,7 @@ components:
           maximum: 1.0
           minimum: 0.0
           title: Proba Reject
+          description: Model probability of `reject`; `proba_approve + proba_reject = 1`
           examples:
           - 0.0179
         verdict:
@@ -379,6 +568,7 @@ components:
           - accepted
           - reject
           title: Verdict
+          description: '`reject` when `proba_reject` reaches the reject threshold (0.5 by default)'
           examples:
           - accepted
       type: object
@@ -396,6 +586,7 @@ components:
           - ready
           - not_ready
           title: Status
+          description: '`ready` (HTTP 200) when every check is `ok`, else `not_ready` (HTTP 503)'
           examples:
           - ready
         checks:
@@ -406,7 +597,7 @@ components:
             - failed
           type: object
           title: Checks
-          description: Dependensi wajib service ini, satu entri per dependensi
+          description: One entry per REQUIRED dependency of this service; empty when it has none
           examples:
           - database: ok
       type: object
@@ -421,7 +612,7 @@ components:
       in: header
       name: X-API-Key
 tags:
-- name: Health
-  description: Liveness check
 - name: Guardrails
   description: Page-level accepted/reject classification
+- name: Health
+  description: Liveness and readiness probes; no API key

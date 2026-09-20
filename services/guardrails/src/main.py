@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
 app = create_app(
     settings=settings,
     title="OCR NPWP Guardrails API",
+    service_name="guardrails",
     description=(
         "Pipeline step 1 for Indonesian NPWP documents: classifies every page of the uploaded "
         "document (image or PDF) as accepted / reject with the guardrails model and aggregates a "
@@ -40,5 +41,6 @@ app = create_app(
     # Model dimuat di lifespan sebelum server menerima koneksi, jadi pod yang
     # menjawab sudah pasti memegang model: tidak ada dependensi lain untuk diperiksa.
     readiness={},
+    backends_example={"guardrails": "efficientnet"},
     lifespan=lifespan,
 )
