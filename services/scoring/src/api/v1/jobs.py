@@ -10,7 +10,7 @@ from ocr_common.envelope import envelope
 from ocr_common.errors import ServiceError
 from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, JobStatusResponse, error
 from ocr_common.security import verify_api_key
-from src.api.v1.scoring import get_scoring_service
+from src.api.v1.scoring import get_confidence_service
 from src.core.pipeline import get_pipeline
 from src.schemas.scoring import ScoringJobRequest
 from src.services.job_service import ScoringJobService
@@ -19,7 +19,7 @@ router = APIRouter(tags=["Pipeline"], dependencies=[Depends(verify_api_key)])
 
 
 def get_job_service() -> ScoringJobService:
-    return ScoringJobService(get_pipeline(), get_scoring_service())
+    return ScoringJobService(get_pipeline(), get_confidence_service())
 
 
 @router.post(
@@ -29,9 +29,12 @@ def get_job_service() -> ScoringJobService:
     summary="Submit a structured document to the async pipeline (scoring stage, last)",
     description=(
         "Called by the structuring service. Records the job (`scoring.jobs`, idempotent per request_id), "
-        "answers **202 immediately**, then in the background: scores the document, stores the result "
-        "(`scoring.results`), and POSTs the stage callback to the orchestrator. As the last stage, its "
-        "callback carries the **final result** (`result`: document_type, fields, scoring, guardrails).\n\n"
+        "answers **202 immediately**, then in the background: builds the ML team's scoring payload from the "
+        "chained guardrails + OCR + structuring results, runs the trust model, stores the result "
+        "(`scoring.results`: npwp_confidence, name_confidence, and the payload that was scored), and POSTs the "
+        "stage callback to the orchestrator. As the last stage, its callback carries the **final result** "
+        "(`result`: document_type, fields, scoring {npwp_confidence, name_confidence}, guardrails). No document "
+        "score and no approve/reject decision: thresholds are the orchestrator's.\n\n"
         "Sending the same request_id again does not run the work twice (`duplicate: true`), unless the "
         "previous attempt FAILED."
     ),
@@ -41,7 +44,9 @@ def get_job_service() -> ScoringJobService:
     },
 )
 async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depends(get_job_service)):
-    data = await service.submit(body.request_id, body.document_type, body.guardrails, body.structuring.model_dump())
+    data = await service.submit(
+        body.request_id, body.document_type, body.guardrails, body.ocr, body.structuring.model_dump()
+    )
     return envelope(202, "Accepted", data, body.request_id)
 
 

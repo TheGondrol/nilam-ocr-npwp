@@ -22,15 +22,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      tags:
+      - Health
+      summary: Readiness check
+      description: 'Liveness vs readiness: /health only says the process is alive and never touches a
+        dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
+        pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
+        otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
+        services are deliberately not checked: their outage is reported per job, not by refusing traffic.
+        Does not require an API key.'
+      operationId: ready_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: A required dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
   /v1/scoring/jobs:
     post:
       tags:
       - Pipeline
       summary: Submit a structured document to the async pipeline (scoring stage, last)
       description: 'Called by the structuring service. Records the job (`scoring.jobs`, idempotent per
-        request_id), answers **202 immediately**, then in the background: scores the document, stores
-        the result (`scoring.results`), and POSTs the stage callback to the orchestrator. As the last
-        stage, its callback carries the **final result** (`result`: document_type, fields, scoring, guardrails).
+        request_id), answers **202 immediately**, then in the background: builds the ML team''s scoring
+        payload from the chained guardrails + OCR + structuring results, runs the trust model, stores
+        the result (`scoring.results`: npwp_confidence, name_confidence, and the payload that was scored),
+        and POSTs the stage callback to the orchestrator. As the last stage, its callback carries the
+        **final result** (`result`: document_type, fields, scoring {npwp_confidence, name_confidence},
+        guardrails). No document score and no approve/reject decision: thresholds are the orchestrator''s.
 
 
         Sending the same request_id again does not run the work twice (`duplicate: true`), unless the
@@ -132,11 +160,60 @@ paths:
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/scoring/confidence:
+    post:
+      tags:
+      - Scoring
+      summary: Per-field confidence from the ML team's trust model
+      description: 'The ML team''s scoring contract: the payload carries the chained results of the previous
+        stages, the answer is the probability that each extracted field is correct (`npwp_confidence`,
+        `name_confidence`), from `weights/trust_model.joblib` (imputer -> scaler -> logistic regression,
+        one feature row per field). There is no document score and no approve/reject decision here; thresholds
+        are the caller''s. A field whose value is null gets a null confidence. Any other null is treated
+        as missing and filled by the model''s own median imputer.'
+      operationId: confidence_v1_scoring_confidence_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfidenceRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfidenceResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.npwp_score: Input should be a valid number'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
   /v1/scoring/score:
     post:
       tags:
       - Scoring
-      summary: Score a structured document
+      summary: 'Legacy: heuristic document score (used only by the legacy extract-ocr contract)'
       description: Combines per-field confidence and format validation into one document score (the `guardrails`
         value of extract-ocr), then applies the configured thresholds to decide approve / review / reject.
       operationId: score_v1_scoring_score_post
@@ -190,6 +267,179 @@ paths:
       - APIKeyHeader: []
 components:
   schemas:
+    ConfidenceRequest:
+      properties:
+        npwp:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Npwp
+          examples:
+          - '123456789012000'
+        npwp_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Score
+          examples:
+          - 0.98
+        npwp_has_homoglyph:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Npwp Has Homoglyph
+          examples:
+          - false
+        npwp_candidate_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Candidate Count
+          examples:
+          - 1
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          examples:
+          - PT CONTOH INDONESIA
+        name_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Score
+          examples:
+          - 0.96
+        name_corrected:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Name Corrected
+          examples:
+          - true
+        n_boxes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Boxes
+          examples:
+          - 34
+        num_pages:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Num Pages
+          examples:
+          - 1
+        avg_doc_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Avg Doc Score
+          examples:
+          - 0.912
+        min_doc_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Min Doc Score
+          examples:
+          - 0.62
+        flag:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Flag
+          examples:
+          - false
+        guardrail_probability:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrail Probability
+          examples:
+          - 0.9821
+      type: object
+      title: ConfidenceRequest
+      description: Payload dari ML engineer. Semua nilai adalah hasil berantai tahap sebelumnya; null
+        = tidak tersedia.
+    ConfidenceResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/ConfidenceResult'
+      type: object
+      required:
+      - data
+      title: ConfidenceResponse
+    ConfidenceResult:
+      properties:
+        npwp_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Confidence
+          description: P(nomor NPWP benar); null kalau `npwp` kosong
+          examples:
+          - 0.93
+        name_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Confidence
+          description: P(nama benar); null kalau `name` kosong
+          examples:
+          - 0.88
+      type: object
+      required:
+      - npwp_confidence
+      - name_confidence
+      title: ConfidenceResult
     ErrorResponse:
       properties:
         status_code:
@@ -468,6 +718,32 @@ components:
       required:
       - data
       title: JobStatusResponse
+    ReadyResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - not_ready
+          title: Status
+          examples:
+          - ready
+        checks:
+          additionalProperties:
+            type: string
+            enum:
+            - ok
+            - failed
+          type: object
+          title: Checks
+          description: Dependensi wajib service ini, satu entri per dependensi
+          examples:
+          - database: ok
+      type: object
+      required:
+      - status
+      - checks
+      title: ReadyResponse
     ScoreReport:
       properties:
         score:
@@ -587,7 +863,8 @@ components:
             type: object
           - type: 'null'
           title: Ocr
-          description: Hasil tahap OCR. Belum dipakai scorer heuristic; tersedia untuk model scoring nanti
+          description: 'Hasil tahap OCR: n_boxes, num_pages, avg/min_doc_score di payload model dihitung
+            dari `blocks`'
         structuring:
           $ref: '#/components/schemas/StructuringPayload'
           description: Hasil tahap structuring

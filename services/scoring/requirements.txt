@@ -8,3 +8,7 @@ sqlalchemy==2.0.52
 # Windows untuk Python 3.12, jadi dev lokal harus compile dari source.
 greenlet==3.2.4
 asyncpg==0.31.0
+# weights/trust_model.joblib dilatih dengan scikit-learn 1.9.0: versi HARUS sama (beda versi = gagal start).
+scikit-learn==1.9.0
+joblib==1.6.0
+numpy==2.3.5

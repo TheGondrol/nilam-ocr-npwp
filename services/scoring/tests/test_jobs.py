@@ -9,7 +9,7 @@ import pytest
 from ocr_common.jobs import STAGE_SCORING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, make_client, wait_for_job
 from src.api.v1.jobs import get_job_service
-from src.api.v1.scoring import get_scoring_service
+from src.api.v1.scoring import get_confidence_service
 from src.main import app
 from src.services.job_service import ScoringJobService
 
@@ -32,7 +32,7 @@ STRUCTURING = {
 def harness():
     callback = RecordingCallback()
     pipeline = StagePipeline(stage=STAGE_SCORING, repository=InMemoryJobRepository(), callback=callback)
-    service = ScoringJobService(pipeline, get_scoring_service())
+    service = ScoringJobService(pipeline, get_confidence_service())
     app.dependency_overrides[get_job_service] = lambda: service
     # Context manager: satu event loop selama test, supaya task background hidup.
     with make_client(app) as client:
@@ -45,7 +45,7 @@ def _payload(request_id, document_type="npwp"):
         "request_id": request_id,
         "document_type": document_type,
         "guardrails": GUARDRAILS,
-        "ocr": {"blocks": []},
+        "ocr": {"blocks": [{"text": "NPWP : 12.345.678.9-012.345", "confidence": 0.96, "page": 0}]},
         "structuring": STRUCTURING,
     }
 
@@ -64,8 +64,15 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
 
     job = wait_for_job(client, "/v1/scoring/jobs/REQ_1")
     assert job["status"] == "DONE"
-    assert 0 <= job["result"]["score"] <= 1
-    assert job["result"]["decision"] in {"approve", "review", "reject"}
+    result = job["result"]
+    # Keluaran ML engineer: dua confidence per field. Tidak ada skor dokumen / keputusan.
+    assert set(result) == {"npwp_confidence", "name_confidence", "payload"}
+    assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
+    # Payload yang dinilai model ikut tersimpan, disusun dari hasil berantai tahap sebelumnya.
+    assert result["payload"]["npwp"] == "123456789012345"
+    assert result["payload"]["name"] == "BUDI SANTOSO"
+    assert result["payload"]["n_boxes"] == 1
+    assert result["payload"]["guardrail_probability"] is None  # GUARDRAILS di test ini tanpa `document`
 
     # Tahap terakhir: callback membawa hasil akhir untuk requests.final_result.
     assert len(callback.calls) == 1
@@ -78,7 +85,7 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
             "nama": {"value": "BUDI SANTOSO", "confidence": 0.95},
             "nama_badan": {"value": None, "confidence": 0.0},
         },
-        "scoring": job["result"],
+        "scoring": {"npwp_confidence": result["npwp_confidence"], "name_confidence": result["name_confidence"]},
         "guardrails": GUARDRAILS,
     }
 

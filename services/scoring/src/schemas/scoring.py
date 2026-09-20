@@ -36,6 +36,37 @@ class ScoreResponse(SuccessEnvelope):
     data: ScoreReport
 
 
+class ConfidenceRequest(BaseModel):
+    """Payload dari ML engineer. Semua nilai adalah hasil berantai tahap sebelumnya; null = tidak tersedia."""
+
+    npwp: str | None = Field(None, examples=["123456789012000"])
+    npwp_score: float | None = Field(None, ge=0, le=1, examples=[0.98])
+    npwp_has_homoglyph: bool | None = Field(None, examples=[False])
+    npwp_candidate_count: int | None = Field(None, ge=0, examples=[1])
+    name: str | None = Field(None, examples=["PT CONTOH INDONESIA"])
+    name_score: float | None = Field(None, ge=0, le=1, examples=[0.96])
+    name_corrected: bool | None = Field(None, examples=[True])
+    n_boxes: int | None = Field(None, ge=0, examples=[34])
+    num_pages: int | None = Field(None, ge=0, examples=[1])
+    avg_doc_score: float | None = Field(None, ge=0, le=1, examples=[0.912])
+    min_doc_score: float | None = Field(None, ge=0, le=1, examples=[0.62])
+    flag: bool | None = Field(None, examples=[False])
+    guardrail_probability: float | None = Field(None, ge=0, le=1, examples=[0.9821])
+
+
+class ConfidenceResult(BaseModel):
+    npwp_confidence: float | None = Field(
+        ..., ge=0, le=1, examples=[0.93], description="P(nomor NPWP benar); null kalau `npwp` kosong"
+    )
+    name_confidence: float | None = Field(
+        ..., ge=0, le=1, examples=[0.88], description="P(nama benar); null kalau `name` kosong"
+    )
+
+
+class ConfidenceResponse(SuccessEnvelope):
+    data: ConfidenceResult
+
+
 class StructuredField(FieldValue):
     # extra="allow": `source` dan field lain dari ServiceStructuring diterima apa adanya.
     model_config = ConfigDict(extra="allow")
@@ -54,6 +85,7 @@ class ScoringJobRequest(BaseModel):
         None, description="Hasil guardrails dari orkestrator; ikut masuk ke hasil akhir"
     )
     ocr: dict[str, Any] | None = Field(
-        None, description="Hasil tahap OCR. Belum dipakai scorer heuristic; tersedia untuk model scoring nanti"
+        None,
+        description="Hasil tahap OCR: n_boxes, num_pages, avg/min_doc_score di payload model dihitung dari `blocks`",
     )
     structuring: StructuringPayload = Field(..., description="Hasil tahap structuring")

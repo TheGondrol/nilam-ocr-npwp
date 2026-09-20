@@ -57,7 +57,11 @@ def test_unsupported_document_type():
 
 
 def test_health_lists_backend(client):
-    assert client.get("/health").json()["backends"] == {"scoring": "heuristic", "storage": "memory"}
+    assert client.get("/health").json()["backends"] == {
+        "scoring": "trust_model",
+        "legacy_score": "heuristic",
+        "storage": "memory",
+    }
 
 
 def test_http_score(client, auth):

@@ -164,7 +164,7 @@ def async_pipeline(client: httpx.Client) -> bool:
         for name, field in jobs["structuring"]["result"]["fields"].items():
             print(f"  {name:<12} {field['value']!r:<35} conf={field['confidence']}")
         score = jobs["scoring"]["result"]
-        print(f"  score = {score['score']} decision = {score['decision']}")
+        print(f"  npwp_confidence = {score['npwp_confidence']}  name_confidence = {score['name_confidence']}")
 
     # Idempoten: request_id yang sama tidak diproses ulang.
     again = client.post(

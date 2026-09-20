@@ -28,6 +28,11 @@ weights/*
 # Bobot model per service: terlalu besar untuk git, mount ke container
 services/*/weights/*
 !services/*/weights/.gitkeep
+# 3 KB dan dibutuhkan test scoring: ikut di-commit (bobot guardrails 16 MB tetap tidak).
+!services/scoring/weights/trust_model.joblib
 
 # Extra: UI pelacak pipeline untuk uji coba lokal (tools/tracker); belum bagian dari deliverable.
 tools/tracker/
+
+# Catatan pribadi (ringkasan repo + GKE); tidak ikut di-commit.
+docs/

@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from ocr_common.app import create_app
+from ocr_common.app import create_app, database_readiness
 from src.api.v1 import jobs, scoring
+from src.api.v1.scoring import get_trust_model
 from src.core.config import get_settings
 from src.core.pipeline import get_pipeline
 from src.models.scoring import get_scorer
@@ -16,6 +17,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_scorer()  # gagal saat boot kalau backend salah konfigurasi
+    get_trust_model()  # file model hilang / versi scikit-learn beda -> gagal saat boot, bukan di job pertama
     if settings.database_url:
         # Import di sini: sqlalchemy hanya dibutuhkan kalau DATABASE_URL diisi.
         from ocr_common.database import check_connection
@@ -48,8 +50,10 @@ app = create_app(
     ],
     routers=[jobs.router, scoring.router],
     backends={
-        "scoring": settings.scoring_backend,
+        "scoring": "trust_model",
+        "legacy_score": settings.scoring_backend,
         "storage": "postgres" if settings.database_url else "memory",
     },
+    readiness=database_readiness(settings.database_url),
     lifespan=lifespan,
 )

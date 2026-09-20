@@ -1,29 +1,35 @@
 """
-Tahap SCORING di pipeline async, tahap terakhir: terima job dari
-ServiceStructuring, jawab 202, lalu di background nilai dokumen, simpan
-hasil, dan kirim callback yang membawa HASIL AKHIR ke Orkestrasi (yang
-menyimpannya sebagai requests.final_result). Tidak ada handoff.
+Tahap SCORING di pipeline async, tahap terakhir: terima job dari ServiceStructuring, jawab 202,
+lalu di background susun payload ML engineer dari hasil berantai tahap sebelumnya, hitung confidence
+per field dengan trust model, simpan hasil, dan kirim callback yang membawa HASIL AKHIR ke Orkestrasi
+(yang menyimpannya sebagai requests.final_result). Tidak ada handoff.
 Mekanismenya ada di ocr_common/jobs.py.
+
+Tidak ada skor dokumen maupun keputusan approve/review/reject: keluaran ML engineer hanya
+{"npwp_confidence", "name_confidence"}. Ambang batas adalah urusan pemanggil (Orkestrasi).
 """
 
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
+from ocr_common.errors import ServiceError
 from ocr_common.jobs import StagePipeline
-from src.services.scoring_service import ScoringService
+from ocr_common.npwp import DOCUMENT_TYPE
+from src.services.confidence_service import ConfidenceService
 
 
 class ScoringJobService:
-    def __init__(self, pipeline: StagePipeline, scoring: ScoringService):
+    def __init__(self, pipeline: StagePipeline, confidence: ConfidenceService):
         self._pipeline = pipeline
-        self._scoring = scoring
+        self._confidence = confidence
 
     async def submit(
         self,
         request_id: str,
         document_type: str,
         guardrails: dict[str, Any] | None,
+        ocr: dict[str, Any] | None,
         structuring: dict[str, Any],
     ) -> dict[str, Any]:
         fields = {
@@ -32,11 +38,22 @@ class ScoringJobService:
         }
 
         async def work() -> dict[str, Any]:
-            # Sinkron dan CPU-bound: di threadpool supaya event loop tetap menerima job lain.
-            return await run_in_threadpool(self._scoring.score, document_type, fields)
+            if document_type != DOCUMENT_TYPE:
+                # Model dilatih hanya dengan kartu NPWP.
+                raise ServiceError(400, f"Unsupported document_type: {document_type}. Supported: ['{DOCUMENT_TYPE}']")
+            payload = self._confidence.payload_from_chain(guardrails, ocr, structuring)
+            # predict_proba sinkron dan CPU-bound: di threadpool supaya event loop tetap menerima job lain.
+            result = await run_in_threadpool(self._confidence.predict, payload)
+            # Payload ikut disimpan: jejak audit atas angka apa persisnya yang dinilai model.
+            return {**result, "payload": payload}
 
         def final_result(scoring: dict[str, Any]) -> dict[str, Any]:
-            return {"document_type": document_type, "fields": fields, "scoring": scoring, "guardrails": guardrails}
+            return {
+                "document_type": document_type,
+                "fields": fields,
+                "scoring": {key: scoring[key] for key in ("npwp_confidence", "name_confidence")},
+                "guardrails": guardrails,
+            }
 
         return await self._pipeline.submit(request_id, work, callback_result=final_result)
 

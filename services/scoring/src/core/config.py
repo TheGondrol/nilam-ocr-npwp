@@ -9,7 +9,12 @@ class Settings(PipelineSettings):
     # callback-nya yang membawa hasil akhir ke Orkestrasi.
     port: int = 8033
 
-    # Backend (implementasi model). Nama harus terdaftar di src/models/scoring.py.
+    # Model kepercayaan per field dari ML engineer (pipeline + /v1/scoring/confidence).
+    scoring_model_path: str = "weights/trust_model.joblib"
+
+    # HANYA endpoint lama /v1/scoring/score (dipakai kontrak lama extract-ocr): skor dokumen
+    # heuristik + ambang approve/review/reject. Bukan dari ML engineer; pipeline tidak memakainya.
+    # Nama harus terdaftar di src/models/scoring.py.
     scoring_backend: str = "heuristic"
 
     # Ambang batas keputusan (aturan bisnis, bukan bagian dari model)
