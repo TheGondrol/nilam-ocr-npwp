@@ -216,6 +216,7 @@ Semua service (`ocr_common.config.BaseServiceSettings`):
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
 | `API_KEY` | **Ya** | – | Header `X-API-Key` yang harus dikirim pemanggil. `MOCK_API_KEY` juga diterima. Tidak boleh kosong; service gagal start |
+| `AUTH_DISABLED` | Tidak | `false` | `true` = pemeriksaan `X-API-Key` dimatikan (dev / uji coba lokal saja; service mencatat peringatan saat start). `API_KEY` tetap wajib karena dipakai sebagai key keluar |
 | `SERVICE_BASE_URL` | Tidak | – | Nilai `servers` di OpenAPI (`/docs`) |
 | `PORT` | Tidak | per service | 8030 / 8031 / 8032 / 8033 |
 | `MAX_UPLOAD_BYTES` | Tidak | `5242880` | Berlaku untuk `file` maupun `file_url` |
@@ -237,8 +238,9 @@ ekstraksi:
 
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
-| `EKSTRAKSI_BACKEND` | Tidak | `mock` | `mock` atau `paddle` |
-| `EKSTRAKSI_OCR_URL` | Jika `paddle` | – | Service PaddleOCR, mis. `http://10.213.128.67:8070` |
+| `EKSTRAKSI_BACKEND` | Tidak | `mock` | `remote` (service model ML engineer, `/v1/predict/json`), `paddle` (API lama PaddleOCR, `/ocr`), atau `mock` |
+| `EKSTRAKSI_OCR_URL` | Jika `remote` / `paddle` | – | `remote`: mis. `http://localhost:8082`; `paddle`: mis. `http://10.213.128.67:8070` |
+| `EKSTRAKSI_OCR_API_KEY` | Tidak | – | Hanya `remote`: `X-API-Key` yang dikirim **ke service model** (bukan `API_KEY` service ini) |
 | `EKSTRAKSI_OCR_TIMEOUT_SECONDS` | Tidak | `30.0` | |
 | `GUARDRAILS_SERVICE_URL` / `STRUCTURING_SERVICE_URL` / `SCORING_SERVICE_URL` | Tidak | `http://127.0.0.1:803x` | Alamat service lain. Pipeline async hanya memakai `STRUCTURING_*`; kontrak lama memakai ketiganya |
 | `GUARDRAILS_API_KEY` / `STRUCTURING_API_KEY` / `SCORING_API_KEY` | Tidak | = `API_KEY` | Key service lain, kalau berbeda |
@@ -361,7 +363,19 @@ curl -X POST http://localhost:8081/v1/predict/json -H "X-API-Key: dummy-key" -F 
 
 Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** ke orkestrator (`POST /v1/guardrails/check`) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: `request_id`, `file_url` (unduh dari MinIO), validasi tipe/ukuran sebelum berkas dikirim, envelope, dan `passed`/`reason`. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
 
-**Ekstraksi, backend `paddle` (sudah ada)**: klien ke PaddleOCR PP-OCRv6 (`POST {EKSTRAKSI_OCR_URL}/ocr`, multipart `file`). Pemetaan response `pages[].texts[]{text, score, poly}` → `blocks[]{text, confidence, bbox, page}`, `models.detection+recognition` → `model`. File yang tidak terbaca (`num_pages: 0`) → `blocks: []`, di pipeline menjadi 400 `No text lines to structure` dari structuring. Aktifkan dengan `EKSTRAKSI_BACKEND=paddle` + `EKSTRAKSI_OCR_URL`.
+**Ekstraksi, backend `remote` (sudah ada)**: klien ke service model ekstraksi milik ML engineer. Kontrak model:
+
+```bash
+curl -X POST http://localhost:8082/v1/predict/json -H "X-API-Key: dummy-key" -F "file=@sample_npwp.jpg"
+# [{"page_index": 0,
+#   "rec_texts":  ["npwp", "KPP PRATAMA WATAMPONE", "95.844.800.1-805.000", "RAHMAT HIDAYAT", ...],
+#   "rec_scores": [0.9847, 0.9804, 0.99996, 0.9931, ...],
+#   "rec_polys":  [[[260,155],[610,178],[599,352],[249,329]], ...]}]
+```
+
+Satu elemen per halaman, dan ketiga array-nya **paralel** (indeks `i` = satu baris teks): itu hasil mentah PaddleOCR. Pemetaan: `rec_texts[i]` → `text`, `rec_scores[i]` → `confidence` (dibulatkan 4 desimal), `rec_polys[i]` (4 titik, bisa miring) → `bbox` kotak tegak yang melingkupinya, `page_index` → `page` (default: posisi elemen). Teks kosong dilewati; `[]` → `blocks: []` (di pipeline menjadi `No text lines to structure` dari structuring). `rec_polys` boleh tidak ada (`bbox: null`), tapi kalau ada harus sejajar. Envelope `{"data": [...]}` juga diterima. Array yang **tidak sama panjang** menjadi 500 `ekstraksi OCR model returned an unexpected response`, bukan dipotong diam-diam: confidence yang menempel ke baris yang salah akan merusak skor dokumen. Response tidak membawa identitas model, jadi `data.model` selalu `null` di backend ini. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya. Aktifkan dengan `EKSTRAKSI_BACKEND=remote` + `EKSTRAKSI_OCR_URL` (+ `EKSTRAKSI_OCR_API_KEY`); kontrak **kita** (`/v1/ekstraksi/jobs`, `/v1/ekstraksi/extract`, `extract-ocr`) tidak berubah. Response asli di atas disimpan sebagai fixture test (`services/ekstraksi/tests/fixtures/remote_npwp_response.json`). Test live: `cd services/ekstraksi && EKSTRAKSI_REMOTE_URL=http://localhost:8082 EKSTRAKSI_REMOTE_API_KEY=dummy-key python -m pytest tests/test_ekstraksi_remote_live.py`.
+
+**Ekstraksi, backend `paddle` (API lama)**: klien ke PaddleOCR PP-OCRv6 (`POST {EKSTRAKSI_OCR_URL}/ocr`, multipart `file`). Pemetaan response `pages[].texts[]{text, score, poly}` → `blocks[]{text, confidence, bbox, page}`, `models.detection+recognition` → `model`. File yang tidak terbaca (`num_pages: 0`) → `blocks: []`, di pipeline menjadi 400 `No text lines to structure` dari structuring. Aktifkan dengan `EKSTRAKSI_BACKEND=paddle` + `EKSTRAKSI_OCR_URL`.
 
 **Menambah backend lain** (structuring dan scoring menunggu dokumentasi modelnya):
 
@@ -391,7 +405,8 @@ Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipe
 
 ## Keterbatasan & Langkah Berikutnya
 
-- Ekstraksi (`paddle`, service PaddleOCR) dan guardrails (`efficientnet`, checkpoint lokal, atau `remote`, service model ML engineer) sudah memakai model sungguhan. Backend `remote` baru diuji terhadap kontrak tertulisnya dan stand-in yang mengikutinya, belum terhadap service model yang asli (`tests/test_guardrails_live.py`); structuring dan scoring masih rule-based / heuristik sampai modelnya tersedia. Model guardrails belum divalidasi dengan foto NPWP asli (lihat catatan di atas).
+- **Structurer `rule_based` belum cocok dengan kartu NPWP asli.** Ia mencari baris berlabel (`NAMA : ...`), padahal kartu asli mencetak nilainya tanpa label. Dengan response OCR asli di fixture ekstraksi (`95.844.800.1-805.000`, `RAHMAT HIDAYAT`, ...): `nomor_npwp` ketemu lewat pola, tapi `nama` dan `nama_badan` `null`, sehingga scoring memberi `0.43` → `reject` untuk dokumen yang terbaca sempurna. Baris `NPWP16:4318 0856 07040052` (NPWP 16 digit / NIK) juga belum punya field. Ini menunggu kontrak model structuring; kalau tetap rule-based, structurer perlu memakai posisi (`bbox`: nama adalah baris tepat di bawah nomor NPWP), yang sudah ikut terkirim di payload `ocr.blocks`.
+- Ekstraksi (`remote` atau `paddle`) dan guardrails (`efficientnet`, checkpoint lokal, atau `remote`, service model ML engineer) sudah memakai model sungguhan. Kedua backend `remote` baru diuji terhadap kontrak tertulisnya dan stand-in yang mengikutinya, belum terhadap service model yang asli (`tests/test_guardrails_live.py`, `tests/test_ekstraksi_remote_live.py`); structuring dan scoring masih rule-based / heuristik sampai modelnya tersedia. Model guardrails belum divalidasi dengan foto NPWP asli (lihat catatan di atas).
 - **Kontrak callback belum disepakati dengan tim orkestrasi.** Path (`/v1/callbacks/stage`), bentuk body, dan bentuk hasil akhir di [Alur Request](#alur-request) adalah usulan dari repo ini; sisi orkestrasi (endpoint callback, `orkestrasi.requests` / `stage_logs`, 422/202, polling) dikerjakan di repo `nilam-ocr-orchestration`. Sampai itu ada, uji callback dengan `SMOKE_CALLBACK_PORT`.
 - **Job hidup di memori proses.** Job jalan sebagai `asyncio` task; kalau proses mati di tengah job (deploy, OOM), baris `jobs` tertinggal `PROCESSING` dan tidak ada callback. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), tapi crash tidak. Orkestrasi perlu timeout per tahap; kalau volume naik, ganti `BackgroundRunner` di `ocr_common/jobs.py` dengan antrean yang tahan restart (mis. worker yang mengambil `jobs.status=PROCESSING` yang basi) tanpa mengubah service.
 - **Callback yang gagal setelah retry hanya dicatat di log**; tidak ada outbox. Orkestrasi bisa merekonsiliasi lewat `GET /v1/<tahap>/jobs/{request_id}`.

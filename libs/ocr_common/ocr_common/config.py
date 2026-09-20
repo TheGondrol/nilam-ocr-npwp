@@ -18,6 +18,12 @@ class BaseServiceSettings(BaseSettings):
     # Pod hijau, API mati. Lebih baik gagal start. MOCK_API_KEY diterima juga
     # supaya .env / script dari mock ocr-* bisa dipakai apa adanya.
     api_key: str = Field(..., min_length=1, validation_alias=AliasChoices("API_KEY", "MOCK_API_KEY"))
+    # Saklar eksplisit untuk mematikan pemeriksaan X-API-Key (dev / uji coba
+    # lokal). Sengaja bukan "API_KEY kosong = tanpa auth": nilai kosong yang
+    # diam-diam mematikan auth adalah jebakan di produksi; saklar bernama
+    # mudah dicari, dan service mencatat peringatan saat aktif. API_KEY tetap
+    # wajib karena juga dipakai sebagai key KELUAR ke service lain.
+    auth_disabled: bool = False
     service_base_url: str | None = None
     port: int = 8000
 

@@ -56,6 +56,10 @@ def create_app(
     # Dibaca oleh security.verify_api_key dan intake.read_image, supaya lib
     # ini tidak perlu meng-import kelas Settings milik service.
     app.state.settings = settings
+    if settings.auth_disabled:
+        logging.getLogger(__name__).warning(
+            "AUTH_DISABLED=true: X-API-Key is NOT checked on this service; only for local development"
+        )
 
     app.add_middleware(RequestIdMiddleware)
     _register_exception_handlers(app)

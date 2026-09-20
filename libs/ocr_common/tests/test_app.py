@@ -50,6 +50,24 @@ def test_missing_api_key_is_401_envelope():
     assert body["errors"] == "Invalid or missing API key"
 
 
+def test_auth_disabled_skips_the_api_key_check():
+    open_app = create_app(
+        settings=BaseServiceSettings(api_key="k", auth_disabled=True, _env_file=None),
+        title="Demo",
+        description="demo",
+        routers=[router],
+    )
+    open_client = TestClient(open_app, raise_server_exceptions=False)
+    assert open_client.post("/v1/echo", files={"file": ("a.jpg", b"x", "image/jpeg")}).status_code == 200
+    # Key salah pun lolos: saklar ini mematikan pemeriksaannya, bukan sekadar mengizinkan header kosong.
+    assert (
+        open_client.post(
+            "/v1/echo", files={"file": ("a.jpg", b"x", "image/jpeg")}, headers={"X-API-Key": "salah"}
+        ).status_code
+        == 200
+    )
+
+
 def test_request_id_header_is_echoed_or_generated():
     response = client.post(
         "/v1/echo", files={"file": ("a.jpg", b"x", "image/jpeg")}, headers={**AUTH, "X-Request-ID": "OCR_1"}

@@ -10,7 +10,9 @@ Blok terurut sesuai urutan baca dari model (atas ke bawah). `page` 0-based,
 berguna untuk PDF multi-halaman.
 
 Implementasi:
-- paddle: klien ke service PaddleOCR (PP-OCRv6) milik ML engineer, POST /ocr.
+- remote: klien ke service model ekstraksi milik ML engineer, POST /v1/predict/json
+  (X-API-Key; hasil mentah PaddleOCR: rec_texts / rec_scores / rec_polys per halaman).
+- paddle: klien ke API lama service PaddleOCR (PP-OCRv6), POST /ocr, tanpa auth.
 - mock: baris ala kartu NPWP yang deterministik (seed dari hash isi file),
   berbentuk "LABEL : NILAI" supaya bisa langsung dimakan structurer. Skenario
   nama file mengikuti mock ocr-npwp: 'servererror' -> 500.
@@ -79,6 +81,77 @@ class PaddleOcrEngine:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+class RemoteOcrEngine:
+    """
+    Klien ke service model ekstraksi milik ML engineer. Kontraknya:
+
+        POST {EKSTRAKSI_OCR_URL}/v1/predict/json
+        header X-API-Key, multipart `file` (gambar atau PDF)
+        -> [{"page_index": 0,
+             "rec_texts":  ["npwp", "95.844.800.1-805.000", ...],
+             "rec_scores": [0.9847, 0.9999, ...],
+             "rec_polys":  [[[x, y], [x, y], [x, y], [x, y]], ...]}, ...]
+
+    Satu elemen per halaman; tiga array-nya PARALEL (indeks i = satu baris
+    teks). Itu bentuk hasil mentah PaddleOCR, beda dengan backend `paddle`
+    (POST /ocr) yang sudah membungkusnya jadi pages[].texts[]{text, score, poly}.
+    Response tidak membawa identitas model, jadi `model` selalu None.
+
+    Envelope {"data": [...]} (gaya service model guardrails) juga diterima.
+    """
+
+    name = "remote"
+    PREDICT_PATH = "/v1/predict/json"
+
+    def __init__(self, client: RemoteModelClient):
+        self._client = client
+
+    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> dict[str, Any]:
+        body = await self._client.post_multipart(
+            self.PREDICT_PATH,
+            filename=filename or "upload",
+            content=content,
+            content_type=content_type or "image/jpeg",
+        )
+        return {"blocks": _parse_rec_pages(body, self._client.name), "model": None}
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
+def _parse_rec_pages(body: Any, name: str) -> list[dict[str, Any]]:
+    """Array paralel -> blocks. Bentuk lain -> 500, bukan ditebak: kalau teks dan skor
+    tidak sejajar, confidence menempel ke baris yang salah dan scoring ikut salah."""
+    unexpected = ServiceError(500, f"{name} returned an unexpected response")
+    pages = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(pages, list):
+        raise unexpected
+
+    blocks: list[dict[str, Any]] = []
+    for position, page in enumerate(pages):
+        if not isinstance(page, dict):
+            raise unexpected
+        texts, scores, polys = page.get("rec_texts"), page.get("rec_scores"), page.get("rec_polys")
+        if not isinstance(texts, list) or not isinstance(scores, list) or len(scores) != len(texts):
+            raise unexpected
+        # bbox opsional di skema kita, jadi rec_polys boleh tidak ada; kalau ada harus sejajar.
+        if polys is None:
+            polys = [None] * len(texts)
+        if not isinstance(polys, list) or len(polys) != len(texts):
+            raise unexpected
+        try:
+            page_index = int(page.get("page_index", position))
+        except (TypeError, ValueError):
+            raise unexpected from None
+
+        for text, score, poly in zip(texts, scores, polys, strict=True):
+            text = str(text or "").strip()
+            if not text:
+                continue
+            blocks.append({"text": text, "confidence": _confidence(score), "bbox": _bbox(poly), "page": page_index})
+    return blocks
 
 
 def _model_name(models: Any) -> str | None:
@@ -184,9 +257,23 @@ def _build_paddle(settings: Settings) -> PaddleOcrEngine:
     return PaddleOcrEngine(client)
 
 
+def _build_remote(settings: Settings) -> RemoteOcrEngine:
+    if not settings.ekstraksi_ocr_url:
+        raise RuntimeError("EKSTRAKSI_OCR_URL is required when EKSTRAKSI_BACKEND=remote")
+    headers = {"X-API-Key": settings.ekstraksi_ocr_api_key} if settings.ekstraksi_ocr_api_key else None
+    client = RemoteModelClient(
+        settings.ekstraksi_ocr_url,
+        settings.ekstraksi_ocr_timeout_seconds,
+        name="ekstraksi OCR model",
+        headers=headers,
+    )
+    return RemoteOcrEngine(client)
+
+
 OCR_BACKENDS: dict[str, Factory] = {
     "mock": lambda settings: MockOcrEngine(),
     "paddle": _build_paddle,
+    "remote": _build_remote,
 }
 
 

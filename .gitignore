@@ -28,3 +28,6 @@ weights/*
 # Bobot model per service: terlalu besar untuk git, mount ke container
 services/*/weights/*
 !services/*/weights/.gitkeep
+
+# Extra: UI pelacak pipeline untuk uji coba lokal (tools/tracker); belum bagian dari deliverable.
+tools/tracker/

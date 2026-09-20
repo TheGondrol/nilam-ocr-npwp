@@ -13,9 +13,13 @@ class Settings(PipelineSettings):
 
     # Backend OCR. Nama harus terdaftar di src/models/ekstraksi.py.
     ekstraksi_backend: str = "mock"
-    # Backend `paddle`: service PaddleOCR milik ML engineer (POST {url}/ocr).
-    # Wajib diisi kalau EKSTRAKSI_BACKEND=paddle.
+    #   remote - service model ekstraksi milik ML engineer (POST {url}/v1/predict/json, X-API-Key)
+    #   paddle - API lama service PaddleOCR (POST {url}/ocr, tanpa auth)
+    #   mock   - baris NPWP deterministik, untuk test
+    # URL wajib diisi untuk `remote` dan `paddle`. API key hanya dipakai `remote`
+    # dan dikirim ke SERVICE MODEL (bukan API_KEY service ini, yang dipakai pemanggil kita).
     ekstraksi_ocr_url: str | None = None
+    ekstraksi_ocr_api_key: str | None = None
     ekstraksi_ocr_timeout_seconds: float = 30.0
 
     # Service lain. Alur async hanya memakai STRUCTURING_* (handoff ke tahap

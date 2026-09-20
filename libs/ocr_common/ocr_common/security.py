@@ -11,7 +11,10 @@ API_KEY_ERROR = "Invalid or missing API key"
 async def verify_api_key(request: Request, api_key: str | None = Security(api_key_header)) -> str:
     # Settings diambil dari app.state (dipasang create_app), bukan di-import:
     # lib ini tidak boleh tahu kelas Settings milik service mana pun.
-    expected = request.app.state.settings.api_key
+    settings = request.app.state.settings
+    if settings.auth_disabled:
+        return api_key or ""
+    expected = settings.api_key
     if not api_key or api_key != expected:
         raise HTTPException(status_code=401, detail=API_KEY_ERROR)
     return api_key
