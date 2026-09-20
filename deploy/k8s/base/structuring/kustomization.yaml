@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# ORCHESTRATION_URL diisi per overlay.
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+# Generator, bukan ConfigMap statis: nama mendapat sufiks hash isi, jadi perubahan
+# konfigurasi otomatis memicu rolling update (env hanya dibaca saat pod start).
+configMapGenerator:
+  - name: structuring-config
+    literals:
+      - PORT=8032
+      - STRUCTURING_BACKEND=npwp_rules
+      - SCORING_SERVICE_URL=http://scoring:8033
+      - PIPELINE_DRAIN_TIMEOUT_SECONDS=30

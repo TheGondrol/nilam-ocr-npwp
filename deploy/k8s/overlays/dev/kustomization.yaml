@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nilam-ocr-dev
+resources:
+  - ../../base
+
+# ENVIRONMENT=dev: lingkungan ter-deploy, SEMUA pengaman aktif (AUTH_DISABLED dan backend
+# mock ditolak, DATABASE_URL + ORCHESTRATION_URL wajib, alamat service tidak boleh localhost).
+# Hanya ENVIRONMENT=local (laptop) yang melonggarkannya; nilai itu tidak boleh ada di sini.
+configMapGenerator:
+  - name: guardrails-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+  - name: ekstraksi-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - EKSTRAKSI_OCR_URL=http://10.213.128.67:8070
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+  - name: structuring-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+  - name: scoring-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+
+images:
+  - name: nilam-ocr-guardrails
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/guardrails
+    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+  - name: nilam-ocr-ekstraksi
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/ekstraksi
+    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+  - name: nilam-ocr-structuring
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/structuring
+    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+  - name: nilam-ocr-scoring
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/scoring
+    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+
+replicas:
+  - name: guardrails
+    count: 1
+  - name: ekstraksi
+    count: 1
+  - name: structuring
+    count: 1
+  - name: scoring
+    count: 1
+
+patches:
+  - target: {kind: ServiceAccount, name: nilam-ocr}
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/iam.gke.io~1gcp-service-account
+        value: nilam-ocr@edm-bribrain-dev-01.iam.gserviceaccount.com
+  - target: {kind: NetworkPolicy, name: allow-orchestration}
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        value: REPLACE_ME-orchestration-namespace

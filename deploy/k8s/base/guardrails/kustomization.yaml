@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# CPU-bound (inference torch). Skalakan dengan replika / HPA, bukan dengan menaikkan thread.
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+# Generator, bukan ConfigMap statis: nama mendapat sufiks hash isi, jadi perubahan
+# konfigurasi otomatis memicu rolling update (env hanya dibaca saat pod start).
+configMapGenerator:
+  - name: guardrails-config
+    literals:
+      - PORT=8031
+      - GUARDRAILS_BACKEND=efficientnet
+      - GUARDRAILS_MODEL_PATH=weights/best_model.pt
+      - GUARDRAILS_DEVICE=cpu
+      - GUARDRAILS_TORCH_THREADS=2

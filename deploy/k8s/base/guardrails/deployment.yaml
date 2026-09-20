@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardrails
+  labels:
+    app.kubernetes.io/name: guardrails
+spec:
+  replicas: 1 # di-override per overlay; production guardrails memakai HPA
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardrails
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # pod lama baru dimatikan setelah pod baru /ready
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guardrails
+    spec:
+      serviceAccountName: nilam-ocr
+      automountServiceAccountToken: false # service tidak memanggil API Kubernetes
+      # Tidak ada job background: request sinkron yang sedang jalan cukup diberi 30 s.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000 # appuser di Dockerfile
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: guardrails
+          image: nilam-ocr-guardrails # nama + tag sebenarnya di-set overlay (images:)
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8031
+          envFrom:
+            - configMapRef:
+                name: guardrails-config
+          env:
+            # Hanya rahasia yang dibutuhkan service ini, bukan seluruh Secret.
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef: {name: nilam-ocr-secrets, key: API_KEY}
+            # Root filesystem read-only: pustaka yang menulis cache ke $HOME diarahkan ke /tmp.
+            - name: HOME
+              value: /tmp
+          # /health = proses hidup (tidak menyentuh dependensi); /ready = dependensi WAJIB menjawab.
+          # Liveness sengaja TIDAK memakai /ready: gangguan database tidak boleh me-restart semua pod.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              exec:
+                # Beri waktu endpoint dicabut dari Service sebelum SIGTERM, supaya tidak ada
+                # request baru yang masuk ke pod yang sedang berhenti.
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
