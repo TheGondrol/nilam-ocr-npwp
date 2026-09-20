@@ -1,5 +1,7 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
+
+from pydantic import model_validator
 
 from ocr_common.config import BaseServiceSettings
 
@@ -39,6 +41,12 @@ class Settings(BaseServiceSettings):
     # Render PDF: dpi per halaman dan batas jumlah halaman yang dinilai.
     guardrails_pdf_dpi: int = 150
     guardrails_max_pages: int = 20
+
+    @model_validator(mode="after")
+    def _guard_guardrails(self) -> Self:
+        self.reject_mock_backend_outside_local(guardrails_backend=self.guardrails_backend)
+        self.reject_localhost_outside_local(guardrails_model_url=self.guardrails_model_url)
+        return self
 
 
 @lru_cache

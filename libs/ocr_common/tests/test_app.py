@@ -52,7 +52,7 @@ def test_missing_api_key_is_401_envelope():
 
 def test_auth_disabled_skips_the_api_key_check():
     open_app = create_app(
-        settings=BaseServiceSettings(api_key="k", auth_disabled=True, _env_file=None),
+        settings=BaseServiceSettings(api_key="k", auth_disabled=True, environment="local", _env_file=None),
         title="Demo",
         description="demo",
         routers=[router],
@@ -66,6 +66,35 @@ def test_auth_disabled_skips_the_api_key_check():
         ).status_code
         == 200
     )
+
+
+def _app_with_readiness(readiness):
+    return TestClient(
+        create_app(settings=settings, title="Demo", description="demo", readiness=readiness),
+        raise_server_exceptions=False,
+    )
+
+
+def test_ready_without_dependencies_is_ready_and_public():
+    response = _app_with_readiness(None).get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "checks": {}}
+
+
+def test_ready_is_503_when_a_required_dependency_fails_but_health_stays_up():
+    async def ok():
+        return None
+
+    async def down():
+        raise ConnectionError("postgresql://user:secret@db:5432 unreachable")
+
+    probe = _app_with_readiness({"database": down, "cache": ok})
+    response = probe.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"status": "not_ready", "checks": {"database": "failed", "cache": "ok"}}
+    assert "secret" not in response.text  # pesan error koneksi tidak boleh bocor
+    # Liveness tidak ikut jatuh: gangguan database tidak boleh membuat Kubernetes me-restart pod.
+    assert probe.get("/health").status_code == 200
 
 
 def test_request_id_header_is_echoed_or_generated():

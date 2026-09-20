@@ -15,6 +15,8 @@ TEST_API_KEY = "test-key"
 def set_test_env(**extra: str) -> None:
     """Panggil SEBELUM import src.main: Settings dibaca sekali lewat lru_cache saat import."""
     os.environ["API_KEY"] = TEST_API_KEY
+    # Test memakai backend mock dan storage in-memory; keduanya hanya sah di local.
+    os.environ["ENVIRONMENT"] = "local"
     os.environ.update(extra)
 
 
@@ -93,7 +95,7 @@ def assert_openapi_up_to_date(app: FastAPI, path: str = "openapi.yaml") -> None:
 def assert_error_responses_have_examples(app: FastAPI) -> None:
     spec = yaml.safe_load(spec_text(app))
     for path, methods in spec["paths"].items():
-        if path == "/health":
+        if path in ("/health", "/ready"):  # bukan envelope: bentuk tetap untuk probe Kubernetes
             continue
         for operation in methods.values():
             for code, response in operation["responses"].items():

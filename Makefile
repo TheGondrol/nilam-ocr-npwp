@@ -42,7 +42,7 @@ test-%:
 typecheck-%:
 	cd services/$* && $(PY) -m ty check src tests
 openapi-%:
-	cd services/$* && API_KEY=x $(PY) -m ocr_common.openapi
+	cd services/$* && API_KEY=x ENVIRONMENT=local $(PY) -m ocr_common.openapi
 run-%:
 	cd services/$* && $(PY) -m uvicorn src.main:app --reload --port $(PORT_$*)
 

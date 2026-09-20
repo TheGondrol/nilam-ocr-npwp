@@ -69,6 +69,13 @@ class HealthResponse(BaseModel):
     )
 
 
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"] = Field(..., examples=["ready"])
+    checks: dict[str, Literal["ok", "failed"]] = Field(
+        ..., description="Dependensi wajib service ini, satu entri per dependensi", examples=[{"database": "ok"}]
+    )
+
+
 def error(
     status_code: int,
     description: str,

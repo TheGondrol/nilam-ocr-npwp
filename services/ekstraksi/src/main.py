@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from ocr_common.app import create_app
+from ocr_common.app import create_app, database_readiness
 from ocr_common.database import check_connection, dispose_engines
 from src.api.v1 import ekstraksi, jobs, ocr
 from src.clients.stages import get_stage_clients
@@ -71,5 +71,6 @@ app = create_app(
         "ekstraksi": settings.ekstraksi_backend,
         "storage": "postgres" if settings.database_url else "memory",
     },
+    readiness=database_readiness(settings.database_url),
     lifespan=lifespan,
 )

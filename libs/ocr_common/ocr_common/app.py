@@ -8,7 +8,7 @@ backends={...}, lifespan=...)` di src/main.py.
 """
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
@@ -19,9 +19,27 @@ from fastapi.responses import JSONResponse
 from ocr_common.config import BaseServiceSettings
 from ocr_common.envelope import envelope
 from ocr_common.request_id import RequestIdMiddleware, get_request_id
-from ocr_common.schemas import HealthResponse
+from ocr_common.schemas import HealthResponse, ReadyResponse
+
+logger = logging.getLogger(__name__)
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+# Satu pemeriksaan dependensi wajib: selesai tanpa exception = ok.
+ReadinessCheck = Callable[[], Awaitable[None]]
+
+
+def database_readiness(database_url: str | None) -> dict[str, ReadinessCheck]:
+    """Readiness untuk service yang menyimpan status. Kosong kalau tanpa DATABASE_URL (dev, in-memory)."""
+    if not database_url:
+        return {}
+
+    async def check() -> None:
+        # Import di sini: sqlalchemy hanya extra `ocr-common[db]`.
+        from ocr_common.database import check_connection
+
+        await check_connection(database_url)
+
+    return {"database": check}
 
 
 def create_app(
@@ -33,6 +51,7 @@ def create_app(
     tags: Iterable[dict[str, Any]] = (),
     routers: Iterable[APIRouter] = (),
     backends: dict[str, str] | None = None,
+    readiness: Mapping[str, ReadinessCheck] | None = None,
     lifespan: Lifespan | None = None,
 ) -> FastAPI:
     # uvicorn hanya mengonfigurasi logger miliknya sendiri; tanpa ini pesan
@@ -63,13 +82,13 @@ def create_app(
 
     app.add_middleware(RequestIdMiddleware)
     _register_exception_handlers(app)
-    app.include_router(_health_router(version, backends or {}))
+    app.include_router(_health_router(version, backends or {}, readiness or {}))
     for router in routers:
         app.include_router(router)
     return app
 
 
-def _health_router(version: str, backends: dict[str, str]) -> APIRouter:
+def _health_router(version: str, backends: dict[str, str], readiness: Mapping[str, ReadinessCheck]) -> APIRouter:
     router = APIRouter(tags=["Health"])
 
     @router.get(
@@ -80,6 +99,35 @@ def _health_router(version: str, backends: dict[str, str]) -> APIRouter:
     )
     async def health():
         return {"status": "healthy", "version": version, "device": "cpu", "backends": backends}
+
+    @router.get(
+        "/ready",
+        response_model=ReadyResponse,
+        summary="Readiness check",
+        description=(
+            "Liveness vs readiness: /health only says the process is alive and never touches a dependency "
+            "(a database blip must not make Kubernetes restart every pod). /ready says whether this pod can "
+            "do its job right now: 200 when every REQUIRED dependency of this service answers, 503 otherwise, "
+            "so the pod is taken out of the Service until it recovers. Downstream stages and model services "
+            "are deliberately not checked: their outage is reported per job, not by refusing traffic. "
+            "Does not require an API key."
+        ),
+        responses={503: {"model": ReadyResponse, "description": "A required dependency is unavailable"}},
+    )
+    async def ready():
+        checks: dict[str, str] = {}
+        for name, check in readiness.items():
+            try:
+                await check()
+                checks[name] = "ok"
+            except Exception as exc:
+                # Hanya jenis error-nya: pesan koneksi bisa memuat host / user database.
+                logger.warning("readiness check %r failed: %s", name, type(exc).__name__)
+                checks[name] = "failed"
+        ok = all(state == "ok" for state in checks.values())
+        return JSONResponse(
+            status_code=200 if ok else 503, content={"status": "ready" if ok else "not_ready", "checks": checks}
+        )
 
     return router
 

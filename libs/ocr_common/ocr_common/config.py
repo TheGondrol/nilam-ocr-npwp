@@ -1,5 +1,12 @@
-from pydantic import AliasChoices, Field
+from typing import Literal, Self
+from urllib.parse import urlsplit
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Environment = Literal["local", "dev", "staging", "production"]
+# Di dalam pod / container, alamat ini berarti "diri sendiri", bukan service lain.
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
 
 class BaseServiceSettings(BaseSettings):
@@ -24,12 +31,68 @@ class BaseServiceSettings(BaseSettings):
     # mudah dicari, dan service mencatat peringatan saat aktif. API_KEY tetap
     # wajib karena juga dipakai sebagai key KELUAR ke service lain.
     auth_disabled: bool = False
+
+    # local = laptop; dev / staging / production = lingkungan ter-deploy (GKE), semuanya
+    # dengan pengaman aktif. `dev` sengaja BUKAN mode longgar: cluster dev bernama "dev",
+    # dan ENVIRONMENT=dev di sana tidak boleh mematikan pengaman.
+    # Default `production`, BUKAN `local`: konfigurasi yang lupa mengisi ENVIRONMENT
+    # (ConfigMap salah salin, env baru) harus gagal start dengan pesan jelas,
+    # bukan diam-diam berjalan dengan semua pengaman mati. Laptop: ENVIRONMENT=local.
+    # Di luar `local` berlaku: AUTH_DISABLED ditolak, backend mock ditolak,
+    # DATABASE_URL + ORCHESTRATION_URL wajib, alamat service tidak boleh localhost.
+    environment: Environment = "production"
     service_base_url: str | None = None
     port: int = 8000
 
     max_upload_bytes: int = 5 * 1024 * 1024
     # PDF ikut diterima: model PaddleOCR membaca PDF multi-halaman.
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
+
+    @property
+    def is_local(self) -> bool:
+        return self.environment == "local"
+
+    def require_outside_local(self, **values: object) -> None:
+        """Setting yang boleh kosong di laptop tapi tidak di cluster. Nama = nama field."""
+        if self.is_local:
+            return
+        missing = [name.upper() for name, value in values.items() if not value]
+        if missing:
+            raise ValueError(
+                f"{', '.join(missing)} must be set when ENVIRONMENT={self.environment} "
+                "(set ENVIRONMENT=local for local development)"
+            )
+
+    def reject_localhost_outside_local(self, **urls: str | None) -> None:
+        """Alamat service LAIN. Bukan untuk DATABASE_URL: Cloud SQL Auth Proxy memang di 127.0.0.1."""
+        if self.is_local:
+            return
+        local = [name.upper() for name, url in urls.items() if url and urlsplit(url).hostname in _LOCAL_HOSTS]
+        if local:
+            raise ValueError(
+                f"{', '.join(local)} points to localhost, which inside a pod is this service itself; "
+                f"set the real address when ENVIRONMENT={self.environment}"
+            )
+
+    def reject_mock_backend_outside_local(self, **backends: str) -> None:
+        """Backend mock mengarang hasil (vonis dari nama file, NPWP acak). Default-nya mock: lupa mengisi = mock."""
+        if self.is_local:
+            return
+        mocked = [name.upper() for name, backend in backends.items() if backend == "mock"]
+        if mocked:
+            raise ValueError(
+                f"{', '.join(mocked)}=mock fabricates results and is only allowed with ENVIRONMENT=local; "
+                f"set a real backend when ENVIRONMENT={self.environment}"
+            )
+
+    @model_validator(mode="after")
+    def _guard_auth(self) -> Self:
+        if self.auth_disabled and not self.is_local:
+            raise ValueError(
+                f"AUTH_DISABLED=true is only allowed with ENVIRONMENT=local (got ENVIRONMENT={self.environment}): "
+                "it turns off the X-API-Key check on every endpoint"
+            )
+        return self
 
 
 class PipelineSettings(BaseServiceSettings):
@@ -57,3 +120,11 @@ class PipelineSettings(BaseServiceSettings):
     pipeline_retry_delay_seconds: float = 0.5
     # Saat shutdown, tunggu job yang masih jalan paling lama sekian detik.
     pipeline_drain_timeout_seconds: float = 30.0
+
+    @model_validator(mode="after")
+    def _guard_pipeline(self) -> Self:
+        # Tanpa DATABASE_URL klaim job hanya idempoten di dalam satu proses; tanpa
+        # ORCHESTRATION_URL callback dilewati diam-diam dan hasil pipeline hilang.
+        self.require_outside_local(database_url=self.database_url, orchestration_url=self.orchestration_url)
+        self.reject_localhost_outside_local(orchestration_url=self.orchestration_url)
+        return self

@@ -37,5 +37,8 @@ app = create_app(
     tags=[{"name": "Guardrails", "description": "Page-level accepted/reject classification"}],
     routers=[guardrails.router],
     backends={"guardrails": settings.guardrails_backend},
+    # Model dimuat di lifespan sebelum server menerima koneksi, jadi pod yang
+    # menjawab sudah pasti memegang model: tidak ada dependensi lain untuk diperiksa.
+    readiness={},
     lifespan=lifespan,
 )
