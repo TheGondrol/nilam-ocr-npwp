@@ -8,3 +8,5 @@ sqlalchemy==2.0.52
 # Windows untuk Python 3.12, jadi dev lokal harus compile dari source.
 greenlet==3.2.4
 asyncpg==0.31.0
+# src/vendor/npwp_rules (poly_center). Versi sama dengan service guardrails.
+numpy==2.3.5

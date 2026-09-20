@@ -22,6 +22,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      tags:
+      - Health
+      summary: Readiness check
+      description: 'Liveness vs readiness: /health only says the process is alive and never touches a
+        dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
+        pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
+        otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
+        services are deliberately not checked: their outage is reported per job, not by refusing traffic.
+        Does not require an API key.'
+      operationId: ready_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: A required dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
   /v1/structuring/jobs:
     post:
       tags:
@@ -190,6 +215,27 @@ paths:
       - APIKeyHeader: []
 components:
   schemas:
+    BoundingBox:
+      properties:
+        x1:
+          type: number
+          title: X1
+        y1:
+          type: number
+          title: Y1
+        x2:
+          type: number
+          title: X2
+        y2:
+          type: number
+          title: Y2
+      type: object
+      required:
+      - x1
+      - y1
+      - x2
+      - y2
+      title: BoundingBox
     ErrorResponse:
       properties:
         status_code:
@@ -456,6 +502,32 @@ components:
       required:
       - blocks
       title: OcrPayload
+    ReadyResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - not_ready
+          title: Status
+          examples:
+          - ready
+        checks:
+          additionalProperties:
+            type: string
+            enum:
+            - ok
+            - failed
+          type: object
+          title: Checks
+          description: Dependensi wajib service ini, satu entri per dependensi
+          examples:
+          - database: ok
+      type: object
+      required:
+      - status
+      - checks
+      title: ReadyResponse
     StructureRequest:
       properties:
         lines:
@@ -549,6 +621,17 @@ components:
           description: Baris mentah asal nilai ini
           examples:
           - 'NPWP : 12.345.678.9-012.345'
+        signals:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Signals
+          description: 'Sinyal untuk payload scoring (backend `npwp_rules`): nomor_npwp -> `has_homoglyph`,
+            `candidate_count`; nama / nama_badan -> `corrected`. null untuk backend `rule_based`'
+          examples:
+          - candidate_count: 2
+            has_homoglyph: false
       type: object
       required:
       - confidence
@@ -588,7 +671,7 @@ components:
           type: string
           title: Text
           examples:
-          - 'NPWP : 12.345.678.9-012.345'
+          - 95.844.800.1-805.000
         confidence:
           type: number
           maximum: 1.0
@@ -597,6 +680,18 @@ components:
           default: 1.0
           examples:
           - 0.96
+        bbox:
+          anyOf:
+          - $ref: '#/components/schemas/BoundingBox'
+          - type: 'null'
+          description: Posisi baris (`blocks[].bbox` dari service ekstraksi). Backend `npwp_rules` mencari
+            nama dari jaraknya ke nomor NPWP; tanpa bbox posisi diturunkan dari urutan baris
+        page:
+          type: integer
+          minimum: 0.0
+          title: Page
+          description: Indeks halaman 0-based
+          default: 0
       type: object
       required:
       - text

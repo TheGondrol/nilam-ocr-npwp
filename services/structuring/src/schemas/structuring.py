@@ -5,9 +5,24 @@ from pydantic import BaseModel, ConfigDict, Field
 from ocr_common.schemas import REQUEST_ID_EXAMPLE, SuccessEnvelope
 
 
+class BoundingBox(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
 class TextLine(BaseModel):
-    text: str = Field(..., examples=["NPWP : 12.345.678.9-012.345"])
+    text: str = Field(..., examples=["95.844.800.1-805.000"])
     confidence: float = Field(1.0, ge=0, le=1, examples=[0.96])
+    bbox: BoundingBox | None = Field(
+        None,
+        description=(
+            "Posisi baris (`blocks[].bbox` dari service ekstraksi). Backend `npwp_rules` mencari nama dari "
+            "jaraknya ke nomor NPWP; tanpa bbox posisi diturunkan dari urutan baris"
+        ),
+    )
+    page: int = Field(0, ge=0, description="Indeks halaman 0-based")
 
 
 class StructureRequest(BaseModel):
@@ -19,6 +34,14 @@ class StructuredField(BaseModel):
     confidence: float = Field(..., ge=0, le=1, examples=[0.96])
     source: str | None = Field(
         None, description="Baris mentah asal nilai ini", examples=["NPWP : 12.345.678.9-012.345"]
+    )
+    signals: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Sinyal untuk payload scoring (backend `npwp_rules`): nomor_npwp -> `has_homoglyph`, "
+            "`candidate_count`; nama / nama_badan -> `corrected`. null untuk backend `rule_based`"
+        ),
+        examples=[{"has_homoglyph": False, "candidate_count": 2}],
     )
 
 

@@ -17,3 +17,7 @@ extra-paths = [".", "../../libs/ocr_common"]
 
 [tool.pyright]
 extraPaths = [".", "../../libs/ocr_common"]
+
+# Kode ML engineer di-vendor apa adanya: tidak di-typecheck supaya tetap sama dengan kiriman.
+[tool.ty.src]
+exclude = ["src/vendor"]

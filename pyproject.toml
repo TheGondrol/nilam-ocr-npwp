@@ -5,6 +5,8 @@
 line-length = 120
 target-version = "py311"
 src = ["libs/ocr_common", "services/guardrails", "services/ekstraksi", "services/structuring", "services/scoring"]
+# Kode pihak lain yang di-vendor apa adanya (lihat README di foldernya): tidak di-lint / di-format.
+extend-exclude = ["services/*/src/vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

@@ -23,7 +23,13 @@ class StructuringJobService:
     ) -> dict[str, Any]:
         async def work() -> dict[str, Any]:
             lines = [
-                {"text": block.get("text") or "", "confidence": block.get("confidence", 1.0)}
+                {
+                    "text": block.get("text") or "",
+                    "confidence": block.get("confidence", 1.0),
+                    # Posisi: backend npwp_rules mencari nama dari jaraknya ke nomor NPWP.
+                    "bbox": block.get("bbox"),
+                    "page": block.get("page", 0),
+                }
                 for block in ocr.get("blocks") or []
             ]
             # Sinkron dan CPU-bound (regex sekarang, LLM/model nanti): di

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from ocr_common.app import create_app
+from ocr_common.app import create_app, database_readiness
 from src.api.v1 import jobs, structuring
 from src.core.config import get_settings
 from src.core.pipeline import get_next_stage, get_pipeline
@@ -53,5 +53,6 @@ app = create_app(
         "structuring": settings.structuring_backend,
         "storage": "postgres" if settings.database_url else "memory",
     },
+    readiness=database_readiness(settings.database_url),
     lifespan=lifespan,
 )

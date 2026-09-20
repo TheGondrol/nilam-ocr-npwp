@@ -63,7 +63,7 @@ def test_service_rejects_blank_input():
 
 
 def test_health_lists_backend(client):
-    assert client.get("/health").json()["backends"] == {"structuring": "rule_based", "storage": "memory"}
+    assert client.get("/health").json()["backends"] == {"structuring": "npwp_rules", "storage": "memory"}
 
 
 def test_http_structure(client, auth):
