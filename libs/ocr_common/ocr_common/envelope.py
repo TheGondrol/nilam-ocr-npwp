@@ -23,9 +23,6 @@ def envelope(
     errors: str | None = None,
     guardrails: float | None = None,
 ) -> dict:
-    # guardrails saudara `data`, bukan isinya: skor itu milik dokumennya, bukan
-    # salah satu fieldnya. Hanya muncul kalau ada, jadi respons error dan
-    # generate-request-id tidak ikut membawa kunci kosong.
     body = {
         "status_code": status_code,
         "status_desc": STATUS_DESC.get(status_code, "Error"),

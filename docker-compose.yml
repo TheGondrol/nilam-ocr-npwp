@@ -1,19 +1,3 @@
-# Empat image, empat container, satu network. Build context = root repo
-# karena tiap image butuh libs/ocr_common.
-#
-#   make up            build + jalankan semuanya
-#   make up-scoring    satu service saja
-#   make smoke         uji pipeline async (dan kontrak lama) lewat container
-#
-# Tiap service membaca .env-nya sendiri (services/<nama>/.env, salin dari
-# .env.example). Port hanya dibuka ke 127.0.0.1, sama seperti ocr-*.
-# Orkestrator di VM yang sama memanggil guardrails/ekstraksi lewat
-# host.docker.internal:8031/8030, dan menerima callback tahap di
-# ORCHESTRATION_URL (isi di .env ekstraksi, structuring, dan scoring).
-#
-# Alur async: orkestrator -> guardrails (sinkron) -> ekstraksi /jobs (202)
-#   -> structuring /jobs (202) -> scoring /jobs (202), tiap tahap callback ke orkestrator.
-
 x-common: &common
   restart: unless-stopped
   extra_hosts:
@@ -32,7 +16,6 @@ services:
       PORT: "8031"
     ports:
       - "127.0.0.1:8031:8031"
-    # Bobot model sudah di dalam image (COPY saat build); tidak ada volume.
 
   structuring:
     <<: *common
@@ -44,7 +27,6 @@ services:
     env_file: services/structuring/.env
     environment:
       PORT: "8032"
-      # Tahap berikutnya di pipeline async; 127.0.0.1 di .env hanya benar untuk proses bare.
       SCORING_SERVICE_URL: http://scoring:8033
     ports:
       - "127.0.0.1:8032:8032"
@@ -74,8 +56,6 @@ services:
     env_file: services/ekstraksi/.env
     environment:
       PORT: "8030"
-      # Di dalam network compose, service lain dijangkau lewat nama service-nya;
-      # nilai 127.0.0.1 di .env hanya benar untuk proses bare di host.
       GUARDRAILS_SERVICE_URL: http://guardrails:8031
       STRUCTURING_SERVICE_URL: http://structuring:8032
       SCORING_SERVICE_URL: http://scoring:8033

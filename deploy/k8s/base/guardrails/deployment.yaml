@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: guardrails
 spec:
-  replicas: 1 # di-override per overlay; production guardrails memakai HPA
+  replicas: 1
   revisionHistoryLimit: 5
   selector:
     matchLabels:
@@ -14,26 +14,25 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0 # pod lama baru dimatikan setelah pod baru /ready
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app.kubernetes.io/name: guardrails
     spec:
       serviceAccountName: nilam-ocr
-      automountServiceAccountToken: false # service tidak memanggil API Kubernetes
-      # Tidak ada job background: request sinkron yang sedang jalan cukup diberi 30 s.
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000 # appuser di Dockerfile
+        runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: guardrails
-          image: nilam-ocr-guardrails # nama + tag sebenarnya di-set overlay (images:)
+          image: nilam-ocr-guardrails
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -42,15 +41,11 @@ spec:
             - configMapRef:
                 name: guardrails-config
           env:
-            # Hanya rahasia yang dibutuhkan service ini, bukan seluruh Secret.
             - name: API_KEY
               valueFrom:
                 secretKeyRef: {name: nilam-ocr-secrets, key: API_KEY}
-            # Root filesystem read-only: pustaka yang menulis cache ke $HOME diarahkan ke /tmp.
             - name: HOME
               value: /tmp
-          # /health = proses hidup (tidak menyentuh dependensi); /ready = dependensi WAJIB menjawab.
-          # Liveness sengaja TIDAK memakai /ready: gangguan database tidak boleh me-restart semua pod.
           startupProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 2
@@ -68,8 +63,6 @@ spec:
           lifecycle:
             preStop:
               exec:
-                # Beri waktu endpoint dicabut dari Service sebelum SIGTERM, supaya tidak ada
-                # request baru yang masuk ke pod yang sedang berhenti.
                 command: ["sleep", "5"]
           resources:
             requests:

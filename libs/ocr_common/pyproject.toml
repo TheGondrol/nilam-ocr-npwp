@@ -7,8 +7,6 @@ name = "ocr-common"
 version = "0.1.0"
 description = "Kode bersama untuk service OCR NPWP (guardrails, ekstraksi, structuring, scoring)"
 requires-python = ">=3.11"
-# Versi persisnya dipin di requirements.txt tiap service; di sini hanya batas bawah
-# supaya lib ini tidak memaksa pin yang berbeda-beda.
 dependencies = [
     "fastapi>=0.115",
     "pydantic-settings>=2.5",
@@ -17,7 +15,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Service yang menyimpan status (ekstraksi, structuring, scoring); guardrails tidak butuh.
 db = ["sqlalchemy>=2.0", "greenlet>=3.0"]
 
 [tool.setuptools.packages.find]

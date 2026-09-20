@@ -1218,14 +1218,6 @@ components:
       required:
       - value
       title: Confidence
-      description: 'Satu field hasil OCR beserta seberapa yakin mesin membacanya.
-
-
-        Nilainya selalu terbungkus, juga saat confidence-nya tinggi: bentuk yang
-
-        berubah-ubah menuntut tiap konsumen memeriksa dulu ini dict atau skalar,
-
-        dan yang lupa memeriksa baru ketahuan di produksi.'
     ConfidenceRequest:
       properties:
         npwp:
@@ -1349,8 +1341,6 @@ components:
           - 0.9821
       type: object
       title: ConfidenceRequest
-      description: Payload dari ML engineer. Semua nilai adalah hasil berantai tahap sebelumnya; null
-        = tidak tersedia.
     DocumentResult:
       properties:
         verdict:
@@ -2283,6 +2273,7 @@ components:
       - name_confidence
       - payload
       title: ScoringJobResult
+      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
     ScoringJobStatus:
       properties:
         request_id:
@@ -2428,6 +2419,7 @@ components:
       - request_id
       - status
       title: ScoringStageCallback
+      description: Body of the callback a stage POSTs to the orchestrator when it finishes.
     StageCallback:
       properties:
         request_id:

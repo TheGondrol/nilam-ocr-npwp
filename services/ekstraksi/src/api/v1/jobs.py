@@ -1,9 +1,3 @@
-"""
-API (presentation) layer tahap OCR di pipeline async. Dipanggil Orkestrasi
-setelah guardrails lolos; menjawab 202 segera, hasilnya dikabarkan lewat
-callback. Tidak ada aturan bisnis di sini; lihat src/services/job_service.py.
-"""
-
 import json
 from typing import Any
 
@@ -117,13 +111,11 @@ async def submit_job(
     service: EkstraksiJobService = Depends(get_job_service),
 ):
     upload, url = resolve_intake(file, file_url)
-    # Upload harus dibaca SEKARANG: berkasnya ditutup begitu response terkirim.
-    # file_url sebaliknya diunduh di background, supaya 202 tidak menunggu MinIO.
     source: Source
     if upload is not None:
         source = (await upload.read(), upload.filename or "", upload.content_type)
     else:
-        assert url is not None  # dijamin resolve_intake: tepat satu dari keduanya
+        assert url is not None
         source = url
     data = await service.submit(request_id, document_type, _parse_guardrails(guardrails), source)
     return envelope(202, "Accepted", data, request_id)

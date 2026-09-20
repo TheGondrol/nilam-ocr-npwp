@@ -1,9 +1,3 @@
-"""
-Tahap STRUCTURING di pipeline async lewat HTTP: 202 segera, kerja di
-background, callback, lalu handoff ke scoring. Orkestrasi dan scoring diganti
-perekam (tanpa jaringan); rantai sungguhan diuji scripts/smoke_e2e.py.
-"""
-
 import pytest
 
 from ocr_common.jobs import STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
@@ -31,7 +25,6 @@ def harness():
     pipeline = StagePipeline(stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback)
     service = StructuringJobService(pipeline, get_structuring_service(), next_stage)
     app.dependency_overrides[get_job_service] = lambda: service
-    # Context manager: satu event loop selama test, supaya task background hidup.
     with make_client(app) as client:
         yield client, callback, next_stage
     app.dependency_overrides.pop(get_job_service, None)
@@ -60,7 +53,6 @@ def test_submit_returns_202_then_structures_callback_and_handoff(harness, auth):
     assert job["result"]["fields"]["nama"]["value"] == "BUDI SANTOSO"
 
     assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("STRUCTURING", "DONE", None)]
-    # Payload ke scoring: hasil guardrails + OCR (utuh, termasuk bbox/page) + structuring.
     assert next_stage.payloads == [{**_payload("REQ_1"), "structuring": job["result"]}]
 
 

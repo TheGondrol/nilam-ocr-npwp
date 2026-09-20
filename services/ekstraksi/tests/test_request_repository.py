@@ -1,10 +1,3 @@
-"""
-Kedua implementasi repository diuji dengan kontrak yang sama. Yang SQL
-dijalankan terhadap SQLite (aiosqlite) sungguhan, bukan fake session, supaya
-model, query, dan konversi tipenya benar-benar teruji; di produksi dialeknya
-PostgreSQL (JSONB), skema di db/schema.sql.
-"""
-
 import pytest
 
 from ocr_common import database
@@ -99,7 +92,6 @@ def test_repository_is_sql_with_database_url(monkeypatch):
 
 
 async def test_ocr_contract_end_to_end_on_sql_repository(client, auth, sqlite_url, monkeypatch):
-    """Alur HTTP lengkap dengan repository SQL di belakangnya."""
     monkeypatch.setattr("src.api.v1.ocr.get_request_repository", lambda: SqlRequestRepository(sqlite_url))
     monkeypatch.setattr("src.api.v1.ocr.get_stage_clients", fake_stage_clients)
 

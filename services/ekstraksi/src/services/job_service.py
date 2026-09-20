@@ -1,11 +1,3 @@
-"""
-Tahap OCR di pipeline async ("ServiceOCR" di sequence diagram): terima job
-dari Orkestrasi, jawab 202, lalu di background ambil file (payload atau
-unduh dari MinIO), jalankan OCR, simpan hasil, callback, dan serahkan ke
-structuring. Mekanismenya ada di ocr_common/jobs.py; di sini hanya kerja
-tahap ini dan bentuk payload untuk tahap berikutnya.
-"""
-
 from typing import Any
 
 from ocr_common.errors import ServiceError
@@ -13,7 +5,6 @@ from ocr_common.fetch_url import FetchUrlError, fetch
 from ocr_common.jobs import STAGE_STRUCTURING, NextStage, StagePipeline
 from src.services.ekstraksi_service import EkstraksiService
 
-# File yang sudah dibaca dari payload, atau URL yang diunduh saat job jalan.
 UploadedFile = tuple[bytes, str, str | None]
 Source = UploadedFile | str
 

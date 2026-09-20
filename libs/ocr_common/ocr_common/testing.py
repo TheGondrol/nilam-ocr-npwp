@@ -1,5 +1,3 @@
-"""Helper test yang sama untuk semua service (dipakai di tests/conftest.py masing-masing)."""
-
 import os
 import time
 
@@ -13,9 +11,7 @@ TEST_API_KEY = "test-key"
 
 
 def set_test_env(**extra: str) -> None:
-    """Panggil SEBELUM import src.main: Settings dibaca sekali lewat lru_cache saat import."""
     os.environ["API_KEY"] = TEST_API_KEY
-    # Test memakai backend mock dan storage in-memory; keduanya hanya sah di local.
     os.environ["ENVIRONMENT"] = "local"
     os.environ.update(extra)
 
@@ -33,12 +29,6 @@ def image_upload(filename="npwp.jpg", content=b"\xff\xd8fake-jpeg-bytes", conten
 
 
 def wait_for_job(client: TestClient, path: str, *, timeout: float = 5.0) -> dict:
-    """Polling GET /v1/<tahap>/jobs/{request_id} sampai job keluar dari PROCESSING. -> `data`.
-
-    Job jalan sebagai asyncio task di event loop app, jadi `client` harus
-    dipakai sebagai context manager (`with make_client(app) as client`): tanpa
-    itu TestClient membuat loop baru per request dan task-nya ikut dibatalkan.
-    """
     deadline = time.monotonic() + timeout
     while True:
         data = client.get(path, headers=auth_headers()).json()["data"]
@@ -48,8 +38,6 @@ def wait_for_job(client: TestClient, path: str, *, timeout: float = 5.0) -> dict
 
 
 class RecordingCallback:
-    """Pengganti OrchestrationCallback: mencatat notifikasi, tanpa jaringan."""
-
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -70,8 +58,6 @@ class RecordingCallback:
 
 
 class RecordingNextStage:
-    """Pengganti NextStageClient: mencatat payload handoff; `error` diisi -> handoff gagal."""
-
     def __init__(self, error: Exception | None = None) -> None:
         self.payloads: list[dict] = []
         self.error = error
@@ -95,7 +81,7 @@ def assert_openapi_up_to_date(app: FastAPI, path: str = "openapi.yaml") -> None:
 def assert_error_responses_have_examples(app: FastAPI) -> None:
     spec = yaml.safe_load(spec_text(app))
     for path, methods in spec["paths"].items():
-        if path in ("/health", "/ready"):  # bukan envelope: bentuk tetap untuk probe Kubernetes
+        if path in ("/health", "/ready"):
             continue
         for operation in methods.values():
             for code, response in operation["responses"].items():

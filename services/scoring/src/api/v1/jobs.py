@@ -1,9 +1,3 @@
-"""
-API (presentation) layer tahap SCORING di pipeline async. Dipanggil
-ServiceStructuring; menjawab 202 segera, hasil akhirnya dikirim ke Orkestrasi
-lewat callback. Tidak ada aturan bisnis di sini; lihat src/services/job_service.py.
-"""
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from ocr_common.envelope import envelope
@@ -67,7 +61,6 @@ def get_job_service() -> ScoringJobService:
     },
 )
 async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depends(get_job_service)):
-    # exclude_unset: hasil guardrails dikembalikan di hasil akhir PERSIS seperti diterima.
     guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
     ocr = body.ocr.model_dump() if body.ocr is not None else None
     data = await service.submit(body.request_id, body.document_type, guardrails, ocr, body.structuring.model_dump())

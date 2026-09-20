@@ -1,5 +1,3 @@
-"""Skema kontrak lama (generate-request-id -> extract-ocr -> get-ocr-result). Teks Field(...) tampil di Swagger."""
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -8,12 +6,6 @@ RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 
 
 class Confidence(BaseModel):
-    """Satu field hasil OCR beserta seberapa yakin mesin membacanya.
-
-    Nilainya selalu terbungkus, juga saat confidence-nya tinggi: bentuk yang
-    berubah-ubah menuntut tiap konsumen memeriksa dulu ini dict atau skalar,
-    dan yang lupa memeriksa baru ketahuan di produksi."""
-
     value: Any = Field(..., description="The value read; null when the field was not found", examples=["BUDI SANTOSO"])
     confidence: float | None = Field(
         None, ge=0, le=1, description="OCR score of the line the value came from; 0 when not found", examples=[0.97]

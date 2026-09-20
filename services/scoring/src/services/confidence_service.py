@@ -1,21 +1,3 @@
-"""
-Business logic confidence per field: payload ML engineer -> {"npwp_confidence", "name_confidence"}
-lewat trust model (src/models/trust_model.py), dan penyusunan payload itu dari hasil berantai
-tahap-tahap sebelumnya ("value-nya adalah chain result dari service sebelumnya").
-
-Asal tiap kunci payload di pipeline:
-
-    npwp, npwp_score, name, name_score        structuring: fields.nomor_npwp / fields.nama | nama_badan
-    npwp_has_homoglyph, npwp_candidate_count  structuring: fields.nomor_npwp.signals
-    name_corrected                            structuring: fields.<nama>.signals
-    n_boxes, num_pages, avg/min_doc_score     ekstraksi: ocr.blocks (jumlah, halaman, confidence)
-    guardrail_probability                     guardrails: document.confidence. Contoh ML engineer memakai
-                                              angka yang sama (0.9821) di response guardrails dan di payload ini.
-    flag                                      BELUM ADA tahap yang menghasilkannya; tidak disebut di kontrak
-                                              service lain yang kami terima. Dikirim kosong (imputer model
-                                              mengisinya; pengaruhnya kecil). Tanyakan asalnya ke ML engineer.
-"""
-
 import re
 from typing import Any
 
@@ -51,7 +33,6 @@ class ConfidenceService:
 
         document = (guardrails or {}).get("document") or {}
         return {
-            # Digit saja, seperti contoh ML engineer ("123456789012000"); nilai kita bertitik untuk 15 digit.
             "npwp": re.sub(r"\D", "", str(number["value"])) if number else None,
             "npwp_score": number.get("confidence") if number else None,
             "npwp_has_homoglyph": number_signals.get("has_homoglyph"),

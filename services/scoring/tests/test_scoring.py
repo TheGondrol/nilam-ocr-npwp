@@ -5,7 +5,7 @@ from src.core.config import Settings
 from src.models.scoring import HeuristicNpwpScorer
 from src.services.scoring_service import ScoringService
 
-SETTINGS = Settings(api_key="x", _env_file=None)  # approve >= 0.8, review >= 0.5
+SETTINGS = Settings(api_key="x", _env_file=None)
 
 FULL = {
     "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.96},

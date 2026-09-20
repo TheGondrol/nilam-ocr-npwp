@@ -1,9 +1,3 @@
-"""
-API (presentation) layer: parses HTTP input, calls the service layer, and
-translates ServiceError into the right HTTPException. No business rules
-live here; see src/services/guardrails_service.py for those.
-"""
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 
 from ocr_common.envelope import envelope

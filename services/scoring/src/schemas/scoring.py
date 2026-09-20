@@ -1,5 +1,3 @@
-"""Skema service scoring. Teks Field(...) tampil di Swagger yang dibaca tim lain: bahasa Inggris."""
-
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -7,14 +5,8 @@ from pydantic import BaseModel, Field
 from ocr_common.pipeline_schemas import FieldConfidences, GuardrailsResult, OcrPayload, StructuringPayload
 from ocr_common.schemas import REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnvelope
 
-# ---------------------------------------------------------------------------
-# Kontrak ML engineer: payload -> confidence per field
-# ---------------------------------------------------------------------------
-
 
 class ConfidenceRequest(BaseModel):
-    """Payload dari ML engineer. Semua nilai adalah hasil berantai tahap sebelumnya; null = tidak tersedia."""
-
     npwp: str | None = Field(
         None, description="Extracted NPWP number, digits only; null when not found", examples=["123456789012000"]
     )
@@ -59,11 +51,6 @@ class ConfidenceResponse(SuccessEnvelope):
     data: FieldConfidences
 
 
-# ---------------------------------------------------------------------------
-# Pipeline async
-# ---------------------------------------------------------------------------
-
-
 class ScoringJobRequest(BaseModel):
     request_id: str = Field(
         ..., min_length=1, description="request_id of the pipeline run", examples=[REQUEST_ID_EXAMPLE]
@@ -94,11 +81,6 @@ class ScoringJobStatus(JobStatusBase):
 
 class ScoringJobStatusResponse(SuccessEnvelope):
     data: ScoringJobStatus
-
-
-# ---------------------------------------------------------------------------
-# Endpoint lama (heuristik), hanya untuk kontrak lama extract-ocr
-# ---------------------------------------------------------------------------
 
 
 class FieldValue(BaseModel):

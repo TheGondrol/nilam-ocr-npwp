@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: structuring # nama ini adalah alamatnya: http://structuring:8032 di dalam namespace
+  name: structuring
   labels:
     app.kubernetes.io/name: structuring
 spec:

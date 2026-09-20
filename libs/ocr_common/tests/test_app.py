@@ -1,5 +1,3 @@
-"""create_app: perilaku yang harus sama di semua service (health, auth, envelope, request_id, intake)."""
-
 from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.testclient import TestClient
 
@@ -59,7 +57,6 @@ def test_auth_disabled_skips_the_api_key_check():
     )
     open_client = TestClient(open_app, raise_server_exceptions=False)
     assert open_client.post("/v1/echo", files={"file": ("a.jpg", b"x", "image/jpeg")}).status_code == 200
-    # Key salah pun lolos: saklar ini mematikan pemeriksaannya, bukan sekadar mengizinkan header kosong.
     assert (
         open_client.post(
             "/v1/echo", files={"file": ("a.jpg", b"x", "image/jpeg")}, headers={"X-API-Key": "salah"}
@@ -92,8 +89,7 @@ def test_ready_is_503_when_a_required_dependency_fails_but_health_stays_up():
     response = probe.get("/ready")
     assert response.status_code == 503
     assert response.json() == {"status": "not_ready", "checks": {"database": "failed", "cache": "ok"}}
-    assert "secret" not in response.text  # pesan error koneksi tidak boleh bocor
-    # Liveness tidak ikut jatuh: gangguan database tidak boleh membuat Kubernetes me-restart pod.
+    assert "secret" not in response.text
     assert probe.get("/health").status_code == 200
 
 

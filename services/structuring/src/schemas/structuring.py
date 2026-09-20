@@ -1,5 +1,3 @@
-"""Skema service structuring. Teks Field(...) tampil di Swagger yang dibaca tim lain: bahasa Inggris."""
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field

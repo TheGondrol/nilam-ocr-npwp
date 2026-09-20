@@ -1,5 +1,3 @@
-"""Composition root service Scoring: rakit FastAPI app dari ocr_common + router service ini."""
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,16 +15,14 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_scorer()  # gagal saat boot kalau backend salah konfigurasi
-    get_trust_model()  # file model hilang / versi scikit-learn beda -> gagal saat boot, bukan di job pertama
+    get_scorer()
+    get_trust_model()
     if settings.database_url:
-        # Import di sini: sqlalchemy hanya dibutuhkan kalau DATABASE_URL diisi.
         from ocr_common.database import check_connection
 
         await check_connection(settings.database_url)
     pipeline = get_pipeline()
     yield
-    # Job yang masih jalan diberi waktu selesai sebelum klien HTTP dan database ditutup.
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
     if settings.database_url:
         from ocr_common.database import dispose_engines

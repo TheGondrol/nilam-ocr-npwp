@@ -1,9 +1,3 @@
-"""
-Mesin tahap pipeline (ocr_common/jobs.py). Kedua repository diuji dengan
-kontrak yang sama; yang SQL terhadap SQLite (aiosqlite) sungguhan supaya
-ON CONFLICT, upsert, dan join-nya benar-benar jalan.
-"""
-
 import httpx
 import pytest
 
@@ -62,7 +56,6 @@ async def test_failed_job_can_be_claimed_again(repository):
     assert await repository.claim("REQ_3") is True
     record = await repository.get("REQ_3")
     assert (record["status"], record["error_message"]) == ("PROCESSING", None)
-    # Hasil percobaan kedua menimpa (UPSERT), bukan bentrok primary key.
     await repository.complete("REQ_3", {"attempt": 2})
     assert (await repository.get("REQ_3"))["result"] == {"attempt": 2}
 
@@ -84,7 +77,6 @@ async def test_pipeline_success_writes_result_then_callback_then_handoff(reposit
         return {"full_text": "NPWP"}
 
     async def handoff(result):
-        # Urutan diagram: hasil sudah tersimpan dan callback sudah terkirim sebelum handoff.
         assert (await repository.get("REQ_10"))["status"] == "DONE"
         assert [c["status"] for c in callback.calls] == ["DONE"]
         events.append(result["full_text"])
@@ -163,7 +155,6 @@ async def test_pipeline_handoff_failure_reports_next_stage_failed(repository):
     await pipeline.submit("REQ_14", work, handoff=handoff, next_stage=STAGE_STRUCTURING)
     await pipeline.runner.drain(5)
 
-    # Tahap ini tetap DONE; yang gagal adalah tahap berikutnya.
     assert (await repository.get("REQ_14"))["status"] == "DONE"
     assert [(c["stage"], c["status"]) for c in callback.calls] == [("OCR", "DONE"), ("STRUCTURING", "FAILED")]
     assert "structuring service is unavailable" in callback.calls[1]["error_message"]

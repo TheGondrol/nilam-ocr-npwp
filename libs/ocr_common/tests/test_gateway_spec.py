@@ -1,5 +1,3 @@
-"""api/gateway.openapi.yaml adalah turunan openapi.yaml keempat service; kalau berbeda, jalankan `make openapi`."""
-
 import importlib.util
 from pathlib import Path
 

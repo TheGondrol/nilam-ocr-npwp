@@ -1,19 +1,3 @@
-"""
-Penyimpanan status request_id: pending -> completed | failed.
-
-Dua implementasi dengan method yang sama (create / get / update), dipilih
-get_request_repository() berdasarkan DATABASE_URL:
-
-- InMemoryRequestRepository: dict di proses ini, sama dengan mock ocr-*.
-  Cukup untuk satu container; hilang saat restart.
-- SqlRequestRepository: tabel ocr_npwp_requests di PostgreSQL lewat
-  SQLAlchemy async (skema: db/schema.sql). Dipakai kalau service ini jalan
-  lebih dari satu replika atau statusnya harus tahan restart.
-
-Tidak ada file lain yang tahu implementasi mana yang aktif; OcrService hanya
-memanggil ketiga method itu.
-"""
-
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any, TypedDict
@@ -35,15 +19,11 @@ class RequestRecord(TypedDict):
 
 
 def _now_with_ds() -> tuple[datetime, str]:
-    """Satu `now` untuk kolom timestamp dan `ds` (YYYYMMDD UTC, partisi harian
-    ala Hive/BigQuery untuk penarikan batch ke Big Data), supaya keduanya
-    tidak pernah berbeda. Konvensi sama dengan ocr-nilam-db."""
     now = datetime.now(UTC)
     return now, now.strftime("%Y%m%d")
 
 
 def _iso(value: datetime) -> str:
-    # SQLite mengembalikan datetime naive; nilainya UTC karena kita yang menulis.
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.isoformat()
@@ -82,7 +62,6 @@ class RequestRow(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
     guardrails: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Metadata file yang disubmit; isi file tidak pernah disimpan.
     file_name: Mapped[str | None] = mapped_column(String, nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -138,6 +117,5 @@ class SqlRequestRepository:
 
 @lru_cache
 def get_request_repository():
-    """Satu instance per proses; engine di bawahnya sudah punya pool koneksi."""
     url = get_settings().database_url
     return SqlRequestRepository(url) if url else InMemoryRequestRepository()

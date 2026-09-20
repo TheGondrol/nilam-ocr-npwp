@@ -1,9 +1,3 @@
-"""
-Business logic Structuring: baris teks mentah (output ekstraksi) ->
-field bernama dengan confidence per field. Selalu mengembalikan semua field
-dokumen; yang tidak ditemukan bernilai null.
-"""
-
 from typing import Any
 
 from ocr_common.errors import ServiceError

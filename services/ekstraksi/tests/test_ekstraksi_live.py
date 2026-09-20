@@ -1,11 +1,3 @@
-"""
-Test integrasi ke service PaddleOCR sungguhan. Dilewati kecuali env
-EKSTRAKSI_OCR_URL di-set (butuh akses jaringan internal), mis.:
-
-    cd services/ekstraksi
-    EKSTRAKSI_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_ekstraksi_live.py -q
-"""
-
 import io
 import os
 
@@ -47,7 +39,7 @@ def synthetic_npwp_jpeg() -> bytes:
 
 @pytest.fixture
 def engine() -> PaddleOcrEngine:
-    assert OCR_URL  # dijamin oleh skipif di atas
+    assert OCR_URL
     return PaddleOcrEngine(RemoteModelClient(OCR_URL, 60.0, name="ekstraksi OCR model"))
 
 

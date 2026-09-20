@@ -1,13 +1,3 @@
-"""
-Composition root service Ekstraksi ("ServiceOCR" di sequence diagram):
-
-- alur async (/v1/ekstraksi/jobs): tahap OCR pipeline; 202, kerja di
-  background, callback ke Orkestrasi, handoff ke structuring;
-- OCR mentah sinkron (/v1/ekstraksi/extract);
-- kontrak orkestrator lama (generate-request-id -> extract-ocr ->
-  get-ocr-result), dipertahankan sampai orkestrator pindah ke alur async.
-"""
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,9 +16,6 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Gagal keras saat startup, bukan di request pertama dengan error yang
-    # membingungkan: DATABASE_URL yang tidak terjangkau, atau backend model
-    # yang salah konfigurasi (mis. EKSTRAKSI_BACKEND=paddle tanpa URL).
     if settings.database_url:
         await check_connection(settings.database_url)
     ocr_engine = get_ocr_engine()
@@ -36,8 +23,6 @@ async def lifespan(app: FastAPI):
     pipeline = get_pipeline()
     next_stage = get_next_stage()
     yield
-    # Job yang masih jalan diberi waktu selesai dulu: mereka masih butuh klien
-    # HTTP dan database di bawah ini.
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
     await next_stage.aclose()
     if hasattr(ocr_engine, "aclose"):

@@ -1,8 +1,3 @@
-"""
-Backend efficientnet dengan checkpoint sungguhan. Dilewati kalau torch tidak
-terpasang atau weights/best_model.pt tidak ada (bobot tidak ikut git).
-"""
-
 import io
 from pathlib import Path
 

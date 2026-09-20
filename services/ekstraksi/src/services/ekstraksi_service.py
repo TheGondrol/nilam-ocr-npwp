@@ -1,12 +1,3 @@
-"""
-Business logic Ekstraksi: jalankan OCR engine pada gambar dan kembalikan
-blok teks mentah + metadata. Penafsiran teks menjadi field adalah tugas
-service structuring.
-
-Async karena engine sungguhan adalah service HTTP (ocr_common.remote);
-panggilan blocking di dalam endpoint async akan menahan seluruh event loop.
-"""
-
 import time
 from typing import Any
 

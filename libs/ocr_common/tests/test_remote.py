@@ -1,5 +1,3 @@
-"""RemoteModelClient: pemetaan transport/HTTP error ke ServiceError, tanpa jaringan."""
-
 import json
 
 import httpx

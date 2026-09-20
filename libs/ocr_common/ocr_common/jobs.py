@@ -1,29 +1,3 @@
-"""
-Mesin tahap pipeline async, sama untuk ServiceOCR (ekstraksi), ServiceStructuring,
-dan ServiceScoring di sequence diagram. Satu tahap, satu pola:
-
-    POST /v1/<tahap>/jobs
-      -> INSERT <schema>.jobs (request_id, PROCESSING) ON CONFLICT DO NOTHING
-      -> 202 segera; sisanya jalan di background:
-         kerja tahap ini (inference / regex / scoring)
-      -> UPSERT <schema>.results + UPDATE <schema>.jobs status=DONE
-      -> POST callback ke Orkestrasi (request_id, stage, status)
-      -> POST job ke tahap berikutnya (fire-and-forget: tahap itu juga menjawab 202)
-
-Service hanya menyediakan `work` (kerjanya) dan `handoff` (payload tahap
-berikutnya); klaim job, penulisan status, callback, retry, dan penanganan
-gagal ada di sini supaya ketiga service berperilaku sama.
-
-Idempoten: request_id yang sama dikirim dua kali (retry orkestrator, tahap
-sebelumnya mengulang handoff) tidak menjalankan kerja dua kali; panggilan
-kedua tetap 202 dengan `duplicate: true`. Pengecualian: job FAILED boleh
-diklaim ulang, supaya orkestrator bisa mencoba lagi.
-
-Batasan: job jalan sebagai asyncio task di proses ini. Proses mati di tengah
-job -> baris jobs tertinggal PROCESSING dan tidak ada callback; orkestrator
-perlu timeout sendiri untuk kasus itu.
-"""
-
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
@@ -61,9 +35,7 @@ class JobRecord(TypedDict):
 class JobRepository(Protocol):
     name: str
 
-    async def claim(self, request_id: str) -> bool:
-        """True kalau panggilan ini yang memulai job (baru, atau FAILED yang diulang)."""
-        ...
+    async def claim(self, request_id: str) -> bool: ...
 
     async def complete(self, request_id: str, result: dict[str, Any]) -> None: ...
 
@@ -114,14 +86,12 @@ class InMemoryJobRepository:
 def build_job_repository(database_url: str | None, schema: str) -> JobRepository:
     if not database_url:
         return InMemoryJobRepository()
-    # Import di sini: sqlalchemy hanya extra `ocr-common[db]`.
     from ocr_common.jobs_sql import SqlJobRepository
 
     return SqlJobRepository(database_url, schema)
 
 
 async def _with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
-    """Ulangi hanya kegagalan yang mungkin sembuh sendiri (5xx / tidak terjangkau); 4xx langsung naik."""
     for attempt in range(1, attempts + 1):
         try:
             return await call()
@@ -132,8 +102,6 @@ async def _with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: 
 
 
 class StageCallback(Protocol):
-    """Yang dibutuhkan StagePipeline dari callback; test memakai perekam tanpa jaringan."""
-
     async def notify(
         self,
         request_id: str,
@@ -148,16 +116,12 @@ class StageCallback(Protocol):
 
 
 class NextStage(Protocol):
-    """Yang dibutuhkan service dari tahap berikutnya; test memakai perekam tanpa jaringan."""
-
     async def submit(self, payload: dict[str, Any]) -> None: ...
 
     async def aclose(self) -> None: ...
 
 
 class OrchestrationCallback:
-    """POST status tahap ke Orkestrasi. Kegagalan callback dicatat, tidak menggagalkan job."""
-
     def __init__(self, client: RemoteModelClient | None, path: str, *, attempts: int = 3, delay: float = 0.5):
         self._client = client
         self._path = path
@@ -197,8 +161,6 @@ class OrchestrationCallback:
 
 
 class NextStageClient:
-    """POST job ke tahap berikutnya; tahap itu menjawab 202 segera, jadi ini bukan menunggu hasilnya."""
-
     def __init__(self, client: RemoteModelClient, path: str, *, attempts: int = 3, delay: float = 0.5):
         self._client = client
         self._path = path
@@ -213,8 +175,6 @@ class NextStageClient:
 
 
 class BackgroundRunner:
-    """asyncio.create_task dengan referensi kuat: task tanpa referensi bisa di-GC di tengah jalan."""
-
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -254,7 +214,6 @@ class StagePipeline:
         next_stage: str | None = None,
         callback_result: CallbackResult | None = None,
     ) -> dict[str, Any]:
-        """Klaim job lalu jalankan di background. -> isi `data` untuk jawaban 202."""
         claimed = await self.repository.claim(request_id)
         status = STATUS_PROCESSING
         if claimed:
@@ -301,8 +260,6 @@ class StagePipeline:
         try:
             await handoff(result)
         except ServiceError as exc:
-            # Tahap ini DONE, tapi rantainya putus. Tanpa kabar ini request
-            # menggantung selamanya di status tahap berikutnya.
             logger.error("%s job %s: handoff to %s failed: %s", self.stage, request_id, next_stage, exc.message)
             await self.callback.notify(
                 request_id,
@@ -320,8 +277,6 @@ class StagePipeline:
 
 
 def _remote(base_url: str, api_key: str, timeout: float, name: str) -> RemoteModelClient:
-    # passthrough_client_errors: 4xx dari tujuan adalah salah payload, bukan
-    # gangguan sementara, jadi tidak boleh ikut di-retry sebagai 500.
     return RemoteModelClient(
         base_url, timeout, name=name, headers={"X-API-Key": api_key}, passthrough_client_errors=True
     )

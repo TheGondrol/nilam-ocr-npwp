@@ -1,10 +1,3 @@
-"""
-Kontrak yang dipanggil ocr-orchestration (sama dengan mock ocr-npwp):
-generate-request-id -> extract-ocr -> get-ocr-result, tiap field
-{value, confidence}, skor dokumen `guardrails` di level envelope. Service
-lain dalam rantai diganti fakes.py; rantai sungguhan diuji smoke_e2e.py.
-"""
-
 import pytest
 
 from ocr_common.errors import ServiceError

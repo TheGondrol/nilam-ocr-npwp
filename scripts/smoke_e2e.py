@@ -1,30 +1,3 @@
-"""
-Uji asap lewat empat service yang sedang jalan (container atau proses bare).
-Ini satu-satunya pemeriksaan yang melewati HTTP sungguhan antar service; test
-unit tiap service mengganti service lain dengan perekam/fake.
-
-Script ini memerankan ORKESTRASI di sequence diagram:
-
-    1. POST guardrails/check (sinkron)            -> passed true/false + reason
-    2. POST ekstraksi/jobs (202, fire-and-forget) -> OCR -> structuring -> scoring
-    3. polling GET <tahap>/jobs/{request_id} sampai scoring DONE / ada yang FAILED
-    4. dokumen yang ditolak guardrails berhenti di langkah 1 (orkestrator: 422)
-    5. kontrak lama extract-ocr (sinkron) masih jalan
-
-    make smoke
-    # atau, dengan URL/key sendiri:
-    API_KEY=changeme EKSTRAKSI_URL=http://127.0.0.1:8030 python scripts/smoke_e2e.py
-
-Callback: set SMOKE_CALLBACK_PORT=8039 supaya script ini juga menerima callback
-tahap, lalu arahkan ketiga service ke sana (ORCHESTRATION_URL=
-http://host.docker.internal:8039 di container, http://127.0.0.1:8039 kalau
-bare). Tanpa itu callback tidak diperiksa (service melewatinya kalau
-ORCHESTRATION_URL kosong) dan hasil dibaca lewat polling saja.
-
-Memakai gambar NPWP sintetis kalau Pillow terpasang (berguna saat
-EKSTRAKSI_BACKEND=paddle); kalau tidak, bytes palsu (cukup untuk backend mock).
-"""
-
 import io
 import json
 import os
@@ -81,8 +54,6 @@ def _image() -> bytes:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         return b"\xff\xd8fake-jpeg-bytes"
-    # Layout ala kartu NPWP (kop + baris berlabel): cukup mirip untuk lolos
-    # model guardrails, dan barisnya dibaca structurer.
     image = Image.new("RGB", (1000, 620), "white")
     draw = ImageDraw.Draw(image)
     try:
@@ -118,7 +89,6 @@ def _guardrails(client: httpx.Client, request_id: str, filename: str, content: b
 
 
 def _poll(client: httpx.Client, request_id: str) -> dict[str, dict]:
-    """Tunggu sampai scoring selesai atau salah satu tahap FAILED. -> {tahap: job}."""
     deadline = time.monotonic() + TIMEOUT_SECONDS
     jobs: dict[str, dict] = {}
     while time.monotonic() < deadline:
@@ -166,7 +136,6 @@ def async_pipeline(client: httpx.Client) -> bool:
         score = jobs["scoring"]["result"]
         print(f"  npwp_confidence = {score['npwp_confidence']}  name_confidence = {score['name_confidence']}")
 
-    # Idempoten: request_id yang sama tidak diproses ulang.
     again = client.post(
         f"{URLS['ekstraksi']}/v1/ekstraksi/jobs",
         headers=HEADERS,
@@ -178,7 +147,7 @@ def async_pipeline(client: httpx.Client) -> bool:
     ok = ok and duplicate is True
 
     if CALLBACK_PORT:
-        time.sleep(1.0)  # callback terakhir dikirim setelah job scoring tercatat DONE
+        time.sleep(1.0)
         mine = [(c["stage"], c["status"]) for c in callbacks if c.get("request_id") == request_id]
         print("callback diterima:", mine)
         expected = [("OCR", "DONE"), ("STRUCTURING", "DONE"), ("SCORING", "DONE")]
@@ -195,7 +164,6 @@ def guardrails_reject(client: httpx.Client) -> bool:
     print("== guardrails menolak ==")
     report = _guardrails(client, f"REQ_{uuid.uuid4()}", "notnpwp.jpg", _image())
     print(f"notnpwp.jpg -> passed={report['passed']} reason={report['reason']!r}")
-    # Hanya backend mock yang menilai dari nama file; model sungguhan menilai gambarnya.
     return True
 
 

@@ -1,5 +1,3 @@
-# Build context = root repo (Dockerfile tiap service butuh libs/ocr_common).
-# Yang masuk image hanya libs/ocr_common dan services/<nama>/{requirements.txt,src}.
 .git
 .gitignore
 .venv

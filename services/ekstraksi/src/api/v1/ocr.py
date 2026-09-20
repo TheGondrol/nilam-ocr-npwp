@@ -1,9 +1,3 @@
-"""
-API (presentation) layer untuk kontrak OCR yang dipanggil ocr-orchestration.
-Parsing HTTP, panggil service, ServiceError -> HTTPException. Tidak ada
-aturan bisnis di sini; lihat src/services/ocr_service.py.
-"""
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 
 from ocr_common.envelope import envelope
@@ -182,6 +176,4 @@ async def get_ocr_result(request_id: str, service: OcrService = Depends(get_ocr_
         data = await service.get_result(request_id)
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
-    # Skor dokumen naik ke envelope, sejajar dengan jalur extract-ocr. Kalau
-    # ditinggal di dalam `data`, dua endpoint yang sama isinya jadi beda bentuk.
     return envelope(200, "Success", data, request_id, guardrails=data.pop("guardrails", None))

@@ -1,15 +1,3 @@
-"""
-Kontrak data yang MENGALIR di sepanjang pipeline: hasil guardrails, hasil OCR, hasil structuring,
-hasil akhir, dan body callback ke Orkestrasi. Satu tempat, dipakai ketiga service, supaya Swagger
-tiap service menunjukkan bentuk yang sama dan tidak ada lagi `object` tanpa isi.
-
-Model di sini sengaja LONGGAR saat menerima (semua field opsional, field tambahan diterima): data ini
-diteruskan dari tahap ke tahap, dan tahap penerus tidak boleh menolak job hanya karena tahap sebelumnya
-menambah satu field. Bentuk KETAT ada di service pemiliknya (mis. GuardrailReport di service guardrails).
-
-Teks Field(...) muncul di Swagger yang dibaca tim gateway, jadi berbahasa Inggris.
-"""
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,11 +9,6 @@ Verdict = Literal["accepted", "reject"]
 
 class _Forwarded(BaseModel):
     model_config = ConfigDict(extra="allow")
-
-
-# ---------------------------------------------------------------------------
-# Guardrails -> (orkestrasi) -> ekstraksi -> structuring -> scoring -> hasil akhir
-# ---------------------------------------------------------------------------
 
 
 class GuardrailsPage(_Forwarded):
@@ -55,17 +38,14 @@ class GuardrailsDocument(_Forwarded):
 
 
 class GuardrailsResult(_Forwarded):
-    """`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline."""
+    model_config = ConfigDict(
+        json_schema_extra={"description": "`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline."}
+    )
 
     passed: bool | None = Field(None, description="true: the document may proceed to OCR", examples=[True])
     reason: str | None = Field(None, description="Why it was rejected; null when passed", examples=[None])
     document: GuardrailsDocument | None = Field(None, description="Verdict for the document as a whole")
     pages: list[GuardrailsPage] = Field(default_factory=list, description="One entry per page, in page order")
-
-
-# ---------------------------------------------------------------------------
-# OCR -> structuring -> scoring
-# ---------------------------------------------------------------------------
 
 
 class BoundingBoxPayload(_Forwarded):
@@ -89,7 +69,11 @@ class OcrBlockPayload(_Forwarded):
 
 
 class OcrPayload(_Forwarded):
-    """Result of the OCR stage (`ocr.results`), forwarded to structuring and scoring."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Result of the OCR stage (`ocr.results`), forwarded to structuring and scoring."
+        }
+    )
 
     engine: str | None = Field(None, description="OCR backend that produced the blocks", examples=["paddle"])
     model: str | None = Field(
@@ -122,18 +106,17 @@ class StructuredFieldPayload(_Forwarded):
 
 
 class StructuringPayload(_Forwarded):
-    """Result of the structuring stage (`structuring.results`), forwarded to scoring."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Result of the structuring stage (`structuring.results`), forwarded to scoring."
+        }
+    )
 
     document_type: str | None = Field(None, description="Document type the fields were read as", examples=["npwp"])
     fields: dict[str, StructuredFieldPayload] = Field(
         ...,
         description="Always `nomor_npwp`, `nama`, `nama_badan`. A person's card fills `nama`, a company's `nama_badan`",
     )
-
-
-# ---------------------------------------------------------------------------
-# Hasil akhir + callback ke Orkestrasi
-# ---------------------------------------------------------------------------
 
 
 class FinalField(BaseModel):
@@ -144,7 +127,11 @@ class FinalField(BaseModel):
 
 
 class FieldConfidences(BaseModel):
-    """Output of the ML team's trust model: probability that each extracted field is correct."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Output of the ML team's trust model: probability that each extracted field is correct."
+        }
+    )
 
     npwp_confidence: float | None = Field(
         ..., ge=0, le=1, description="P(the NPWP number is correct); null when no number was found", examples=[0.7296]
@@ -155,7 +142,11 @@ class FieldConfidences(BaseModel):
 
 
 class FinalResult(BaseModel):
-    """What the pipeline produced for one request_id. Carried by the SCORING / DONE callback."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "What the pipeline produced for one request_id. Carried by the SCORING / DONE callback."
+        }
+    )
 
     document_type: str = Field(..., description="Document type the fields were read as", examples=["npwp"])
     fields: dict[str, FinalField] = Field(
@@ -185,7 +176,9 @@ class FinalResult(BaseModel):
 
 
 class StageCallback(BaseModel):
-    """Body of the callback a stage POSTs to the orchestrator when it finishes."""
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Body of the callback a stage POSTs to the orchestrator when it finishes."}
+    )
 
     request_id: str = Field(
         ..., description="The request_id you submitted with `POST /v1/ekstraksi/jobs`", examples=[REQUEST_ID_EXAMPLE]

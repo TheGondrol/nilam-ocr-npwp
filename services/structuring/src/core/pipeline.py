@@ -1,5 +1,3 @@
-"""Perakitan tahap STRUCTURING di pipeline async: tabel structuring.jobs/results, callback, handoff ke scoring."""
-
 from functools import lru_cache
 
 from ocr_common.jobs import (

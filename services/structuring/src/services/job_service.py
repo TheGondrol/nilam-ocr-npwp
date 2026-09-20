@@ -1,9 +1,3 @@
-"""
-Tahap STRUCTURING di pipeline async: terima job dari ServiceOCR, jawab 202,
-lalu di background ubah baris OCR menjadi field bernama, simpan hasil,
-callback, dan serahkan ke scoring. Mekanismenya ada di ocr_common/jobs.py.
-"""
-
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -26,14 +20,11 @@ class StructuringJobService:
                 {
                     "text": block.get("text") or "",
                     "confidence": block.get("confidence", 1.0),
-                    # Posisi: backend npwp_rules mencari nama dari jaraknya ke nomor NPWP.
                     "bbox": block.get("bbox"),
                     "page": block.get("page", 0),
                 }
                 for block in ocr.get("blocks") or []
             ]
-            # Sinkron dan CPU-bound (regex sekarang, LLM/model nanti): di
-            # threadpool supaya event loop tetap menerima job lain.
             return await run_in_threadpool(self._structuring.structure, lines)
 
         async def handoff(structuring: dict[str, Any]) -> None:

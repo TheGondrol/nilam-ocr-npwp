@@ -1,5 +1,3 @@
-"""Pengaman konfigurasi khusus structuring (yang umum: libs/ocr_common/tests/test_config.py)."""
-
 from typing import Any
 
 import pytest

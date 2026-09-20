@@ -1,14 +1,3 @@
-"""
-Tahap SCORING di pipeline async, tahap terakhir: terima job dari ServiceStructuring, jawab 202,
-lalu di background susun payload ML engineer dari hasil berantai tahap sebelumnya, hitung confidence
-per field dengan trust model, simpan hasil, dan kirim callback yang membawa HASIL AKHIR ke Orkestrasi
-(yang menyimpannya sebagai requests.final_result). Tidak ada handoff.
-Mekanismenya ada di ocr_common/jobs.py.
-
-Tidak ada skor dokumen maupun keputusan approve/review/reject: keluaran ML engineer hanya
-{"npwp_confidence", "name_confidence"}. Ambang batas adalah urusan pemanggil (Orkestrasi).
-"""
-
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -39,12 +28,9 @@ class ScoringJobService:
 
         async def work() -> dict[str, Any]:
             if document_type != DOCUMENT_TYPE:
-                # Model dilatih hanya dengan kartu NPWP.
                 raise ServiceError(400, f"Unsupported document_type: {document_type}. Supported: ['{DOCUMENT_TYPE}']")
             payload = self._confidence.payload_from_chain(guardrails, ocr, structuring)
-            # predict_proba sinkron dan CPU-bound: di threadpool supaya event loop tetap menerima job lain.
             result = await run_in_threadpool(self._confidence.predict, payload)
-            # Payload ikut disimpan: jejak audit atas angka apa persisnya yang dinilai model.
             return {**result, "payload": payload}
 
         def final_result(scoring: dict[str, Any]) -> dict[str, Any]:

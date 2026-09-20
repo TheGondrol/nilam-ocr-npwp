@@ -11,8 +11,6 @@ from src.services.pages import render_pages
 
 
 class StubClassifier:
-    """Mengembalikan prediksi yang sudah ditentukan, satu per halaman."""
-
     reject_threshold = 0.5
 
     def __init__(self, *predictions):
@@ -43,11 +41,6 @@ def _pdf(n_pages: int) -> bytes:
     return document.tobytes()
 
 
-# ---------------------------------------------------------------------------
-# Rendering halaman
-# ---------------------------------------------------------------------------
-
-
 def test_image_is_one_page():
     pages = render_pages("image/jpeg", _jpeg(), dpi=150, max_pages=20)
     assert len(pages) == 1
@@ -71,11 +64,6 @@ def test_unreadable_pdf_is_400():
     with pytest.raises(ServiceError) as exc:
         render_pages("application/pdf", b"%PDF-1.4 broken", dpi=150, max_pages=20)
     assert exc.value.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Agregasi vonis dokumen
-# ---------------------------------------------------------------------------
 
 
 async def test_all_pages_accepted_gives_accepted_with_weakest_page_confidence():
@@ -119,11 +107,6 @@ async def test_unsupported_content_type_is_400():
     with pytest.raises(ServiceError) as exc:
         await GuardrailsService(StubClassifier(), _settings()).check("a.txt", "text/plain", b"x")
     assert exc.value.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# HTTP (backend mock)
-# ---------------------------------------------------------------------------
 
 
 def test_health_lists_backend(client):
@@ -171,7 +154,6 @@ def test_http_mock_scenarios_reject_with_200(client, auth, filename):
     data = response.json()["data"]
     assert data["document"]["verdict"] == "reject"
     assert data["document"]["n_reject"] == 1
-    # "true/false + alasan" di sequence diagram: orkestrator menjawab 422 dengan reason ini.
     assert data["passed"] is False
     assert data["reason"] == "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"
 

@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: structuring
 spec:
-  replicas: 1 # di-override per overlay; production guardrails memakai HPA
+  replicas: 1
   revisionHistoryLimit: 5
   selector:
     matchLabels:
@@ -14,27 +14,25 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0 # pod lama baru dimatikan setelah pod baru /ready
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app.kubernetes.io/name: structuring
     spec:
       serviceAccountName: nilam-ocr
-      automountServiceAccountToken: false # service tidak memanggil API Kubernetes
-      # > PIPELINE_DRAIN_TIMEOUT_SECONDS (30) + preStop (5): job background yang masih jalan
-      # diberi waktu selesai sebelum SIGKILL. Default k8s 30 s akan memotongnya tepat di batas.
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000 # appuser di Dockerfile
+        runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: structuring
-          image: nilam-ocr-structuring # nama + tag sebenarnya di-set overlay (images:)
+          image: nilam-ocr-structuring
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -43,7 +41,6 @@ spec:
             - configMapRef:
                 name: structuring-config
           env:
-            # Hanya rahasia yang dibutuhkan service ini, bukan seluruh Secret.
             - name: API_KEY
               valueFrom:
                 secretKeyRef: {name: nilam-ocr-secrets, key: API_KEY}
@@ -53,11 +50,8 @@ spec:
             - name: ORCHESTRATION_API_KEY
               valueFrom:
                 secretKeyRef: {name: nilam-ocr-secrets, key: ORCHESTRATION_API_KEY, optional: true}
-            # Root filesystem read-only: pustaka yang menulis cache ke $HOME diarahkan ke /tmp.
             - name: HOME
               value: /tmp
-          # /health = proses hidup (tidak menyentuh dependensi); /ready = dependensi WAJIB menjawab.
-          # Liveness sengaja TIDAK memakai /ready: gangguan database tidak boleh me-restart semua pod.
           startupProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 2
@@ -75,8 +69,6 @@ spec:
           lifecycle:
             preStop:
               exec:
-                # Beri waktu endpoint dicabut dari Service sebelum SIGTERM, supaya tidak ada
-                # request baru yang masuk ke pod yang sedang berhenti.
                 command: ["sleep", "5"]
           resources:
             requests:

@@ -1,16 +1,9 @@
-# Konfigurasi tool per service. Ruff dikonfigurasi di pyproject.toml root
-# (file ini tidak punya [tool.ruff], jadi ruff melewatinya). pytest dan ty
-# dijalankan dari folder service ini karena package-nya bernama `src`, sama
-# seperti ocr-* di nilam-ocr-orchestration.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
-# Modul di-import sebagai `src.<...>`; root import adalah folder service ini.
-# ../../libs/ocr_common: lib bersama dipasang editable, dan import hook editable
-# tidak terlihat oleh ty/pyright, jadi source-nya ditunjuk langsung.
 [tool.ty.environment]
 root = ["."]
 extra-paths = [".", "../../libs/ocr_common"]

@@ -1,9 +1,3 @@
-"""
-API (presentation) layer tahap STRUCTURING di pipeline async. Dipanggil
-ServiceOCR; menjawab 202 segera, hasilnya dikabarkan ke Orkestrasi lewat
-callback. Tidak ada aturan bisnis di sini; lihat src/services/job_service.py.
-"""
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from ocr_common.envelope import envelope
@@ -71,7 +65,6 @@ def get_job_service() -> StructuringJobService:
     },
 )
 async def submit_job(body: StructuringJobRequest, service: StructuringJobService = Depends(get_job_service)):
-    # exclude_unset: data tahap sebelumnya diteruskan PERSIS seperti diterima, tanpa default tambahan.
     guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
     data = await service.submit(
         body.request_id, body.document_type, guardrails, body.ocr.model_dump(exclude_unset=True)

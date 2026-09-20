@@ -1,25 +1,16 @@
-# Konfigurasi ruff untuk seluruh monorepo. pytest dan ty dikonfigurasi per
-# package (libs/ocr_common/pyproject.toml, services/<nama>/pyproject.toml)
-# karena tiap service punya package `src` sendiri.
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 src = ["libs/ocr_common", "services/guardrails", "services/ekstraksi", "services/structuring", "services/scoring"]
-# Kode pihak lain yang di-vendor apa adanya (lihat README di foldernya): tidak di-lint / di-format.
 extend-exclude = ["services/*/src/vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-# `src` adalah package lokal tiap service; `ocr_common` adalah lib terpasang
-# (third-party menurut isort), jadi urutannya: stdlib, third-party (termasuk
-# fastapi & ocr_common), lalu src.
 known-first-party = ["src", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
-# Gaya `file: UploadFile = File(...)` dan `raise HTTPException(...)` di dalam except
-# disamakan dengan nilam-ocr-orchestration.
 "services/*/src/api/**" = ["B008", "B904"]
 "libs/ocr_common/ocr_common/intake.py" = ["B008"]
-"libs/ocr_common/ocr_common/fetch_url.py" = ["B904", "UP"]  # disalin apa adanya dari ocr-*
+"libs/ocr_common/ocr_common/fetch_url.py" = ["B904", "UP"]

@@ -1,6 +1,3 @@
-# Lapis jaringan di bawah X-API-Key: tiap service hanya menerima dari pemanggil yang sah.
-# Butuh GKE Dataplane V2 (atau network policy enforcement); tanpa itu objek ini diabaikan.
-# Egress sengaja tidak dibatasi: pod butuh DNS, Cloud SQL, model OCR (VM), dan Orkestrasi.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -11,8 +8,6 @@ spec:
       app.kubernetes.io/part-of: nilam-ocr
   policyTypes: ["Ingress"]
 ---
-# Orkestrasi -> guardrails (sinkron) dan -> ekstraksi (/v1/ekstraksi/jobs).
-# Label namespace Orkestrasi di-patch per overlay.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -28,7 +23,6 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: REPLACE_ME-orchestration-namespace
 ---
-# Rantai pipeline: ekstraksi -> structuring -> scoring.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -60,14 +54,12 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: structuring
-        # Kontrak lama extract-ocr: ekstraksi memanggil scoring langsung.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: ekstraksi
       ports:
         - port: 8033
 ---
-# Kontrak lama extract-ocr: ekstraksi memanggil guardrails. Hapus bersama kontrak lama.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

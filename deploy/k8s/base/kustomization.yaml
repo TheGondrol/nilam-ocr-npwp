@@ -9,5 +9,5 @@ resources:
 labels:
   - pairs:
       app.kubernetes.io/part-of: nilam-ocr
-    includeSelectors: false # selector Deployment tidak boleh berubah setelah dibuat
-    includeTemplates: true # tapi pod harus membawanya: dipakai NetworkPolicy
+    includeSelectors: false
+    includeTemplates: true

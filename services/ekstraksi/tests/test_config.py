@@ -1,5 +1,3 @@
-"""Pengaman konfigurasi khusus ekstraksi (yang umum: libs/ocr_common/tests/test_config.py)."""
-
 from typing import Any
 
 import pytest
@@ -26,7 +24,6 @@ def test_production_configuration_is_accepted():
 
 
 def test_mock_ocr_is_refused_outside_local():
-    """Default backend adalah mock: lupa mengisi EKSTRAKSI_BACKEND tidak boleh berarti NPWP karangan di produksi."""
     with pytest.raises(ValidationError, match="EKSTRAKSI_BACKEND=mock fabricates results"):
         settings(ekstraksi_backend="mock")
 

@@ -1,23 +1,3 @@
-"""
-Pembungkus OCR engine. Kontrak method:
-
-    async extract(filename, content, content_type) -> {
-        "blocks": [{"text": str, "confidence": 0..1, "bbox": {"x1","y1","x2","y2"} | None, "page": int}, ...],
-        "model": str | None,   # identitas model yang membaca, untuk audit
-    }
-
-Blok terurut sesuai urutan baca dari model (atas ke bawah). `page` 0-based,
-berguna untuk PDF multi-halaman.
-
-Implementasi:
-- remote: klien ke service model ekstraksi milik ML engineer, POST /v1/predict/json
-  (X-API-Key; hasil mentah PaddleOCR: rec_texts / rec_scores / rec_polys per halaman).
-- paddle: klien ke API lama service PaddleOCR (PP-OCRv6), POST /ocr, tanpa auth.
-- mock: baris ala kartu NPWP yang deterministik (seed dari hash isi file),
-  berbentuk "LABEL : NILAI" supaya bisa langsung dimakan structurer. Skenario
-  nama file mengikuti mock ocr-npwp: 'servererror' -> 500.
-"""
-
 import hashlib
 import random
 from functools import lru_cache
@@ -30,19 +10,6 @@ from src.core.config import Settings, get_settings
 
 
 class PaddleOcrEngine:
-    """
-    Klien ke service PaddleOCR. Response model untuk POST /ocr (multipart `file`):
-
-        {"models": {"detection", "recognition", "pipeline", "device"},
-         "num_pages": int,
-         "pages": [{"page_index", "width", "height",
-                    "texts": [{"text", "score", "poly": [[x, y] x 4]}]}],
-         "filename": str}
-
-    Dengan query split=true bentuk yang sama dibungkus list; keduanya diterima.
-    File yang tidak bisa didecode dijawab 200 dengan num_pages 0 (bukan error).
-    """
-
     name = "paddle"
 
     def __init__(self, client: RemoteModelClient):
@@ -84,24 +51,6 @@ class PaddleOcrEngine:
 
 
 class RemoteOcrEngine:
-    """
-    Klien ke service model ekstraksi milik ML engineer. Kontraknya:
-
-        POST {EKSTRAKSI_OCR_URL}/v1/predict/json
-        header X-API-Key, multipart `file` (gambar atau PDF)
-        -> [{"page_index": 0,
-             "rec_texts":  ["npwp", "95.844.800.1-805.000", ...],
-             "rec_scores": [0.9847, 0.9999, ...],
-             "rec_polys":  [[[x, y], [x, y], [x, y], [x, y]], ...]}, ...]
-
-    Satu elemen per halaman; tiga array-nya PARALEL (indeks i = satu baris
-    teks). Itu bentuk hasil mentah PaddleOCR, beda dengan backend `paddle`
-    (POST /ocr) yang sudah membungkusnya jadi pages[].texts[]{text, score, poly}.
-    Response tidak membawa identitas model, jadi `model` selalu None.
-
-    Envelope {"data": [...]} (gaya service model guardrails) juga diterima.
-    """
-
     name = "remote"
     PREDICT_PATH = "/v1/predict/json"
 
@@ -122,8 +71,6 @@ class RemoteOcrEngine:
 
 
 def _parse_rec_pages(body: Any, name: str) -> list[dict[str, Any]]:
-    """Array paralel -> blocks. Bentuk lain -> 500, bukan ditebak: kalau teks dan skor
-    tidak sejajar, confidence menempel ke baris yang salah dan scoring ikut salah."""
     unexpected = ServiceError(500, f"{name} returned an unexpected response")
     pages = body.get("data") if isinstance(body, dict) else body
     if not isinstance(pages, list):
@@ -136,7 +83,6 @@ def _parse_rec_pages(body: Any, name: str) -> list[dict[str, Any]]:
         texts, scores, polys = page.get("rec_texts"), page.get("rec_scores"), page.get("rec_polys")
         if not isinstance(texts, list) or not isinstance(scores, list) or len(scores) != len(texts):
             raise unexpected
-        # bbox opsional di skema kita, jadi rec_polys boleh tidak ada; kalau ada harus sejajar.
         if polys is None:
             polys = [None] * len(texts)
         if not isinstance(polys, list) or len(polys) != len(texts):
@@ -171,7 +117,6 @@ def _confidence(score: Any) -> float:
 
 
 def _bbox(poly: Any) -> dict[str, int] | None:
-    """poly = 4 titik [x, y] (bisa miring); bbox = kotak tegak yang melingkupinya."""
     try:
         xs = [float(point[0]) for point in poly]
         ys = [float(point[1]) for point in poly]
@@ -181,10 +126,6 @@ def _bbox(poly: Any) -> dict[str, int] | None:
         return None
     return {"x1": round(min(xs)), "y1": round(min(ys)), "x2": round(max(xs)), "y2": round(max(ys))}
 
-
-# ---------------------------------------------------------------------------
-# Mock
-# ---------------------------------------------------------------------------
 
 NAMA_POOL = [
     "BUDI SANTOSO",
@@ -241,11 +182,6 @@ class MockOcrEngine:
             for i, text in enumerate(lines)
         ]
         return {"blocks": blocks, "model": None}
-
-
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
 
 
 def _build_paddle(settings: Settings) -> PaddleOcrEngine:

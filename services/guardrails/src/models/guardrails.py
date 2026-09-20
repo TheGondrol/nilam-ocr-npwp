@@ -1,29 +1,3 @@
-"""
-Pembungkus model Guardrails: pengklasifikasi halaman accepted / reject.
-
-Dua kontrak method, tergantung di mana modelnya jalan:
-
-    backend lokal (model di proses ini):
-    classify(filename, pages: list[PIL.Image.Image]) -> list[PagePrediction]
-        PagePrediction = (proba_approve, proba_reject), keduanya 0..1, jumlah 1.
-        Service layer (src/services/guardrails_service.py) yang merender file
-        menjadi halaman, menerapkan ambang batas, dan mengagregasi vonis dokumen.
-
-    backend remote (model sebagai service HTTP):
-    async check_document(filename, content, content_type) -> {"document", "pages"}
-        Service model menerima berkas utuh dan sudah mengembalikan vonis dokumen.
-
-Implementasi:
-- remote: service model guardrails milik ML engineer (POST /v1/predict/json);
-  lihat RemoteGuardrailsModel.
-- efficientnet: checkpoint torchvision EfficientNet-B0 milik ML engineer
-  (weights/best_model.pt). Checkpoint berisi `model_state_dict`,
-  `class_names` ['accepted', 'reject'], `image_size` 224, `reject_threshold`
-  0.5, `epoch`, `val_macro_f1`. torch di-import di dalam kelas supaya backend
-  mock (dan test) tidak butuh torch terpasang.
-- mock: vonis dari nama file, skenario sama dengan mock ocr-*.
-"""
-
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -38,9 +12,8 @@ from src.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-PagePrediction = tuple[float, float]  # (proba_approve, proba_reject)
+PagePrediction = tuple[float, float]
 
-# Normalisasi ImageNet, bawaan bobot pretrained torchvision yang di-fine-tune.
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -62,8 +35,6 @@ class EfficientNetPageClassifier:
         if threads:
             torch.set_num_threads(threads)
 
-        # weights_only=True: checkpoint hanya berisi tensor + metadata skalar/list,
-        # jadi pemuatan tanpa eksekusi pickle sembarang aman dan cukup.
         checkpoint = torch.load(path, map_location=device, weights_only=True)
         state_dict = checkpoint["model_state_dict"]
         self.class_names: list[str] = list(checkpoint.get("class_names") or ["accepted", "reject"])
@@ -95,11 +66,9 @@ class EfficientNetPageClassifier:
     def _to_tensor(self, image: Image.Image):
         import numpy as np
 
-        # Resize langsung ke image_size x image_size (bukan crop), supaya tepi
-        # halaman yang ter-crop tetap terlihat oleh model.
         resized = image.convert("RGB").resize((self.image_size, self.image_size), Image.Resampling.BILINEAR)
-        array = np.asarray(resized, dtype=np.float32) / 255.0  # HWC
-        tensor = self._torch.from_numpy(array).permute(2, 0, 1)  # CHW
+        array = np.asarray(resized, dtype=np.float32) / 255.0
+        tensor = self._torch.from_numpy(array).permute(2, 0, 1)
         return (tensor - self._mean) / self._std
 
     def classify(self, filename: str, pages: list[Image.Image]) -> list[PagePrediction]:
@@ -112,23 +81,6 @@ class EfficientNetPageClassifier:
 
 
 class RemoteGuardrailsModel:
-    """
-    Klien ke service model guardrails milik ML engineer. Kontraknya:
-
-        POST {GUARDRAILS_MODEL_URL}/v1/predict/json
-        header X-API-Key, multipart `file` (gambar atau PDF)
-        -> {"status_code": 200, "message": "OK",
-            "data": {"document": {"verdict", "confidence", "n_pages", "n_approve", "n_reject"},
-                     "pages": [{"page_index", "proba_approve", "proba_reject", "verdict"}]}}
-
-    Beda dengan backend lokal: service itu menerima BERKAS utuh (PDF dirender
-    di sana) dan sudah mengembalikan vonis dokumen, jadi kontraknya
-    check_document(), bukan classify(halaman). Vonisnya diteruskan apa adanya:
-    ambang reject, kebijakan dokumen, dan render PDF adalah urusan service
-    model, sehingga GUARDRAILS_REJECT_THRESHOLD / _DOCUMENT_POLICY / _PDF_DPI /
-    _MAX_PAGES tidak berlaku untuk backend ini.
-    """
-
     name = "remote"
     PREDICT_PATH = "/v1/predict/json"
 
@@ -136,7 +88,6 @@ class RemoteGuardrailsModel:
         self._client = client
 
     async def check_document(self, filename: str, content: bytes, content_type: str | None) -> dict[str, Any]:
-        """-> {"document": {...}, "pages": [...]}, bentuk yang sama dengan backend lokal."""
         body = await self._client.post_multipart(
             self.PREDICT_PATH,
             filename=filename or "upload",
@@ -156,8 +107,6 @@ def _verdict(value: Any) -> str:
 
 
 def _parse_report(body: Any, name: str) -> dict[str, Any]:
-    """Ambil hanya field kontrak, dengan tipe yang dijanjikan schema kita. Bentuk lain -> 500,
-    bukan diteruskan: vonis yang salah baca lebih berbahaya daripada request yang gagal."""
     try:
         data = body["data"]
         document = data["document"]

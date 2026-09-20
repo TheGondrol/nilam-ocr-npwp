@@ -8,7 +8,6 @@ from src.services.ekstraksi_service import EkstraksiService
 
 SETTINGS = Settings(api_key="x", _env_file=None)
 
-# Response asli service PaddleOCR (PP-OCRv6) untuk gambar NPWP sintetis, dipangkas.
 PADDLE_RESPONSE = {
     "models": {
         "detection": "PP-OCRv6_medium_det",
@@ -92,7 +91,6 @@ async def test_paddle_engine_posts_multipart_and_maps_response():
     assert b"\xff\xd8jpeg" in seen["body"]
 
     assert result["model"] == "PP-OCRv6_medium_det+PP-OCRv6_medium_rec"
-    # Baris kosong dibuang; urutan dipertahankan.
     assert [b["text"] for b in result["blocks"]] == [
         "KEMENTERIAN KEUANGAN REPUBLIK INDONESIA",
         "NPWP:12.345.678.9-012.345",

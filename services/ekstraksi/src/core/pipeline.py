@@ -1,5 +1,3 @@
-"""Perakitan tahap OCR di pipeline async: tabel ocr.jobs/ocr.results, callback, handoff ke structuring."""
-
 from functools import lru_cache
 
 from ocr_common.jobs import (

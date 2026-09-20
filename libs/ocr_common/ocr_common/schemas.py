@@ -1,10 +1,3 @@
-"""
-Skema response yang sama untuk semua service: envelope sukses, error (+ contoh), job, health.
-
-Teks di dalam Field(...) muncul apa adanya di Swagger (/docs) dan openapi.yaml yang dibaca tim lain
-(gateway / orkestrasi), jadi ditulis dalam bahasa Inggris dan selalu membawa contoh.
-"""
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -18,8 +11,6 @@ JobState = Literal["PROCESSING", "DONE", "FAILED"]
 
 
 class SuccessEnvelope(BaseModel):
-    """Bagian envelope yang sama untuk semua response sukses; subclass hanya menentukan `data`."""
-
     status_code: int = Field(200, description="Same as the HTTP status code", examples=[200])
     status_desc: str = Field("OK", description="Reason phrase of `status_code`", examples=["OK"])
     message: str = Field("Success", description="Human-readable outcome", examples=["Success"])
@@ -81,8 +72,6 @@ class JobAcceptedResponse(SuccessEnvelope):
 
 
 class JobStatusBase(BaseModel):
-    """Status satu tahap untuk satu request_id. Tiap service menurunkannya dengan `result` yang bertipe."""
-
     request_id: str = Field(..., description="request_id of the pipeline run", examples=[REQUEST_ID_EXAMPLE])
     stage: Stage = Field(..., description="Pipeline stage this job belongs to", examples=["OCR"])
     status: JobState = Field(
@@ -133,11 +122,6 @@ def error(
     request_id: str | None = None,
     errors: str | None = None,
 ) -> dict:
-    """Satu entri `responses` lengkap dengan contohnya sendiri.
-
-    Tanpa contoh per status, /docs memakai example bawaan ErrorResponse untuk
-    semua kode: 401 pun tampil sebagai 400, dan pembacanya belajar kode yang
-    salah."""
     return {
         "model": ErrorResponse,
         "description": description,
@@ -150,10 +134,6 @@ def error(
 
 
 def success_examples(description: str, **named: tuple[str, Any]) -> dict:
-    """Entri `responses` 2xx dengan contoh bernama: `nama=(ringkasan, body lengkap)`.
-
-    Satu contoh per skenario yang harus ditangani pemanggil (mis. job baru vs duplikat), bukan satu
-    contoh rakitan dari `examples` tiap field: yang terakhir tidak pernah menunjukkan kombinasi nyata."""
     return {
         "description": description,
         "content": {
@@ -164,5 +144,4 @@ def success_examples(description: str, **named: tuple[str, Any]) -> dict:
     }
 
 
-# Entri 401 yang sama di semua router; diimpor supaya kalimatnya satu sumber.
 UNAUTHORIZED = error(401, "Missing or invalid X-API-Key", "Invalid or missing API key")

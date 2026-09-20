@@ -1,9 +1,3 @@
-"""
-Tahap OCR di pipeline async lewat HTTP: 202 segera, kerja di background,
-callback, lalu handoff ke structuring. Orkestrasi dan structuring diganti
-perekam (tanpa jaringan); rantai sungguhan diuji scripts/smoke_e2e.py.
-"""
-
 import json
 
 import pytest
@@ -25,7 +19,6 @@ def harness():
     pipeline = StagePipeline(stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback)
     service = EkstraksiJobService(pipeline, get_ekstraksi_service(), next_stage, 5 * 1024 * 1024)
     app.dependency_overrides[get_job_service] = lambda: service
-    # Context manager: satu event loop selama test, supaya task background hidup.
     with make_client(app) as client:
         yield client, callback, next_stage
     app.dependency_overrides.pop(get_job_service, None)
@@ -51,7 +44,6 @@ def test_submit_returns_202_then_runs_ocr_callback_and_handoff(harness, auth):
     assert job["result"]["blocks"]
 
     assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("OCR", "DONE", None)]
-    # Payload ke structuring: request_id + document_type + hasil guardrails + hasil OCR.
     assert next_stage.payloads == [
         {"request_id": "REQ_1", "document_type": "npwp", "guardrails": GUARDRAILS, "ocr": job["result"]}
     ]
@@ -70,7 +62,6 @@ def test_same_request_id_is_not_processed_twice(harness, auth):
 
 
 def test_bad_file_fails_the_job_not_the_request(harness, auth):
-    """File dinilai di background: 202 tetap keluar, kegagalannya dikabarkan lewat callback."""
     client, callback, next_stage = harness
     response = client.post(
         "/v1/ekstraksi/jobs",
@@ -94,7 +85,6 @@ def test_handoff_failure_is_reported_as_structuring_failed(harness, auth):
     _submit(client, auth, "REQ_4")
 
     assert wait_for_job(client, "/v1/ekstraksi/jobs/REQ_4")["status"] == "DONE"
-    # Callback kedua dikirim setelah job DONE; tunggu sampai muncul.
     for _ in range(100):
         if len(callback.calls) == 2:
             break

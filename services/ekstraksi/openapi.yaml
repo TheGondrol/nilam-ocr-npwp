@@ -964,14 +964,6 @@ components:
       required:
       - value
       title: Confidence
-      description: 'Satu field hasil OCR beserta seberapa yakin mesin membacanya.
-
-
-        Nilainya selalu terbungkus, juga saat confidence-nya tinggi: bentuk yang
-
-        berubah-ubah menuntut tiap konsumen memeriksa dulu ini dict atau skalar,
-
-        dan yang lupa memeriksa baru ketahuan di produksi.'
     ErrorResponse:
       properties:
         status_code:

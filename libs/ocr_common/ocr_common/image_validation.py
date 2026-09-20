@@ -1,5 +1,3 @@
-"""Validasi upload gambar yang dipakai semua service yang menerima file."""
-
 from ocr_common.config import BaseServiceSettings
 from ocr_common.errors import ServiceError
 

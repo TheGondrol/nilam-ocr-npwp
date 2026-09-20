@@ -693,8 +693,6 @@ components:
           - 0.9821
       type: object
       title: ConfidenceRequest
-      description: Payload dari ML engineer. Semua nilai adalah hasil berantai tahap sebelumnya; null
-        = tidak tersedia.
     ConfidenceResponse:
       properties:
         status_code:
@@ -1459,6 +1457,7 @@ components:
       - name_confidence
       - payload
       title: ScoringJobResult
+      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
     ScoringJobStatus:
       properties:
         request_id:
@@ -1604,6 +1603,7 @@ components:
       - request_id
       - status
       title: ScoringStageCallback
+      description: Body of the callback a stage POSTs to the orchestrator when it finishes.
     StructuredFieldPayload:
       properties:
         value:

@@ -1,15 +1,3 @@
-"""
-Klien ke service lain dalam rantai extract-ocr (analog src/clients/ocr_client.py
-di ocr-orchestration). Service ini adalah "ServiceOCR" di sequence diagram:
-untuk kontrak extract-ocr sinkron ia memanggil guardrails, lalu OCR-nya
-sendiri, lalu structuring, lalu scoring, semuanya lewat HTTP supaya tiap
-tahap bisa di-deploy dan diskalakan terpisah.
-
-passthrough_client_errors=True: 4xx dari service lain (mis. 400 "No text
-lines to structure") adalah salah input dan diteruskan apa adanya; 5xx dan
-kegagalan transport menjadi 500/503/504 dengan nama service-nya.
-"""
-
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -30,7 +18,6 @@ class GuardrailsClient:
         self._client = client
 
     async def check(self, request_id: str, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
-        """-> {"document": {"verdict", "confidence", "n_pages", "n_approve", "n_reject"}, "pages": [...]}."""
         body = await self._client.post_multipart(
             "/v1/guardrails/check",
             filename=filename or "upload",
@@ -46,7 +33,6 @@ class StructuringClient:
         self._client = client
 
     async def structure(self, lines: list[dict[str, Any]]) -> dict[str, Any]:
-        """-> {"document_type", "fields": {name: {"value", "confidence", "source"}}}."""
         body = await self._client.post_json("/v1/structuring/structure", {"lines": lines})
         return _data(body, self._client.name)
 
@@ -56,7 +42,6 @@ class ScoringClient:
         self._client = client
 
     async def score(self, document_type: str, fields: dict[str, Any]) -> dict[str, Any]:
-        """-> {"score", "decision", "field_scores", "reasons"}."""
         payload = {
             "document_type": document_type,
             "fields": {

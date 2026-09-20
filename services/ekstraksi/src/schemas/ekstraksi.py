@@ -1,5 +1,3 @@
-"""Skema OCR mentah + status job tahap OCR. Teks Field(...) tampil di Swagger: bahasa Inggris."""
-
 from typing import Literal
 
 from pydantic import BaseModel, Field

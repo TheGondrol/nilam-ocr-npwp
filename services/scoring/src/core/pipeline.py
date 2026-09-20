@@ -1,5 +1,3 @@
-"""Perakitan tahap SCORING di pipeline async: tabel scoring.jobs/results dan callback hasil akhir."""
-
 from functools import lru_cache
 
 from ocr_common.jobs import STAGE_SCORING, StagePipeline, build_stage_pipeline

@@ -1,12 +1,3 @@
-"""
-Pabrik FastAPI app: satu tempat untuk middleware request_id, exception
-handler (envelope), dan /health, supaya keempat service berperilaku sama
-tanpa menyalin main.py.
-
-Tiap service: `app = create_app(settings=..., title=..., routers=[...],
-backends={...}, lifespan=...)` di src/main.py.
-"""
-
 import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -25,17 +16,14 @@ from ocr_common.schemas import HealthResponse, ReadyResponse, success_examples
 logger = logging.getLogger(__name__)
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
-# Satu pemeriksaan dependensi wajib: selesai tanpa exception = ok.
 ReadinessCheck = Callable[[], Awaitable[None]]
 
 
 def database_readiness(database_url: str | None) -> dict[str, ReadinessCheck]:
-    """Readiness untuk service yang menyimpan status. Kosong kalau tanpa DATABASE_URL (dev, in-memory)."""
     if not database_url:
         return {}
 
     async def check() -> None:
-        # Import di sini: sqlalchemy hanya extra `ocr-common[db]`.
         from ocr_common.database import check_connection
 
         await check_connection(database_url)
@@ -43,8 +31,6 @@ def database_readiness(database_url: str | None) -> dict[str, ReadinessCheck]:
     return {"database": check}
 
 
-# Bagian yang sama di Swagger keempat service: aturan yang harus diketahui pemanggil sebelum
-# membaca endpoint mana pun. Ditulis sekali di sini supaya tidak pernah berbeda antar service.
 API_CONVENTIONS = """
 
 ## Conventions (the same for every nilam-ocr service)
@@ -86,19 +72,13 @@ def create_app(
     routers: Iterable[APIRouter] = (),
     backends: dict[str, str] | None = None,
     readiness: Mapping[str, ReadinessCheck] | None = None,
-    # Contoh untuk Swagger. STATIS, bukan nilai yang sedang aktif: openapi.yaml tidak boleh berubah
-    # mengikuti .env tempat ia dibuat (efficientnet di laptop, mock di test).
     backends_example: dict[str, str] | None = None,
     readiness_example: dict[str, str] | None = None,
     lifespan: Lifespan | None = None,
 ) -> FastAPI:
-    # uvicorn hanya mengonfigurasi logger miliknya sendiri; tanpa ini pesan
-    # INFO aplikasi (mis. "guardrails model loaded ...") tidak pernah tampil.
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    # "/" di urutan pertama: Swagger UI memakai server pertama untuk "Try it out", dan halaman /docs
-    # selalu disajikan oleh service itu sendiri. Sisanya adalah alamat yang dipakai pemanggil sungguhan.
     servers: list[dict[str, Any]] = [{"url": "/", "description": "This host (where this page is served)"}]
     if settings.service_base_url:
         servers.append({"url": settings.service_base_url, "description": "Configured base URL"})
@@ -129,8 +109,6 @@ def create_app(
         servers=servers,
         lifespan=lifespan,
     )
-    # Dibaca oleh security.verify_api_key dan intake.read_image, supaya lib
-    # ini tidak perlu meng-import kelas Settings milik service.
     app.state.settings = settings
     if settings.auth_disabled:
         logging.getLogger(__name__).warning(
@@ -148,10 +126,6 @@ def create_app(
 
 
 def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> None:
-    """Dokumentasikan callback tahap sebagai webhook OpenAPI 3.1: request yang DIKIRIM service ini ke
-    Orkestrasi. Webhook, bukan `callbacks` per operasi, karena URL tujuannya tidak datang dari request
-    melainkan dari konfigurasi (ORCHESTRATION_URL + ORCHESTRATION_CALLBACK_PATH). Tidak menambah route."""
-
     @app.webhooks.post(
         "stageCallback",
         operation_id="stageCallback",
@@ -179,10 +153,8 @@ def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> 
             description="`ORCHESTRATION_API_KEY` of the sending service; when unset, that service's own `API_KEY`",
         ),
     ) -> None:
-        """Hanya untuk dokumentasi; tidak pernah dipanggil."""
+        pass
 
-    # FastAPI menambahkan 422 + HTTPValidationError ke setiap operasi yang punya body. Di webhook itu
-    # menyesatkan: jawaban endpoint ini ditentukan Orkestrasi, bukan oleh service ini.
     generate = app.openapi
 
     def openapi() -> dict[str, Any]:
@@ -190,7 +162,6 @@ def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> 
         schema = generate()
         if fresh:
             schema["webhooks"]["stageCallback"]["post"]["responses"].pop("422", None)
-            # Setiap 422 di service ini memakai ErrorResponse, jadi skema bawaan FastAPI tinggal yatim.
             if "#/components/schemas/HTTPValidationError" not in json.dumps(schema["paths"]):
                 for orphan in ("HTTPValidationError", "ValidationError"):
                     schema["components"]["schemas"].pop(orphan, None)
@@ -266,7 +237,6 @@ def _health_router(
                 await check()
                 checks[name] = "ok"
             except Exception as exc:
-                # Hanya jenis error-nya: pesan koneksi bisa memuat host / user database.
                 logger.warning("readiness check %r failed: %s", name, type(exc).__name__)
                 checks[name] = "failed"
         ok = all(state == "ok" for state in checks.values())
@@ -288,11 +258,6 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        # Form/path/body yang hilang atau salah bentuk gagal sebelum fungsi
-        # endpoint jalan. Tanpa handler ini FastAPI menjawab {"detail": [...]},
-        # bentuk yang tidak dikenal konsumen kita. errors diisi kode, bukan
-        # pesan: pesannya menyebut field yang berbeda tiap kali, jadi hanya
-        # kode yang bisa dicabang oleh pemanggil.
         request_id = get_request_id(request)
         message = "; ".join(f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors())
         return JSONResponse(

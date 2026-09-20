@@ -11,7 +11,6 @@ from src.services.structuring_service import StructuringService
 
 router = APIRouter(tags=["Structuring"], dependencies=[Depends(verify_api_key)])
 
-# Dipakai juga oleh contoh GET /v1/structuring/jobs/{request_id}: hasil tahap ini = bentuk ini.
 STRUCTURED_EXAMPLE = {
     "document_type": "npwp",
     "fields": {

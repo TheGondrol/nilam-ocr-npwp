@@ -1,14 +1,3 @@
-"""
-Backend `remote`: service model ekstraksi milik ML engineer.
-
-    POST {EKSTRAKSI_OCR_URL}/v1/predict/json   header X-API-Key, multipart `file`
-    -> [{"page_index", "rec_texts": [...], "rec_scores": [...], "rec_polys": [...]}, ...]
-
-Service model diganti httpx.MockTransport yang membalas response ASLI dari
-kontraknya (tests/fixtures/remote_npwp_response.json: kartu NPWP sungguhan),
-tanpa jaringan. Test ke service sungguhan: test_ekstraksi_remote_live.py.
-"""
-
 import json
 from pathlib import Path
 from typing import Any
@@ -85,16 +74,15 @@ async def test_request_follows_the_model_contract():
 async def test_real_npwp_sample_maps_parallel_arrays_to_blocks():
     result = await _engine(_reply(SAMPLE)).extract("sample_npwp.jpg", JPEG, "image/jpeg")
 
-    assert result["model"] is None  # response tidak membawa identitas model
+    assert result["model"] is None
     blocks = result["blocks"]
-    assert [b["text"] for b in blocks] == SAMPLE[0]["rec_texts"]  # urutan baca dipertahankan
+    assert [b["text"] for b in blocks] == SAMPLE[0]["rec_texts"]
     assert all(b["page"] == 0 for b in blocks)
 
-    # Indeks i dari ketiga array adalah satu baris: teks, skor, dan poly-nya tetap berpasangan.
     npwp = blocks[2]
     assert npwp["text"] == "95.844.800.1-805.000"
-    assert npwp["confidence"] == 1.0  # 0.99996 dibulatkan 4 desimal
-    assert npwp["bbox"] == {"x1": 271, "y1": 358, "x2": 1347, "y2": 511}  # kotak tegak dari poly miring
+    assert npwp["confidence"] == 1.0
+    assert npwp["bbox"] == {"x1": 271, "y1": 358, "x2": 1347, "y2": 511}
     assert blocks[3] == {
         "text": "RAHMAT HIDAYAT",
         "confidence": 0.9931,
@@ -136,7 +124,6 @@ async def test_missing_rec_polys_gives_blocks_without_bbox():
 
 
 async def test_no_pages_is_empty_blocks_not_an_error():
-    """Berkas tanpa teks: structuring yang akan menjawab "No text lines to structure"."""
     assert (await _engine(_reply([])).extract("a.jpg", JPEG, "image/jpeg"))["blocks"] == []
 
 
@@ -149,11 +136,11 @@ async def test_envelope_with_data_list_is_accepted():
 @pytest.mark.parametrize(
     "body",
     [
-        {"status_code": 200, "message": "OK"},  # objek tanpa data
+        {"status_code": 200, "message": "OK"},
         ["not-a-page"],
-        [{"page_index": 0, "rec_scores": [0.9]}],  # tanpa rec_texts
-        [_page(rec_texts=["A", "B"], rec_scores=[0.9])],  # skor tidak sejajar dengan teks
-        [_page(rec_texts=["A", "B"], rec_scores=[0.9, 0.8], rec_polys=[[[0, 0]]])],  # poly tidak sejajar
+        [{"page_index": 0, "rec_scores": [0.9]}],
+        [_page(rec_texts=["A", "B"], rec_scores=[0.9])],
+        [_page(rec_texts=["A", "B"], rec_scores=[0.9, 0.8], rec_polys=[[[0, 0]]])],
         [_page(page_index="dua")],
     ],
 )
@@ -168,7 +155,6 @@ async def test_model_error_status_becomes_500_with_detail():
     engine = _engine(_reply({"status_code": 401, "message": "Invalid API key"}, status_code=401))
     with pytest.raises(ServiceError) as exc:
         await engine.extract("a.jpg", JPEG, "image/jpeg")
-    # 401 dari service MODEL adalah salah konfigurasi kita, bukan salah pemanggil kita.
     assert (exc.value.status_code, exc.value.message) == (500, "ekstraksi OCR model error (401): Invalid API key")
 
 
@@ -208,7 +194,6 @@ async def test_remote_backend_is_built_from_settings():
 
 
 def test_http_extract_with_remote_backend(client, auth, monkeypatch):
-    """Kontrak KITA tidak berubah: /v1/ekstraksi/extract tetap mengembalikan blocks + envelope."""
     monkeypatch.setattr("src.api.v1.ekstraksi.get_ocr_engine", lambda: _engine(_reply(SAMPLE)))
     response = client.post("/v1/ekstraksi/extract", headers=auth, files=image_upload("sample_npwp.jpg", JPEG))
     assert response.status_code == 200, response.text

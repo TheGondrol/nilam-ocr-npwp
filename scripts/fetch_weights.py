@@ -1,20 +1,3 @@
-"""
-Unduh bobot model ke folder weights service sebelum `docker build`.
-
-Sumbernya dibaca dari env, supaya pilihan GCS vs MinIO tinggal mengganti nilai:
-
-    GUARDRAILS_MODEL_URI     gs://bucket/npwp-guardrails/v1/best_model.pt   (GCS, butuh gsutil)
-                             s3://alias/bucket/npwp-guardrails/v1/best_model.pt  (MinIO, butuh mc + alias)
-                             https://.../best_model.pt?X-Amz-...            (presigned URL GCS/MinIO)
-    GUARDRAILS_MODEL_SHA256  opsional; kalau diisi, file yang tidak cocok dihapus dan skrip gagal
-
-    python scripts/fetch_weights.py            # atau: make weights
-    python scripts/fetch_weights.py --force    # unduh ulang walau file sudah ada
-
-Tanpa env, skrip hanya memberi tahu dan keluar dengan kode 2, supaya dev lokal
-yang sudah menaruh bobotnya manual tidak terganggu.
-"""
-
 import argparse
 import hashlib
 import os
@@ -27,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Satu entri per model. Menambah model lain = menambah baris di sini.
 MODELS = {
     "guardrails": {
         "uri_env": "GUARDRAILS_MODEL_URI",
@@ -45,7 +27,6 @@ def _download(uri: str, target: Path) -> None:
         if uri.startswith("gs://"):
             subprocess.run(["gsutil", "cp", uri, str(tmp)], check=True)
         elif uri.startswith("s3://"):
-            # mc memakai alias yang sudah dikonfigurasi: mc alias set <alias> <endpoint> <key> <secret>
             subprocess.run(["mc", "cp", uri[len("s3://") :], str(tmp)], check=True)
         elif uri.startswith(("http://", "https://")):
             with urllib.request.urlopen(uri, timeout=120) as response, open(tmp, "wb") as out:

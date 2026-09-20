@@ -1,15 +1,3 @@
-"""
-Test integrasi ke service model guardrails sungguhan. Dilewati kecuali env
-GUARDRAILS_MODEL_URL di-set, mis.:
-
-    cd services/guardrails
-    GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key \
-        python -m pytest tests/test_guardrails_live.py -q
-
-Yang dijaga di sini adalah KONTRAK-nya (path, auth, bentuk response), bukan
-vonisnya: gambar sintetis boleh saja ditolak model.
-"""
-
 import io
 import os
 
@@ -38,7 +26,7 @@ def synthetic_npwp_jpeg() -> bytes:
 
 @pytest.fixture
 async def model():
-    assert MODEL_URL  # dijamin oleh skipif di atas
+    assert MODEL_URL
     headers = {"X-API-Key": MODEL_API_KEY} if MODEL_API_KEY else None
     instance = RemoteGuardrailsModel(RemoteModelClient(MODEL_URL, 60.0, name="guardrails model", headers=headers))
     yield instance

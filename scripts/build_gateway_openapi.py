@@ -1,16 +1,3 @@
-"""
-Rakit SATU spec OpenAPI untuk tim gateway / orkestrasi dari openapi.yaml keempat service.
-
-    python scripts/build_gateway_openapi.py            # tulis api/gateway.openapi.yaml
-    python scripts/build_gateway_openapi.py --check    # gagal (exit 1) kalau file-nya ketinggalan
-
-Isinya hanya yang dibutuhkan pihak yang MENGINTEGRASIKAN pipeline: endpoint yang mereka panggil, endpoint
-rekonsiliasi, dan callback yang harus mereka sediakan. Panggilan internal antar tahap
-(structuring/jobs, scoring/jobs) dan helper sinkron tidak ikut; semuanya tetap ada di spec per service.
-
-File ini TURUNAN: sumbernya decorator route di tiap service. Jalankan `make openapi` setelah mengubahnya.
-"""
-
 import copy
 import re
 import sys
@@ -25,7 +12,6 @@ ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "api" / "gateway.openapi.yaml"
 SERVICES = ("guardrails", "ekstraksi", "structuring", "scoring")
 
-# (service, method, path) -> tag di spec gabungan. Urutan = urutan tampil.
 OPERATIONS: list[tuple[str, str, str, str]] = [
     ("guardrails", "post", "/v1/guardrails/check", "1. Guardrails (synchronous)"),
     ("ekstraksi", "post", "/v1/ekstraksi/jobs", "2. Start the pipeline (asynchronous)"),
@@ -153,7 +139,6 @@ def build() -> dict[str, Any]:
             nodes.append(webhook)
         needed = _closure(set().union(*(_refs(node) for node in nodes)) if nodes else set(), schemas)
 
-        # Nama sama, isi beda antar service -> diberi awalan nama service. Nama sama, isi sama -> satu saja.
         rename = {
             name: f"{service.capitalize()}{name}"
             for name in needed

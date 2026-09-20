@@ -5,9 +5,6 @@ resources:
   - ../../base
   - hpa-guardrails.yaml
 
-# ENVIRONMENT=production: lingkungan ter-deploy, SEMUA pengaman aktif (AUTH_DISABLED dan backend
-# mock ditolak, DATABASE_URL + ORCHESTRATION_URL wajib, alamat service tidak boleh localhost).
-# Hanya ENVIRONMENT=local (laptop) yang melonggarkannya; nilai itu tidak boleh ada di sini.
 configMapGenerator:
   - name: guardrails-config
     behavior: merge
@@ -33,16 +30,16 @@ configMapGenerator:
 images:
   - name: nilam-ocr-guardrails
     newName: asia-southeast2-docker.pkg.dev/REPLACE_ME-prod-project/nilam-ocr/guardrails
-    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+    newTag: REPLACE_ME
   - name: nilam-ocr-ekstraksi
     newName: asia-southeast2-docker.pkg.dev/REPLACE_ME-prod-project/nilam-ocr/ekstraksi
-    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+    newTag: REPLACE_ME
   - name: nilam-ocr-structuring
     newName: asia-southeast2-docker.pkg.dev/REPLACE_ME-prod-project/nilam-ocr/structuring
-    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+    newTag: REPLACE_ME
   - name: nilam-ocr-scoring
     newName: asia-southeast2-docker.pkg.dev/REPLACE_ME-prod-project/nilam-ocr/scoring
-    newTag: REPLACE_ME # tag tak berubah (git sha / semver), jangan `latest`
+    newTag: REPLACE_ME
 
 replicas:
   - name: ekstraksi
@@ -65,6 +62,5 @@ patches:
         value: REPLACE_ME-orchestration-namespace
   - target: {kind: Deployment, name: guardrails}
     patch: |-
-      # HPA yang memegang jumlah replika; `replicas` di sini akan me-reset-nya tiap apply.
       - op: remove
         path: /spec/replicas

@@ -1,14 +1,3 @@
-# Overlay opsional: PostgreSQL lokal untuk tabel jobs/results ketiga tahap
-# pipeline (schema ocr, structuring, scoring) dan kontrak lama ekstraksi.
-#
-#   docker compose -f docker-compose.yml -f docker-compose.db.yml up -d --build
-#   (atau: make up-db)
-#
-# Pola sama dengan docker-compose.elk.yml di ocr-orchestration: overlay di atas
-# compose utama, supaya ketiga service ikut mendapat DATABASE_URL yang menunjuk
-# ke container postgres ini. Satu database, satu schema per service. Di produksi
-# dengan PostgreSQL terkelola, jangan pakai overlay ini; cukup isi DATABASE_URL
-# di services/<nama>/.env dan jalankan services/<nama>/db/schema.sql.
 x-database: &database
   environment:
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-bribrain_ocr_nilam}
@@ -32,13 +21,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-bribrain_ocr_nilam}
     ports:
-      # Port host bisa diganti kalau 5433 sudah dipakai: POSTGRES_HOST_PORT=5434 make up-db
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # Dijalankan otomatis hanya saat volume pertama kali diinisialisasi. Volume
-      # lama (sebelum pipeline async) tidak punya schema baru: jalankan ketiga
-      # file ini manual, atau `docker compose ... down -v` untuk mulai bersih.
       - ./services/ekstraksi/db/schema.sql:/docker-entrypoint-initdb.d/10-ekstraksi.sql:ro
       - ./services/structuring/db/schema.sql:/docker-entrypoint-initdb.d/20-structuring.sql:ro
       - ./services/scoring/db/schema.sql:/docker-entrypoint-initdb.d/30-scoring.sql:ro

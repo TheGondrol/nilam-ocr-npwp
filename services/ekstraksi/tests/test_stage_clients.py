@@ -1,5 +1,3 @@
-"""Klien ke service lain: payload yang dikirim dan pemetaan jawabannya, tanpa jaringan."""
-
 import json
 
 import httpx
@@ -93,8 +91,6 @@ async def test_unexpected_response_shape_is_500():
 
 
 def test_build_stage_clients_falls_back_to_own_api_key(monkeypatch):
-    # Env API_KEY (dari conftest) diprioritaskan pydantic-settings di atas kwarg
-    # bernama field; hapus dulu supaya nilai di bawah yang dipakai.
     monkeypatch.delenv("API_KEY", raising=False)
     settings = Settings(api_key="own", structuring_api_key="other", _env_file=None)
     stages = build_stage_clients(settings)

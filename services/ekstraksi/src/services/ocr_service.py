@@ -1,18 +1,3 @@
-"""
-Business logic kontrak OCR yang dipanggil ocr-orchestration:
-generate-request-id -> extract-ocr -> get-ocr-result. Sama perannya dengan
-OcrService di mock ocr-npwp, tapi di balik extract() ada pipeline sungguhan
-yang tersebar di empat service:
-
-    guardrails service (kualitas gambar, jenis dokumen)   gagal -> 400
-    -> OCR engine milik service ini
-    -> structuring service (field bernama)
-    -> scoring service (skor dokumen)                      -> `guardrails` di envelope
-
-Layer ini tidak tahu HTTP: melempar ServiceError, controller yang
-menerjemahkannya. Pemanggilan ke service lain lewat src/clients/stages.py.
-"""
-
 import uuid
 from typing import Any
 
@@ -70,7 +55,6 @@ class OcrService:
         structured = await self._stages.structuring.structure(lines)
         score = await self._stages.scoring.score(DOCUMENT_TYPE, structured["fields"])
 
-        # Bentuk yang dijanjikan schema NpwpFields: tiap daun {value, confidence}.
         data = {
             name: {"value": field.get("value"), "confidence": field.get("confidence", 0.0)}
             for name, field in structured["fields"].items()
@@ -95,7 +79,6 @@ class OcrService:
 
 
 def _guardrail_message(document: dict[str, Any]) -> str:
-    """400 saat guardrails menolak; menyebut berapa halaman yang ditolak dan keyakinannya."""
     n_reject, n_pages = document.get("n_reject", "?"), document.get("n_pages", "?")
     confidence = document.get("confidence")
     suffix = f" (confidence {confidence:.2f})" if isinstance(confidence, int | float) else ""

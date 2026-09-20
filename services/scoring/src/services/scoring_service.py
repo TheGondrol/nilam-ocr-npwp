@@ -1,8 +1,3 @@
-"""
-Business logic Scoring: nilai field terstruktur, lalu terapkan ambang batas
-dari Settings untuk memutuskan approve / review / reject.
-"""
-
 from typing import Any
 
 from ocr_common.errors import ServiceError

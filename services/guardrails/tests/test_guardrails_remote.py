@@ -1,13 +1,3 @@
-"""
-Backend `remote`: service model guardrails milik ML engineer.
-
-    POST {GUARDRAILS_MODEL_URL}/v1/predict/json   header X-API-Key, multipart `file`
-    -> {"status_code": 200, "message": "OK", "data": {"document": {...}, "pages": [...]}}
-
-Service model diganti httpx.MockTransport yang membalas contoh response dari
-kontraknya (tanpa jaringan). Test ke service sungguhan: test_guardrails_live.py.
-"""
-
 from typing import Any
 
 import httpx
@@ -81,7 +71,6 @@ async def test_request_follows_the_model_contract():
     assert (seen["method"], seen["path"]) == ("POST", "/v1/predict/json")
     assert seen["api_key"] == "dummy-key"
     assert seen["content_type"].startswith("multipart/form-data")
-    # Satu-satunya field adalah `file`, membawa nama, tipe, dan isi berkas apa adanya.
     assert b'name="file"; filename="sample_npwp.jpg"' in seen["body"]
     assert b"Content-Type: image/jpeg" in seen["body"]
     assert JPEG in seen["body"]
@@ -101,7 +90,6 @@ async def test_rejected_report_gets_reason_for_the_orchestrator():
 
 
 async def test_model_verdict_is_not_overridden_by_local_settings():
-    """Ambang dan kebijakan dokumen milik service model: setting lokal tidak boleh mengubah vonisnya."""
     settings = _settings(guardrails_reject_threshold=0.001, guardrails_document_policy="majority")
     report = await GuardrailsService(_model(_reply(ACCEPTED)), settings).check("a.jpg", "image/jpeg", JPEG)
     assert report["document"]["verdict"] == "accepted"
@@ -142,10 +130,10 @@ async def test_extra_fields_from_the_model_are_dropped():
 @pytest.mark.parametrize(
     "body",
     [
-        {"status_code": 200, "message": "OK"},  # tanpa data
-        {"data": {"document": {"verdict": "accepted"}, "pages": []}},  # document tidak lengkap
-        {"data": {"document": {**ACCEPTED["data"]["document"], "verdict": "maybe"}, "pages": []}},  # vonis asing
-        {"data": {"document": ACCEPTED["data"]["document"], "pages": [{"page_index": 0}]}},  # halaman tidak lengkap
+        {"status_code": 200, "message": "OK"},
+        {"data": {"document": {"verdict": "accepted"}, "pages": []}},
+        {"data": {"document": {**ACCEPTED["data"]["document"], "verdict": "maybe"}, "pages": []}},
+        {"data": {"document": ACCEPTED["data"]["document"], "pages": [{"page_index": 0}]}},
         ["not", "an", "object"],
     ],
 )
@@ -160,7 +148,6 @@ async def test_model_error_status_becomes_500_with_detail():
     model = _model(_reply({"status_code": 401, "message": "Invalid API key"}, status_code=401))
     with pytest.raises(ServiceError) as exc:
         await model.check_document("a.jpg", JPEG, "image/jpeg")
-    # 401 dari service MODEL adalah salah konfigurasi kita, bukan salah pemanggil kita: jangan teruskan 401.
     assert exc.value.status_code == 500
     assert exc.value.message == "guardrails model error (401): Invalid API key"
 
@@ -203,7 +190,6 @@ async def test_remote_backend_is_built_from_settings():
 
 
 def test_http_check_with_remote_backend(client, auth, monkeypatch):
-    """Kontrak KITA ke orkestrator tidak berubah: request_id + file masuk, envelope + passed/reason keluar."""
     monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: _model(_reply(REJECTED)))
     response = client.post(
         "/v1/guardrails/check", data={"request_id": "OCR_R1"}, files=image_upload("npwp.jpg", JPEG), headers=auth

@@ -3,8 +3,6 @@ kind: PodDisruptionBudget
 metadata:
   name: structuring
 spec:
-  # maxUnavailable, bukan minAvailable: dengan 1 replika, minAvailable: 1 akan menahan
-  # drain node (upgrade GKE) selamanya. Bermakna begitu replika >= 2.
   maxUnavailable: 1
   selector:
     matchLabels:

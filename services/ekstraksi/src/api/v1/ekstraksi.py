@@ -13,7 +13,6 @@ from src.services.ekstraksi_service import EkstraksiService
 
 router = APIRouter(tags=["Ekstraksi"], dependencies=[Depends(verify_api_key)])
 
-# Dipakai juga oleh contoh GET /v1/ekstraksi/jobs/{request_id}: hasil tahap OCR = bentuk ini.
 OCR_RESULT_EXAMPLE = {
     "engine": "paddle",
     "model": "PP-OCRv6_medium_det+PP-OCRv6_medium_rec",

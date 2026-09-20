@@ -1,14 +1,3 @@
-"""
-Tulis ulang openapi.yaml sebuah service dari aplikasinya sendiri.
-
-    cd services/<nama> && python -m ocr_common.openapi      # atau: make openapi-<nama>
-
-Spec yang ditulis tangan selalu kalah cepat dari kodenya. Karena itu file ini
-turunan, bukan sumber: yang diedit adalah decorator route. tests/test_openapi.py
-tiap service menjaga keduanya tidak berpisah. Format dump sama dengan
-scripts/check_openapi.py di nilam-ocr-orchestration.
-"""
-
 import importlib
 import sys
 from pathlib import Path

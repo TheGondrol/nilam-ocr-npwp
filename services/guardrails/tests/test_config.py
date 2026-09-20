@@ -1,5 +1,3 @@
-"""Pengaman konfigurasi khusus guardrails (yang umum: libs/ocr_common/tests/test_config.py)."""
-
 import pytest
 from pydantic import ValidationError
 
@@ -7,7 +5,6 @@ from src.core.config import Settings
 
 
 def test_mock_classifier_is_refused_outside_local():
-    """Default backend adalah mock, yang memvonis dari NAMA FILE. Tidak boleh sampai ke produksi karena lupa env."""
     with pytest.raises(ValidationError, match="GUARDRAILS_BACKEND=mock fabricates results"):
         Settings(api_key="x", _env_file=None, environment="production")
 

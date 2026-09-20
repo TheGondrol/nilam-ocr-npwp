@@ -1,16 +1,3 @@
-"""
-JobRepository di PostgreSQL: <schema>.jobs + <schema>.results, satu schema per
-service (ocr, structuring, scoring) di database yang sama. DDL-nya di
-services/<nama>/db/schema.sql dan dipasang manual; definisi Table di bawah
-harus tetap sama dengannya.
-
-SQLAlchemy Core, bukan ORM: tabelnya sama untuk tiga schema berbeda, dan
-klaim job butuh INSERT ... ON CONFLICT DO NOTHING yang atomik.
-
-Di dialek selain PostgreSQL (SQLite untuk test) schema dipetakan ke "tanpa
-schema", karena SQLite tidak punya schema tanpa ATTACH.
-"""
-
 from datetime import UTC, datetime
 from typing import Any
 
@@ -48,7 +35,6 @@ def build_tables(schema: str) -> tuple[MetaData, Table, Table]:
 
 
 def _iso(value: datetime) -> str:
-    # SQLite mengembalikan datetime naive; nilainya UTC karena kita yang menulis.
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.isoformat()
@@ -91,8 +77,6 @@ class SqlJobRepository:
             )
             if inserted.rowcount == 1:
                 return True
-            # Sudah ada. Hanya job FAILED yang boleh diulang; syarat status di
-            # WHERE membuat dua retry bersamaan tetap hanya satu yang menang.
             retried = await conn.execute(
                 update(jobs)
                 .where(jobs.c.request_id == request_id, jobs.c.status == STATUS_FAILED)

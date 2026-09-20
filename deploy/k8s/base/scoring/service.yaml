@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: scoring # nama ini adalah alamatnya: http://scoring:8033 di dalam namespace
+  name: scoring
   labels:
     app.kubernetes.io/name: scoring
 spec:

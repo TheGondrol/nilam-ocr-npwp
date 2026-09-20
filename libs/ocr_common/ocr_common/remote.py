@@ -1,21 +1,3 @@
-"""
-Klien HTTP bersama untuk (1) model ML yang di-deploy sebagai service terpisah
-dan (2) service OCR lain dalam rantai (guardrails -> ekstraksi -> structuring
--> scoring). Analog src/clients/ocr_client.py di ocr-orchestration.
-
-Satu httpx.AsyncClient persisten per tujuan: koneksi dipakai ulang, bukan
-dibuka tiap request. Semua kegagalan transport dan jawaban error dipetakan
-ke ServiceError di sini:
-
-    timeout baca/tulis (tujuan menerima request tapi tidak menjawab) -> 504
-    tidak bisa connect / timeout connect / error transport lain       -> 503
-    HTTP >= 400                                                        -> 500,
-        atau status aslinya kalau passthrough_client_errors=True dan 4xx
-        (dipakai antar service kita: 400 "No text lines" dari structuring
-        memang salah input, bukan kegagalan structuring)
-    body bukan JSON                                                    -> 500
-"""
-
 import json
 from typing import Any
 
@@ -70,10 +52,8 @@ class RemoteModelClient:
         try:
             response = await self._client.request(method, path, **kwargs)
         except (httpx.ReadTimeout, httpx.WriteTimeout) as exc:
-            # Request sampai ke tujuan, jawabannya yang tidak datang.
             raise ServiceError(504, f"{self.name} timed out after {self.timeout}s") from exc
         except httpx.RequestError as exc:
-            # ConnectTimeout, ConnectError, PoolTimeout, dll: request tidak pernah sampai.
             raise ServiceError(503, f"{self.name} is unavailable") from exc
 
         if response.status_code >= 400:
@@ -88,7 +68,6 @@ class RemoteModelClient:
 
 
 def _error_detail(response: httpx.Response) -> str:
-    """Pesan dari body error: {"detail": str | [..]} (FastAPI) atau {"message": ...} (envelope kita)."""
     try:
         body = response.json()
     except ValueError:

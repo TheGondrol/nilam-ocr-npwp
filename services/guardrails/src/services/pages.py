@@ -1,8 +1,3 @@
-"""
-Render dokumen (gambar atau PDF) menjadi daftar halaman PIL RGB. PDF dirender
-per halaman dengan PyMuPDF; gambar adalah satu halaman.
-"""
-
 import io
 
 from PIL import Image, UnidentifiedImageError
@@ -26,11 +21,11 @@ def _open_image(content: bytes) -> Image.Image:
 
 
 def _render_pdf(content: bytes, *, dpi: int, max_pages: int) -> list[Image.Image]:
-    import fitz  # PyMuPDF
+    import fitz
 
     try:
         document = fitz.open(stream=content, filetype="pdf")
-    except Exception as exc:  # fitz melempar RuntimeError/ValueError untuk PDF rusak
+    except Exception as exc:
         raise ServiceError(400, "Uploaded file is not a readable PDF") from exc
 
     pages: list[Image.Image] = []

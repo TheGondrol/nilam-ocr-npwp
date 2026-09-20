@@ -1,12 +1,3 @@
-"""
-Backend `npwp_rules`: aturan regex + posisi dari ML engineer (src/vendor/npwp_rules), dirangkai ke
-kontrak structurer kita. Data ujinya dua hasil OCR kartu NPWP ASLI:
-
-- kartu model baru: response service model ekstraksi (tests/fixtures/remote_npwp_response.json),
-  nama tanpa label, nomor 15 digit DAN "NPWP16" 16 digit;
-- kartu model lama: hasil PaddleOCR atas foto kartu kuning, "NPWP:" berlabel tapi nama tetap tanpa label.
-"""
-
 import json
 from pathlib import Path
 from typing import Any
@@ -71,7 +62,6 @@ def test_new_card_name_without_label_is_found_by_position():
 
 
 def test_new_card_prefers_the_16_digit_number_over_the_legacy_15_digit_one():
-    """Kartu yang mencetak keduanya: nomor 16 digit (label NPWP16) adalah nomor resmi yang berlaku."""
     number = structure(NEW_CARD)["nomor_npwp"]
     assert number["value"] == "4318085607040052"
     assert number["source"] == "NPWP16:4318 0856 07040052"
@@ -79,27 +69,24 @@ def test_new_card_prefers_the_16_digit_number_over_the_legacy_15_digit_one():
 
 
 def test_signals_for_the_scoring_payload_come_from_the_ml_rules():
-    """npwp_has_homoglyph, npwp_candidate_count, name_corrected di payload scoring ML engineer."""
     number = structure(NEW_CARD)["nomor_npwp"]["signals"]
-    assert number == {"has_homoglyph": False, "candidate_count": 2}  # 15 digit + NPWP16 di kartu yang sama
+    assert number == {"has_homoglyph": False, "candidate_count": 2}
     assert structure(OLD_CARD)["nomor_npwp"]["signals"] == {"has_homoglyph": False, "candidate_count": 1}
 
     corrected = structure(
         [_line("KPP PRATAMA TEGAL", 40), _line("63.48O.341.5-5O1.000", 120), _line("SRI WAHYUNI", 200)]
     )
     assert corrected["nomor_npwp"]["signals"]["has_homoglyph"] is True
-    # name_master.py masih pengganti sementara: koreksi nama tidak pernah terjadi.
     assert corrected["nama"]["signals"] == {"corrected": False}
 
 
 def test_old_card_keeps_the_dotted_15_digit_format_and_title_suffix():
     fields = structure(OLD_CARD)
     assert fields["nomor_npwp"]["value"] == "48.903.841.4-722.000"
-    assert fields["nama"]["value"] == "TOTOK WIJAYANTO, SSI."  # gelar menempel dengan koma tetap lolos
+    assert fields["nama"]["value"] == "TOTOK WIJAYANTO, SSI."
 
 
 def test_this_is_exactly_what_the_label_based_backend_misses():
-    """Alasan backend ini dipasang: pada kedua kartu asli, rule_based tidak menemukan nama."""
     for card in (NEW_CARD, OLD_CARD):
         assert RuleBasedNpwpStructurer().structure(card)["nama"]["value"] is None
         assert structure(card)["nama"]["value"] is not None
@@ -116,7 +103,7 @@ def test_company_name_goes_to_nama_badan():
         [
             _line("KPP PRATAMA JAKARTA MENTENG", 40),
             _line("01.234.567.8-091.000", 120),
-            _line("PT CIPTA KARYA INDONESIA", 200),  # "INDONESIA" kata boilerplate, tapi baris PT/CV dikecualikan
+            _line("PT CIPTA KARYA INDONESIA", 200),
             _line("JL. MERDEKA NO. 12", 280),
         ]
     )
@@ -130,11 +117,9 @@ def test_ocr_homoglyphs_in_the_number_are_corrected():
 
 
 def test_number_with_an_unresolvable_character_is_not_reported_as_a_shorter_valid_number():
-    """'T' di luar posisi pertama tidak bisa dipastikan 1 atau 7, jadi dibuang aturan ML engineer. Nomor 16
-    digit yang tinggal 15 digit akan LOLOS validasi sebagai nomor 15 digit: lebih baik tidak dilaporkan."""
     fields = structure([_line("KPP PRATAMA TEGAL", 40), _line("3329 1T30 1001 0006", 120), _line("SRI WAHYUNI", 200)])
     assert fields["nomor_npwp"]["value"] is None
-    assert fields["nama"]["value"] == "SRI WAHYUNI"  # deteksi per field, bukan semua-atau-tidak
+    assert fields["nama"]["value"] == "SRI WAHYUNI"
 
 
 def test_address_and_office_lines_never_become_the_name():
@@ -144,7 +129,7 @@ def test_address_and_office_lines_never_become_the_name():
             _line("12.345.678.9-012.345", 120),
             _line("KOTA TEGAL", 200),
             _line("KPP PRATAMA TEGAL", 260),
-            _line("ADITYA ARDELLO PRATAMA", 330),  # "PRATAMA" adalah nama orang yang sah
+            _line("ADITYA ARDELLO PRATAMA", 330),
         ]
     )
     assert fields["nama"]["value"] == "ADITYA ARDELLO PRATAMA"
@@ -154,7 +139,7 @@ def test_low_confidence_fragment_near_the_number_does_not_win():
     fields = structure(
         [
             _line("12.345.678.9-012.345", 120),
-            _line("CamScan", 150, confidence=0.55),  # watermark: lebih dekat, tapi di bawah NAME_MIN_SCORE
+            _line("CamScan", 150, confidence=0.55),
             _line("BUDI SANTOSO", 220),
         ]
     )

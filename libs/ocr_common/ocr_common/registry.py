@@ -1,11 +1,3 @@
-"""
-Pemilihan implementasi model berdasarkan nama backend di Settings.
-
-Tiap modul services/<nama>/src/models/<app>.py punya dict registry
-{nama: factory(settings)}. Nama yang tidak dikenal langsung gagal dengan
-pesan jelas; service memanggilnya saat startup supaya gagalnya saat boot.
-"""
-
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 

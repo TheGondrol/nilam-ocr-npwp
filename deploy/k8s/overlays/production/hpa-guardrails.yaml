@@ -1,5 +1,3 @@
-# Hanya guardrails yang CPU-bound (inference torch), jadi hanya dia yang masuk akal
-# diskalakan dari CPU. Tiga service lain menunggu I/O; skalakan lewat `replicas`.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -20,4 +18,4 @@ spec:
           averageUtilization: 70
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 300 # image 1,7 GB: pod baru mahal, jangan cepat-cepat dibuang
+      stabilizationWindowSeconds: 300

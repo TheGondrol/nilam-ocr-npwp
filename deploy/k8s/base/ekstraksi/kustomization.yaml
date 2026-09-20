@@ -1,12 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# I/O-bound (menunggu model OCR). EKSTRAKSI_OCR_URL dan ORCHESTRATION_URL diisi per overlay.
 resources:
   - deployment.yaml
   - service.yaml
   - pdb.yaml
-# Generator, bukan ConfigMap statis: nama mendapat sufiks hash isi, jadi perubahan
-# konfigurasi otomatis memicu rolling update (env hanya dibaca saat pod start).
 configMapGenerator:
   - name: ekstraksi-config
     literals:

@@ -1,8 +1,3 @@
-"""
-Pengaman konfigurasi: di luar ENVIRONMENT=local (yaitu dev / staging / production), salah konfigurasi harus gagal
-START dengan pesan jelas, bukan berjalan diam-diam dengan perilaku berbahaya.
-"""
-
 import pytest
 from pydantic import ValidationError
 
@@ -21,14 +16,12 @@ def pipeline(**overrides) -> PipelineSettings:
 
 
 def test_environment_defaults_to_production(monkeypatch):
-    """Lupa mengisi ENVIRONMENT harus jatuh ke mode yang paling ketat, bukan yang paling longgar."""
     monkeypatch.delenv("ENVIRONMENT", raising=False)
     assert base().environment == "production"
     assert base().is_local is False
 
 
 def test_dev_is_a_deployed_environment_not_the_laptop_mode():
-    """Cluster GKE dev bernama "dev": ENVIRONMENT=dev di sana harus tetap menyalakan semua pengaman."""
     assert base(environment="dev").is_local is False
     with pytest.raises(ValidationError, match="DATABASE_URL, ORCHESTRATION_URL must be set when ENVIRONMENT=dev"):
         pipeline(environment="dev")
@@ -65,7 +58,6 @@ def test_pipeline_outside_local_requires_database_and_orchestration():
 
 
 def test_empty_string_counts_as_missing():
-    """ConfigMap dengan kunci kosong (`DATABASE_URL: ""`) sama berbahayanya dengan tanpa kunci."""
     with pytest.raises(ValidationError, match="DATABASE_URL must be set"):
         pipeline(environment="production", database_url="", orchestration_url=ORCH)
 

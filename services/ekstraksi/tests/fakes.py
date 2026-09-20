@@ -1,10 +1,3 @@
-"""
-Pengganti service lain (guardrails, structuring, scoring) untuk test kontrak
-extract-ocr, tanpa jaringan. Perilakunya meniru mock masing-masing service
-secukupnya: skenario nama file, pelabelan "LABEL : NILAI", skor = confidence
-terendah. Rantai sungguhan antar container diuji scripts/smoke_e2e.py.
-"""
-
 import re
 from types import SimpleNamespace
 from typing import Any

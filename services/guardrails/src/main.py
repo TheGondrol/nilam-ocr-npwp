@@ -1,5 +1,3 @@
-"""Composition root service Guardrails: rakit FastAPI app dari ocr_common + router service ini."""
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,12 +12,8 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Muat model saat startup: salah path bobot, backend salah konfigurasi (mis.
-    # GUARDRAILS_BACKEND=remote tanpa URL) gagal saat boot, dan request pertama
-    # tidak menanggung waktu pemuatan.
     classifier = get_page_classifier()
     yield
-    # Backend remote memegang koneksi HTTP persisten ke service model.
     if hasattr(classifier, "aclose"):
         await classifier.aclose()
 
@@ -38,8 +32,6 @@ app = create_app(
     tags=[{"name": "Guardrails", "description": "Page-level accepted/reject classification"}],
     routers=[guardrails.router],
     backends={"guardrails": settings.guardrails_backend},
-    # Model dimuat di lifespan sebelum server menerima koneksi, jadi pod yang
-    # menjawab sudah pasti memegang model: tidak ada dependensi lain untuk diperiksa.
     readiness={},
     backends_example={"guardrails": "efficientnet"},
     lifespan=lifespan,

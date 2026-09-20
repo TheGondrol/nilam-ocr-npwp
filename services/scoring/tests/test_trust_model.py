@@ -1,12 +1,3 @@
-"""
-Trust model dari ML engineer (weights/trust_model.joblib) dan kontrak scoring-nya:
-
-    payload 13 kunci (hasil berantai tahap sebelumnya) -> {"npwp_confidence", "name_confidence"}
-
-Angka yang di-pin di sini adalah keluaran FILE MODEL YANG SEKARANG. Kalau test ini gagal setelah file
-model diganti, itu memang yang seharusnya terjadi: periksa model barunya, lalu perbarui angkanya.
-"""
-
 import math
 from typing import Any
 
@@ -16,7 +7,6 @@ from src.api.v1.scoring import get_trust_model
 from src.models.trust_model import FEATURES, UNDEFINED_FEATURES, TrustModel
 from src.services.confidence_service import ConfidenceService
 
-# Contoh payload persis seperti yang diberikan ML engineer.
 EXAMPLE: dict[str, Any] = {
     "npwp": "123456789012000",
     "npwp_score": 0.98,
@@ -49,17 +39,14 @@ def test_bundle_is_what_the_file_says_it_is(model):
 
 def test_payload_maps_to_one_feature_row_per_field(model):
     rows = model.feature_rows(EXAMPLE)
-    # field_is_npwp, field_score, field_corrected, shape_confidence, field_multiple_candidates,
-    # n_boxes_per_page, avg_doc_score, min_doc_score, flag, guardrail_probability
     npwp, name = rows["npwp"], rows["name"]
-    assert npwp[:3] == [1.0, 0.98, 0.0]  # npwp_score, npwp_has_homoglyph
-    assert name[:3] == [0.0, 0.96, 1.0]  # name_score, name_corrected
-    assert npwp[4] == name[4] == 0.0  # npwp_candidate_count 1 -> bukan "multiple"; satu nilai untuk kedua baris
-    assert npwp[5:] == name[5:] == [34.0, 0.912, 0.62, 0.0, 0.9821]  # n_boxes / num_pages, lalu kunci bernama sama
+    assert npwp[:3] == [1.0, 0.98, 0.0]
+    assert name[:3] == [0.0, 0.96, 1.0]
+    assert npwp[4] == name[4] == 0.0
+    assert npwp[5:] == name[5:] == [34.0, 0.912, 0.62, 0.0, 0.9821]
 
 
 def test_shape_confidence_is_left_to_the_models_own_imputer(model):
-    """Satu-satunya fitur yang tidak ada di payload dan tidak terdefinisi di file mana pun: dikirim kosong."""
     assert UNDEFINED_FEATURES == ("shape_confidence",)
     index = FEATURES.index("shape_confidence")
     rows = model.feature_rows(EXAMPLE)
@@ -70,7 +57,6 @@ def test_example_payload_gives_two_confidences(model):
     result = model.predict(EXAMPLE)
     assert set(result) == {"npwp_confidence", "name_confidence"}
     assert result["npwp_confidence"] == pytest.approx(0.9737, abs=1e-4)
-    # name_corrected=true: di data training field yang dikoreksi hampir selalu salah, jadi model menjatuhkannya.
     assert result["name_confidence"] == pytest.approx(0.001, abs=1e-3)
 
 
@@ -90,7 +76,6 @@ def test_multiple_candidates_lower_the_confidence(model):
 
 
 def test_missing_field_has_no_confidence(model):
-    """Tanpa ini imputer mengisi skor OCR field KOSONG dengan median training (0.998) -> confidence tinggi."""
     result = model.predict(EXAMPLE | {"name": None, "name_score": None, "name_corrected": None})
     assert result["name_confidence"] is None
     assert result["npwp_confidence"] == pytest.approx(0.9737, abs=1e-4)
@@ -116,10 +101,6 @@ def test_foreign_bundle_is_refused(tmp_path):
     with pytest.raises(RuntimeError, match="Unexpected feature_cols"):
         TrustModel(str(path))
 
-
-# ---------------------------------------------------------------------------
-# Payload dari hasil berantai (pipeline)
-# ---------------------------------------------------------------------------
 
 GUARDRAILS = {
     "passed": True,
@@ -159,7 +140,7 @@ STRUCTURING = {
 def test_payload_is_built_from_the_chained_results():
     payload = ConfidenceService.payload_from_chain(GUARDRAILS, OCR, STRUCTURING)
     assert payload == {
-        "npwp": "958448001805000",  # digit saja, seperti contoh ML engineer
+        "npwp": "958448001805000",
         "npwp_score": 1.0,
         "npwp_has_homoglyph": False,
         "npwp_candidate_count": 2,
@@ -170,10 +151,10 @@ def test_payload_is_built_from_the_chained_results():
         "num_pages": 1,
         "avg_doc_score": pytest.approx(0.9885),
         "min_doc_score": 0.9762,
-        "flag": None,  # belum ada tahap yang menghasilkannya
+        "flag": None,
         "guardrail_probability": 0.7595,
     }
-    assert set(payload) == set(EXAMPLE)  # persis kunci kontrak ML engineer, tidak lebih tidak kurang
+    assert set(payload) == set(EXAMPLE)
 
 
 def test_company_name_is_the_name_of_the_payload():
@@ -186,20 +167,13 @@ def test_company_name_is_the_name_of_the_payload():
     }
     payload = ConfidenceService.payload_from_chain(None, None, structuring)
     assert (payload["name"], payload["name_score"]) == ("PT CONTOH INDONESIA", 0.96)
-    # Tanpa hasil OCR / guardrails: kosong, bukan nol (nol adalah nilai yang sah dan berarti lain).
     assert payload["n_boxes"] is None and payload["avg_doc_score"] is None and payload["guardrail_probability"] is None
 
 
 def test_structurer_without_signals_leaves_them_empty():
-    """Backend structuring `rule_based` tidak mengeluarkan signals: kosong -> diisi imputer, bukan False."""
     structuring = {"fields": {"nomor_npwp": {"value": "01.234.567.8-091.000", "confidence": 0.99}}}
     payload = ConfidenceService.payload_from_chain(None, None, structuring)
     assert payload["npwp_has_homoglyph"] is None and payload["npwp_candidate_count"] is None
-
-
-# ---------------------------------------------------------------------------
-# HTTP
-# ---------------------------------------------------------------------------
 
 
 def test_http_confidence_follows_the_ml_contract(client, auth):

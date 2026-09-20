@@ -1,23 +1,3 @@
-"""
-Business logic Guardrails: nilai tiap halaman dokumen accepted / reject dengan
-model, lalu putuskan vonis dokumen. Hasilnya laporan, bukan error; keputusan
-melanjutkan ke OCR ada di pemanggil (orkestrator / service ekstraksi).
-
-Bentuk laporan (kontrak dengan orkestrator):
-
-    {"passed": bool, "reason": str | None,
-     "document": {"verdict": "accepted" | "reject", "confidence", "n_pages", "n_approve", "n_reject"},
-     "pages": [{"page_index", "proba_approve", "proba_reject", "verdict"}, ...]}
-
-`passed` / `reason` adalah "true/false + alasan" di sequence diagram: passed=false
--> orkestrator menjawab 422 ke client dengan `reason`; passed=true -> lanjut ke OCR.
-
-Layer ini tidak tahu HTTP (melempar ServiceError) dan tidak tahu model apa
-yang dipakai (menerima classifier lewat constructor). Yang ia tahu hanya dua
-bentuk kontrak backend (lihat src/models/guardrails.py): lokal `classify()`
-per halaman, atau remote `check_document()` yang sudah membawa vonis dokumen.
-"""
-
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -31,8 +11,6 @@ VERDICT_REJECT = "reject"
 
 
 def _reject_reason(document: dict[str, Any]) -> str:
-    """Alasan penolakan untuk 422 orkestrator. Modelnya biner (accepted / reject), jadi
-    alasannya hanya bisa menyebut berapa halaman yang ditolak dan seberapa yakin."""
     return (
         f"Document rejected by guardrails: {document['n_reject']}/{document['n_pages']} page(s) rejected "
         f"(confidence {document['confidence']:.2f})"
@@ -45,16 +23,11 @@ class GuardrailsService:
         self._settings = settings
 
     async def check(self, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
-        # Tipe / kosong / ukuran dinilai di sini untuk SEMUA backend, supaya
-        # berkas yang jelas salah tidak sampai dikirim ke service model.
         validate_image(content_type, content, self._settings)
 
         if hasattr(self._classifier, "check_document"):
-            # Backend remote: I/O jaringan, vonis dokumen datang dari service model.
             report = await self._classifier.check_document(filename, content, content_type)
         else:
-            # Backend lokal: render halaman + inference itu CPU-bound dan sinkron;
-            # di threadpool supaya event loop tetap melayani /health dan request lain.
             report = await run_in_threadpool(self._check_locally, filename, content_type, content)
 
         passed = report["document"]["verdict"] == VERDICT_ACCEPTED
@@ -91,11 +64,9 @@ class GuardrailsService:
 
         if self._settings.guardrails_document_policy == "majority":
             accepted = n_approve > n_reject
-        else:  # all
+        else:
             accepted = n_pages > 0 and n_reject == 0
 
-        # Keyakinan pada vonis dokumen: kalau accepted, halaman yang paling
-        # lemah menentukan; kalau reject, halaman yang paling kuat menolak.
         if accepted:
             confidence = min(page["proba_approve"] for page in pages)
         else:

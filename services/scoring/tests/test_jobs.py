@@ -1,9 +1,3 @@
-"""
-Tahap SCORING di pipeline async lewat HTTP: 202 segera, kerja di background,
-lalu callback yang membawa hasil akhir. Orkestrasi diganti perekam (tanpa
-jaringan); rantai sungguhan diuji scripts/smoke_e2e.py.
-"""
-
 import pytest
 
 from ocr_common.jobs import STAGE_SCORING, InMemoryJobRepository, StagePipeline
@@ -34,7 +28,6 @@ def harness():
     pipeline = StagePipeline(stage=STAGE_SCORING, repository=InMemoryJobRepository(), callback=callback)
     service = ScoringJobService(pipeline, get_confidence_service())
     app.dependency_overrides[get_job_service] = lambda: service
-    # Context manager: satu event loop selama test, supaya task background hidup.
     with make_client(app) as client:
         yield client, callback
     app.dependency_overrides.pop(get_job_service, None)
@@ -65,16 +58,13 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
     job = wait_for_job(client, "/v1/scoring/jobs/REQ_1")
     assert job["status"] == "DONE"
     result = job["result"]
-    # Keluaran ML engineer: dua confidence per field. Tidak ada skor dokumen / keputusan.
     assert set(result) == {"npwp_confidence", "name_confidence", "payload"}
     assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
-    # Payload yang dinilai model ikut tersimpan, disusun dari hasil berantai tahap sebelumnya.
     assert result["payload"]["npwp"] == "123456789012345"
     assert result["payload"]["name"] == "BUDI SANTOSO"
     assert result["payload"]["n_boxes"] == 1
-    assert result["payload"]["guardrail_probability"] is None  # GUARDRAILS di test ini tanpa `document`
+    assert result["payload"]["guardrail_probability"] is None
 
-    # Tahap terakhir: callback membawa hasil akhir untuk requests.final_result.
     assert len(callback.calls) == 1
     call = callback.calls[0]
     assert (call["stage"], call["status"]) == ("SCORING", "DONE")

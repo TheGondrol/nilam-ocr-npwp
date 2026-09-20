@@ -1,15 +1,3 @@
-"""
-Pembungkus scorer: field bernama -> skor dokumen 0..1 + rincian per field.
-    score(fields: {name: {"value", "confidence"}}) -> {"score", "field_scores": [...], "reasons": [...]}
-
-Skor dokumen inilah yang dikirim sebagai `guardrails` di envelope
-extract-ocr / get-ocr-result (orkestrator membandingkannya dengan ambang
-batas role). Keputusan approve/review/reject TIDAK diambil di sini, melainkan
-di service layer berdasarkan ambang batas di Settings. Implementasi default
-heuristik (confidence OCR x validasi format); ganti dengan scorer berbasis
-model bila ada.
-"""
-
 import re
 from collections.abc import Callable
 from functools import lru_cache
@@ -17,18 +5,14 @@ from functools import lru_cache
 from ocr_common.registry import Factory, build_backend
 from src.core.config import get_settings
 
-# Bobot relatif tiap field terhadap skor akhir. Field yang tidak ada dihitung 0.
 WEIGHTS: dict[str, float] = {
     "nomor_npwp": 3.0,
     "nama": 2.0,
     "nama_badan": 2.0,
 }
 REQUIRED = ("nomor_npwp",)
-# NPWP orang pribadi hanya punya nama, NPWP badan hanya (atau terutama) nama
-# badan: salah satu wajib ada, dan yang kosong tidak dihitung sebagai kekurangan.
 ONE_OF = ("nama", "nama_badan")
 
-# Mengembalikan pesan masalah, atau None jika valid.
 Validator = Callable[[str], str | None]
 
 
@@ -75,7 +59,6 @@ class HeuristicNpwpScorer:
             field_score = self._score_field(name, fields.get(name))
             field_scores.append(field_score)
             if name in ONE_OF and present_one_of and field_score["issues"] == ["missing"]:
-                # Pasangannya ada; yang ini memang tidak berlaku untuk dokumen ini.
                 continue
             weighted_total += weight * field_score["score"]
             weight_total += weight

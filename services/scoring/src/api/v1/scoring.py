@@ -17,7 +17,6 @@ from src.services.scoring_service import ScoringService
 
 router = APIRouter(tags=["Scoring"], dependencies=[Depends(verify_api_key)])
 
-# Dipakai juga oleh contoh GET /v1/scoring/jobs/{request_id}: payload yang dinilai model.
 CONFIDENCE_PAYLOAD_EXAMPLE = {
     "npwp": "123456789012345",
     "npwp_score": 0.9992,
