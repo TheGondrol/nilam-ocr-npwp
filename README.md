@@ -7,7 +7,7 @@ Service OCR untuk dokumen NPWP (kartu identitas pajak) Indonesia, dipecah menjad
 | **guardrails** | 8031 | `nilam-ocr-guardrails` | "ServiceGuardrails": dipanggil Orkestrasi **sinkron**. Klasifikasi tiap halaman `accepted`/`reject` dengan model EfficientNet-B0 (lokal, CPU) + vonis dokumen; selalu 200 dengan `data.passed` (true/false) + `data.reason` |
 | **ekstraksi** | 8030 | `nilam-ocr-ekstraksi` | "ServiceOCR": tahap pertama pipeline async (`/v1/ekstraksi/jobs` → 202, OCR di background, callback, handoff ke structuring). Juga OCR mentah sinkron (`/v1/ekstraksi/extract`) dan kontrak lama `generate-request-id` → `extract-ocr` → `get-ocr-result` (slot `ocr-npwp`, `OCR_NPWP_SERVICE_URL`) |
 | **structuring** | 8032 | `nilam-ocr-structuring` | "ServiceStructuring": `/v1/structuring/jobs` → 202, baris teks → `nomor_npwp`, `nama`, `nama_badan` dengan confidence per field, callback, handoff ke scoring |
-| **scoring** | 8033 | `nilam-ocr-scoring` | "ServiceScoring", tahap terakhir: `/v1/scoring/jobs` → 202, skor dokumen 0..1 + `approve`/`review`/`reject`; callback-nya membawa **hasil akhir** ke Orkestrasi |
+| **scoring** | 8033 | `nilam-ocr-scoring` | "ServiceScoring", tahap terakhir: `/v1/scoring/jobs` → 202, confidence per field (`npwp_confidence`, `name_confidence`) dari trust model ML engineer; callback-nya membawa **hasil akhir** ke Orkestrasi. Tanpa skor dokumen / keputusan: ambang milik Orkestrasi |
 
 Orkestrasi (repo `nilam-ocr-orchestration`) memegang `request_id`, status per tahap (`orkestrasi.requests`, `orkestrasi.stage_logs`), dan polling client; repo ini hanya keempat service di atas.
 
@@ -76,6 +76,7 @@ nilam-ocr-npwp/
 │   │   └── src/services/pages.py     # gambar -> 1 halaman, PDF -> halaman per halaman (PyMuPDF)
 │   ├── structuring/                  # port 8032: sama, plus api/v1/jobs.py · services/job_service.py · core/pipeline.py · db/schema.sql
 │   └── scoring/                      # port 8033: sama (tanpa handoff; tahap terakhir)
+├── deploy/k8s/                       # manifest GKE (Kustomize): base + overlays dev / staging / production
 ├── docker-compose.yml                # 4 image, 4 container, satu network
 ├── docker-compose.db.yml             # overlay PostgreSQL lokal: satu database, schema ocr / structuring / scoring
 ├── scripts/smoke_e2e.py              # memerankan Orkestrasi: guardrails -> jobs -> callback, lewat container
@@ -134,7 +135,7 @@ Ketiga tahap memakai mesin yang sama, `ocr_common/jobs.py`; tiap service hanya m
 ```json
 {"document_type": "npwp",
  "fields": {"nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.96}, "nama": {...}, "nama_badan": {...}},
- "scoring": {"score": 0.91, "decision": "approve", "field_scores": [...], "reasons": []},
+ "scoring": {"npwp_confidence": 0.93, "name_confidence": 0.88},
  "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}}
 ```
 
@@ -153,7 +154,7 @@ orkestrator ──► ekstraksi:8030 /v1/extract-ocr (request_id + file/file_url
                  └─► 200 {data: {nomor_npwp, nama, nama_badan: {value, confidence}}, guardrails: <skor>}
 ```
 
-Endpoint sinkron tiap tahap (`/v1/structuring/structure`, `/v1/scoring/score`) melakukan kerja yang sama dengan `/jobs`-nya, tanpa job/callback. Error dari tahap lain diteruskan: 4xx dari service lain dipertahankan status dan pesannya (mis. 400 `No text lines to structure`), 5xx/tidak terjangkau menjadi 500/503/504 dengan nama service-nya (`structuring service is unavailable`).
+`/v1/structuring/structure` melakukan kerja yang sama dengan `/jobs`-nya, tanpa job/callback. `/v1/scoring/score` adalah skor dokumen **heuristik lama** (bukan dari ML engineer), dipertahankan hanya karena `extract-ocr` mengembalikan satu angka `guardrails`; pipeline async memakai trust model (`/v1/scoring/confidence`). Error dari tahap lain diteruskan: 4xx dari service lain dipertahankan status dan pesannya (mis. 400 `No text lines to structure`), 5xx/tidak terjangkau menjadi 500/503/504 dengan nama service-nya (`structuring service is unavailable`).
 
 Di dalam tiap service: `api/v1/*.py` (controller, `ServiceError` → `HTTPException`) → `services/*_service.py` (logika, tidak tahu HTTP) → `models/*.py` (pembungkus model, dipilih lewat env) / `repositories/`. Handler envelope, `X-Request-ID`, 401, dan 422 (`errors: "VALIDATION_ERROR"`) datang dari `ocr_common.app.create_app`.
 
@@ -209,6 +210,8 @@ Di compose, URL antar service sudah di-override ke nama service (`http://structu
 
 Uji callback tanpa orkestrator: `SMOKE_CALLBACK_PORT=8039 make smoke` membuat smoke script ikut menerima callback; arahkan ketiga service ke sana dengan `ORCHESTRATION_URL=http://host.docker.internal:8039` (container) atau `http://127.0.0.1:8039` (proses bare). Script memeriksa urutan `OCR → STRUCTURING → SCORING` dan menampilkan hasil akhir.
 
+Deploy ke GKE: lihat [deploy/k8s/README.md](deploy/k8s/README.md) (Kustomize, External Secrets, NetworkPolicy, probe `/health` + `/ready`).
+
 ## Environment Variables
 
 Semua service (`ocr_common.config.BaseServiceSettings`):
@@ -216,7 +219,8 @@ Semua service (`ocr_common.config.BaseServiceSettings`):
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
 | `API_KEY` | **Ya** | – | Header `X-API-Key` yang harus dikirim pemanggil. `MOCK_API_KEY` juga diterima. Tidak boleh kosong; service gagal start |
-| `AUTH_DISABLED` | Tidak | `false` | `true` = pemeriksaan `X-API-Key` dimatikan (dev / uji coba lokal saja; service mencatat peringatan saat start). `API_KEY` tetap wajib karena dipakai sebagai key keluar |
+| `ENVIRONMENT` | Di laptop: `local` | `production` | `local` (laptop) atau `dev` / `staging` / `production` (ter-deploy). Di luar `local` service **menolak start** kalau: `AUTH_DISABLED=true`, backend `mock`, `DATABASE_URL` / `ORCHESTRATION_URL` kosong, atau alamat service menunjuk localhost. Default `production` supaya konfigurasi yang lupa mengisinya gagal keras, bukan berjalan dengan pengaman mati. `dev` bukan mode longgar: cluster dev GKE bernama "dev" |
+| `AUTH_DISABLED` | Tidak | `false` | `true` = pemeriksaan `X-API-Key` dimatikan. Hanya diterima dengan `ENVIRONMENT=local`; service mencatat peringatan saat start. `API_KEY` tetap wajib karena dipakai sebagai key keluar |
 | `SERVICE_BASE_URL` | Tidak | – | Nilai `servers` di OpenAPI (`/docs`) |
 | `PORT` | Tidak | per service | 8030 / 8031 / 8032 / 8033 |
 | `MAX_UPLOAD_BYTES` | Tidak | `5242880` | Berlaku untuk `file` maupun `file_url` |
@@ -261,9 +265,9 @@ guardrails:
 | `GUARDRAILS_DOCUMENT_POLICY` | Tidak | `all` | Backend lokal saja. `all`: accepted hanya kalau semua halaman accepted; `majority`: accepted > reject |
 | `GUARDRAILS_PDF_DPI` / `GUARDRAILS_MAX_PAGES` | Tidak | `150` / `20` | Backend lokal saja. Render PDF per halaman |
 
-structuring: `STRUCTURING_BACKEND` (`rule_based`); tahap berikutnya `SCORING_SERVICE_URL` (`http://127.0.0.1:8033`), `SCORING_API_KEY` (= `API_KEY`), `SCORING_TIMEOUT_SECONDS` (`10.0`).
+structuring: `STRUCTURING_BACKEND` (`npwp_rules`, default: aturan regex + posisi dari ML engineer; atau `rule_based`: regex berbasis label, hanya untuk teks berlabel), `STRUCTURING_PAGE_GUARDRAILS` (`true`: tolak upload berisi KTP/KK/Akta, CAPTCHA, screenshot "Cek NPWP", atau > 2 halaman → 400 / job `FAILED`); tahap berikutnya `SCORING_SERVICE_URL` (`http://127.0.0.1:8033`), `SCORING_API_KEY` (= `API_KEY`), `SCORING_TIMEOUT_SECONDS` (`10.0`).
 
-scoring: `SCORING_BACKEND` (`heuristic`), `SCORING_APPROVE_THRESHOLD` (`0.8`), `SCORING_REVIEW_THRESHOLD` (`0.5`).
+scoring: `SCORING_MODEL_PATH` (`weights/trust_model.joblib`: trust model ML engineer, dipakai pipeline dan `/v1/scoring/confidence`). Hanya untuk endpoint lama `/v1/scoring/score`: `SCORING_BACKEND` (`heuristic`), `SCORING_APPROVE_THRESHOLD` (`0.8`), `SCORING_REVIEW_THRESHOLD` (`0.5`).
 
 ## Endpoint API
 
@@ -271,7 +275,8 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 
 | Service | Method | Path | Body |
 |---|---|---|---|
-| semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`) |
+| semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`). **Liveness**: hanya "proses hidup", tidak menyentuh dependensi |
+| semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk ekstraksi / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
 | guardrails | POST | `/v1/guardrails/check` | form: `request_id` + `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]` {page_index, proba_approve, proba_reject, verdict} |
 | ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, `data` dari guardrails/check), + tepat satu dari `file` / `file_url` |
 | structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}` |
@@ -281,8 +286,9 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 | ekstraksi | POST | `/v1/extract-ocr` | kontrak lama. form: `request_id` + tepat satu dari `file` / `file_url` |
 | ekstraksi | GET | `/v1/get-ocr-result/{request_id}` | kontrak lama. – |
 | ekstraksi | POST | `/v1/ekstraksi/extract` | form: `file` / `file_url` → blok teks, `confidence`, `bbox`, `page`, `model` |
-| structuring | POST | `/v1/structuring/structure` | JSON `{"lines": [{"text", "confidence"}]}` → `fields` |
-| scoring | POST | `/v1/scoring/score` | JSON `{"document_type", "fields": {name: {"value", "confidence"}}}` → `score`, `decision` |
+| structuring | POST | `/v1/structuring/structure` | JSON `{"lines": [{"text", "confidence", "bbox"?, "page"?}]}` → `fields`. `bbox` (dari `blocks[]` ekstraksi) dipakai `npwp_rules` untuk mencari nama dari posisinya; tanpa itu dipakai urutan baris |
+| scoring | POST | `/v1/scoring/confidence` | **Kontrak ML engineer.** JSON 13 kunci (`npwp`, `npwp_score`, `npwp_has_homoglyph`, `npwp_candidate_count`, `name`, `name_score`, `name_corrected`, `n_boxes`, `num_pages`, `avg_doc_score`, `min_doc_score`, `flag`, `guardrail_probability`; semua boleh null) → `{"npwp_confidence", "name_confidence"}`. Field yang nilainya null mendapat confidence null |
+| scoring | POST | `/v1/scoring/score` | lama, heuristik. JSON `{"document_type", "fields": {name: {"value", "confidence"}}}` → `score`, `decision` |
 
 **Response `/jobs`** (202): `data: {"request_id", "stage", "status", "duplicate"}`. `status` adalah `PROCESSING` untuk job baru, atau status terkini kalau `duplicate: true`. Validasi isi (file rusak, tidak ada teks, `document_type` tidak didukung) terjadi di background, jadi muncul sebagai callback `FAILED`, bukan 4xx; yang langsung ditolak hanya bentuk request yang salah (400 intake / JSON `guardrails`, 401, 422).
 
@@ -377,6 +383,14 @@ Satu elemen per halaman, dan ketiga array-nya **paralel** (indeks `i` = satu bar
 
 **Ekstraksi, backend `paddle` (API lama)**: klien ke PaddleOCR PP-OCRv6 (`POST {EKSTRAKSI_OCR_URL}/ocr`, multipart `file`). Pemetaan response `pages[].texts[]{text, score, poly}` → `blocks[]{text, confidence, bbox, page}`, `models.detection+recognition` → `model`. File yang tidak terbaca (`num_pages: 0`) → `blocks: []`, di pipeline menjadi 400 `No text lines to structure` dari structuring. Aktifkan dengan `EKSTRAKSI_BACKEND=paddle` + `EKSTRAKSI_OCR_URL`.
 
+**Scoring, trust model (sudah ada)**: `services/scoring/weights/trust_model.joblib` dari ML engineer (3 KB, ikut di repo dan di-COPY ke image). Isinya, dibaca dari file-nya: dict `pipeline` (`SimpleImputer(median)` → `StandardScaler` → `LogisticRegression`, scikit-learn **1.9.0**), `feature_cols` (10 fitur), `train_report` (n=1760 = 880 dokumen × 2 field, 1640 benar / 120 salah, AUC 0,96). Modelnya **per field**: satu baris fitur untuk nomor NPWP dan satu untuk nama; keluarannya P(field itu benar). Versi scikit-learn harus sama dengan saat training: beda versi = service menolak start, bukan sekadar peringatan.
+
+Pemetaan payload → fitur ada di docstring `src/models/trust_model.py`; asal tiap kunci payload di pipeline ada di `src/services/confidence_service.py` (`npwp*`/`name*` dari structuring, `n_boxes`/`num_pages`/`avg`/`min_doc_score` dari blok OCR, `guardrail_probability` dari `document.confidence` guardrails). Perilaku model yang perlu diketahui: field yang **dikoreksi** (`npwp_has_homoglyph` / `name_corrected` = true) mendapat confidence ≈ 0, karena di data training field seperti itu hampir selalu salah; `npwp_candidate_count > 1` menurunkan confidence nomor (0,97 → 0,85). Tiga hal yang **belum terdefinisi** dan perlu ditanyakan ke ML engineer:
+
+1. `shape_confidence` (fitur ke-4, koefisien terbesar kedua): tidak ada di payload, definisinya tidak ada di file mana pun. Dikirim kosong sehingga imputer model mengisinya dengan median training (2). Akibatnya confidence **terlalu tinggi** untuk field yang nilai aslinya 1 (sampel kartu asli: 0,74 → 0,05). Isi rumusnya di `TrustModel._shape_confidence()`.
+2. `flag`: ada di payload, tapi tidak ada tahap yang menghasilkannya. Dikirim kosong di pipeline (pengaruhnya kecil: 0,735 → 0,701).
+3. Contoh keluaran mereka (`0.93` / `0.88`) **tidak bisa direproduksi** dari contoh payload mereka dengan kombinasi fitur apa pun (model memberi 0,97 / 0,001, karena `name_corrected: true`). Kemungkinan hanya ilustrasi format; minta satu pasang payload + keluaran yang benar-benar dihitung supaya pemetaan bisa diverifikasi.
+
 **Menambah backend lain** (structuring dan scoring menunggu dokumentasi modelnya):
 
 1. Tambahkan kelas di `services/<nama>/src/models/<app>.py` dengan method yang sama dengan mock-nya; untuk model HTTP terima `RemoteModelClient` lewat constructor.
@@ -405,7 +419,7 @@ Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipe
 
 ## Keterbatasan & Langkah Berikutnya
 
-- **Structurer `rule_based` belum cocok dengan kartu NPWP asli.** Ia mencari baris berlabel (`NAMA : ...`), padahal kartu asli mencetak nilainya tanpa label. Dengan response OCR asli di fixture ekstraksi (`95.844.800.1-805.000`, `RAHMAT HIDAYAT`, ...): `nomor_npwp` ketemu lewat pola, tapi `nama` dan `nama_badan` `null`, sehingga scoring memberi `0.43` → `reject` untuk dokumen yang terbaca sempurna. Baris `NPWP16:4318 0856 07040052` (NPWP 16 digit / NIK) juga belum punya field. Ini menunggu kontrak model structuring; kalau tetap rule-based, structurer perlu memakai posisi (`bbox`: nama adalah baris tepat di bawah nomor NPWP), yang sudah ikut terkirim di payload `ocr.blocks`.
+- **Structuring memakai aturan ML engineer (`npwp_rules`), tapi kirimannya belum lengkap.** Dua file (`npwp.py`, `name_extraction.py`) di-vendor apa adanya di `services/structuring/src/vendor/npwp_rules/`: nama dicari dari posisinya terhadap nomor NPWP, karena kartu asli mencetak nama tanpa label. Pada dua hasil OCR kartu asli, backend lama `rule_based` memberi `nama=null` → skor 0,43 `reject`; `npwp_rules` menemukan nama → 0,98 dan 0,99 `approve`. Yang belum dikirim: (1) `name_master.py` + daftar nama rujukannya (sekarang pengganti sementara tanpa-sinyal: tidak ada koreksi spasi nama, tidak ada tie-break "nama dikenal"); (2) modul pemanggilnya, jadi cara memilih nomor, kapan guardrail halaman menolak, dan format output adalah tafsir kami atas docstring kedua file (`NpwpRulesStructurer`). Dua keputusan yang perlu dikonfirmasi ke ML engineer / bisnis: kartu yang mencetak nomor 15 **dan** 16 digit kini melaporkan yang 16 digit (`npwp_priority`), dan nomor 16 digit dikembalikan tanpa titik (15 digit tetap `XX.XXX.XXX.X-XXX.XXX`).
 - Ekstraksi (`remote` atau `paddle`) dan guardrails (`efficientnet`, checkpoint lokal, atau `remote`, service model ML engineer) sudah memakai model sungguhan. Kedua backend `remote` baru diuji terhadap kontrak tertulisnya dan stand-in yang mengikutinya, belum terhadap service model yang asli (`tests/test_guardrails_live.py`, `tests/test_ekstraksi_remote_live.py`); structuring dan scoring masih rule-based / heuristik sampai modelnya tersedia. Model guardrails belum divalidasi dengan foto NPWP asli (lihat catatan di atas).
 - **Kontrak callback belum disepakati dengan tim orkestrasi.** Path (`/v1/callbacks/stage`), bentuk body, dan bentuk hasil akhir di [Alur Request](#alur-request) adalah usulan dari repo ini; sisi orkestrasi (endpoint callback, `orkestrasi.requests` / `stage_logs`, 422/202, polling) dikerjakan di repo `nilam-ocr-orchestration`. Sampai itu ada, uji callback dengan `SMOKE_CALLBACK_PORT`.
 - **Job hidup di memori proses.** Job jalan sebagai `asyncio` task; kalau proses mati di tengah job (deploy, OOM), baris `jobs` tertinggal `PROCESSING` dan tidak ada callback. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), tapi crash tidak. Orkestrasi perlu timeout per tahap; kalau volume naik, ganti `BackgroundRunner` di `ocr_common/jobs.py` dengan antrean yang tahan restart (mis. worker yang mengambil `jobs.status=PROCESSING` yang basi) tanpa mengubah service.
