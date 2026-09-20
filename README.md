@@ -410,12 +410,29 @@ make test          # lib + keempat service (pytest dijalankan di folder masing-m
 make test-scoring  # satu service
 make lint          # ruff seluruh repo
 make typecheck     # ty per package
-make openapi       # tulis ulang openapi.yaml tiap service dari kodenya
+make openapi       # tulis ulang openapi.yaml tiap service dari kodenya, lalu api/gateway.openapi.yaml
+make api-docs      # Swagger UI kelima spec tanpa menjalankan service: http://127.0.0.1:8088/api/
 ```
 
 Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipeline async (`tests/test_jobs.py`) mengganti Orkestrasi dan tahap berikutnya dengan perekam dari `ocr_common.testing` (`RecordingCallback`, `RecordingNextStage`) dan menunggu job background dengan `wait_for_job`; kontrak lama di ekstraksi memakai `tests/fakes.py`. Mesin pipelinenya sendiri (`libs/ocr_common/tests/test_jobs.py`) diuji terhadap repository in-memory **dan** SQL (SQLite sungguhan: `ON CONFLICT`, upsert, join). Rantai HTTP sungguhan antar container diuji `make smoke` (`scripts/smoke_e2e.py`). Test live ke PaddleOCR: `cd services/ekstraksi && EKSTRAKSI_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_ekstraksi_live.py`.
 
 `openapi.yaml` tiap service adalah turunan kode, dijaga `tests/test_openapi.py`, dan format dump-nya sama dengan `scripts/check_openapi.py` di monorepo orkestrasi.
+
+### Spec untuk tim gateway / orkestrasi
+
+`api/gateway.openapi.yaml` adalah **satu** spec OpenAPI 3.1 berisi hanya yang dibutuhkan pihak yang mengintegrasikan pipeline, dirakit `scripts/build_gateway_openapi.py` dari keempat `openapi.yaml` (jadi tidak pernah ditulis tangan, dan dijaga `libs/ocr_common/tests/test_gateway_spec.py`):
+
+| Bagian | Isi |
+|---|---|
+| 1. Guardrails | `POST /v1/guardrails/check` (sinkron) |
+| 2. Start the pipeline | `POST /v1/ekstraksi/jobs` (202) |
+| 3. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
+| 4. Reconciliation | `GET /v1/<tahap>/jobs/{request_id}` di tiga service, `result` bertipe per tahap |
+| Legacy | `generate-request-id` / `extract-ocr` / `get-ocr-result`, ditandai `deprecated` |
+
+Tiap operasi membawa `servers` milik service pemiliknya (DNS GKE lintas namespace dengan variabel `environment`, DNS satu namespace / Compose, localhost), karena satu spec ini mencakup empat host. Panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`) dan helper sinkron sengaja tidak ikut; semuanya ada di spec per service dan di `/docs` masing-masing.
+
+Aturan penulisan yang dijaga test: setiap operasi punya `operationId` (dipakai generator klien: `checkGuardrails`, `submitOcrJob`, `getOcrJob`, ...), setiap respons 4xx/5xx punya contohnya sendiri, dan teks `Field(description=...)` berbahasa Inggris karena dibaca tim lain. Contoh di spec memakai data fiktif.
 
 ## Keterbatasan & Langkah Berikutnya
 

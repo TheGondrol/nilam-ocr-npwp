@@ -3,6 +3,7 @@
 #   make dev                pasang semua dependency + lib bersama (editable)
 #   make test / lint / typecheck / openapi     semua service (+ lib)
 #   make test-ekstraksi     satu service saja (juga lint-, typecheck-, openapi-, run-)
+#   make api-docs           Swagger UI spec gabungan gateway + keempat service (api/index.html)
 #   make run-guardrails     uvicorn --reload untuk satu service di port defaultnya
 #   make weights            unduh bobot model dari GUARDRAILS_MODEL_URI (GCS/MinIO/https) sebelum build
 #   make build              build keempat image
@@ -28,7 +29,7 @@ lint:
 format:
 	$(PY) -m ruff format . && $(PY) -m ruff check --fix .
 typecheck: typecheck-lib $(SERVICES:%=typecheck-%)
-openapi: $(SERVICES:%=openapi-%)
+openapi: $(SERVICES:%=openapi-%) openapi-gateway
 
 test-lib:
 	cd libs/ocr_common && $(PY) -m pytest -q
@@ -43,6 +44,12 @@ typecheck-%:
 	cd services/$* && $(PY) -m ty check src tests
 openapi-%:
 	cd services/$* && API_KEY=x ENVIRONMENT=local $(PY) -m ocr_common.openapi
+# Spec gabungan untuk tim gateway, dirakit dari keempat openapi.yaml di atas.
+openapi-gateway: $(SERVICES:%=openapi-%)
+	$(PY) scripts/build_gateway_openapi.py
+# Swagger UI kelima spec tanpa menjalankan service: http://127.0.0.1:8088/api/
+api-docs:
+	$(PY) -m http.server 8088
 run-%:
 	cd services/$* && $(PY) -m uvicorn src.main:app --reload --port $(PORT_$*)
 
@@ -68,4 +75,4 @@ logs-%:
 smoke:
 	$(PY) scripts/smoke_e2e.py
 
-.PHONY: dev test lint format typecheck openapi test-lib typecheck-lib weights build up up-db down ps smoke
+.PHONY: dev test lint format typecheck openapi openapi-gateway api-docs test-lib typecheck-lib weights build up up-db down ps smoke
