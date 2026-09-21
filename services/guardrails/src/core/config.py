@@ -24,10 +24,18 @@ class Settings(BaseServiceSettings):
     guardrails_pdf_dpi: int = 150
     guardrails_max_pages: int = 20
 
+    ekstraksi_service_url: str = "http://127.0.0.1:8030"
+    ekstraksi_api_key: str | None = None
+    ekstraksi_timeout_seconds: float = 10.0
+    pipeline_retry_attempts: int = 3
+    pipeline_retry_delay_seconds: float = 0.5
+
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:
         self.reject_mock_backend_outside_local(guardrails_backend=self.guardrails_backend)
-        self.reject_localhost_outside_local(guardrails_model_url=self.guardrails_model_url)
+        self.reject_localhost_outside_local(
+            guardrails_model_url=self.guardrails_model_url, ekstraksi_service_url=self.ekstraksi_service_url
+        )
         return self
 
 

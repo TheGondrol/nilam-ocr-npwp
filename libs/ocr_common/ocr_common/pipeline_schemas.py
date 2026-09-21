@@ -39,7 +39,12 @@ class GuardrailsDocument(_Forwarded):
 
 class GuardrailsResult(_Forwarded):
     model_config = ConfigDict(
-        json_schema_extra={"description": "`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline."}
+        json_schema_extra={
+            "description": (
+                "The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded "
+                "unchanged down the pipeline."
+            )
+        }
     )
 
     passed: bool | None = Field(None, description="true: the document may proceed to OCR", examples=[True])

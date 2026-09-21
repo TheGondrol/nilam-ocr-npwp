@@ -192,7 +192,7 @@ async def test_remote_backend_is_built_from_settings():
 def test_http_check_with_remote_backend(client, auth, monkeypatch):
     monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: _model(_reply(REJECTED)))
     response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_R1"}, files=image_upload("npwp.jpg", JPEG), headers=auth
+        "/v1/extract-ocr", data={"request_id": "OCR_R1"}, files=image_upload("npwp.jpg", JPEG), headers=auth
     )
     assert response.status_code == 200
     body = response.json()
@@ -207,7 +207,7 @@ def test_http_model_unreachable_returns_503_envelope(client, auth, monkeypatch):
 
     monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: _model(refuse))
     response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_R2"}, files=image_upload("npwp.jpg", JPEG), headers=auth
+        "/v1/extract-ocr", data={"request_id": "OCR_R2"}, files=image_upload("npwp.jpg", JPEG), headers=auth
     )
     assert response.status_code == 503
     assert response.json()["message"] == "guardrails model is unavailable"

@@ -706,7 +706,8 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsResult
-      description: '`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline.'
+      description: The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded
+        unchanged down the pipeline.
     HealthResponse:
       properties:
         status:

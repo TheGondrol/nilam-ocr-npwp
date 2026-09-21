@@ -44,8 +44,9 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
     operation_id="submitOcrJob",
     summary="Start the pipeline for a document (OCR stage)",
     description=(
-        "**Step 2 of the pipeline, asynchronous: the entry point of the OCR -> structuring -> scoring chain.** "
-        "Call it after `POST /v1/guardrails/check` answered `passed: true`.\n\n"
+        "**Step 2 of the pipeline, asynchronous: the start of the OCR -> structuring -> scoring chain.** "
+        "Called by the guardrails service from its `POST /v1/extract-ocr` once the document passed; the "
+        "orchestrator does not call it. Calling it directly skips the guardrails check.\n\n"
         "Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in the "
         "background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result "
         "(`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which hands it "
@@ -96,9 +97,10 @@ async def submit_job(
     guardrails: str | None = Form(
         None,
         description=(
-            "The `data` object of `POST /v1/guardrails/check`, serialised as a JSON string. Forwarded down the "
-            "chain: scoring uses `document.confidence`, and the final result returns it unchanged. Optional, but "
-            "without it the scoring model works with one input missing"
+            "The guardrails report (`data` of the guardrails service's `POST /v1/extract-ocr`), serialised as a "
+            "JSON string; the guardrails service fills it in. Forwarded down the chain: scoring uses "
+            "`document.confidence`, and the final result returns it unchanged. Optional, but without it the "
+            "scoring model works with one input missing"
         ),
         examples=[
             '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821, '

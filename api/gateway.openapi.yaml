@@ -4,21 +4,23 @@ info:
   version: 1.0.0
   description: "Everything the gateway / orchestrator needs to integrate the NPWP OCR pipeline, merged\
     \ from the four\nservices' own specs. Each service also serves its full Swagger UI at `/docs`.\n\n\
-    ## The flow\n\n1. **`POST /v1/guardrails/check`** on the *guardrails* service, synchronous. `data.passed:\
-    \ false` ->\n   stop and answer the client with `data.reason`. `data.passed: true` -> go on.\n2. **`POST\
-    \ /v1/ekstraksi/jobs`** on the *ekstraksi* service with your `request_id`, the document\n   (`file`\
-    \ or `file_url`), and the guardrails `data` from step 1 as the `guardrails` form field.\n   It answers\
-    \ **202** at once. You are done calling.\n3. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING`\
-    \ -> `SCORING`, each `DONE` or\n   `FAILED`. The `SCORING` / `DONE` callback carries the **final result**.\
-    \ A `FAILED` callback of any\n   stage ends the request.\n4. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}`\
-    \ on the stage's own service.\n\nTime a request out on your side: a stage that crashes mid-job cannot\
-    \ send its callback.\n\n## What the result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`,\
-    \ `nama_badan`. `scoring` holds `npwp_confidence` and\n`name_confidence`: the probability, from the\
-    \ ML team's trust model, that each extracted field is\ncorrect. There is **no document-level score\
-    \ and no approve / reject decision**; thresholds are yours.\n\n## Addresses\n\nEach operation lists\
-    \ the servers of the service that owns it. Inside GKE, from another namespace:\n`http://<service>.nilam-ocr-<environment>.svc.cluster.local:<port>`\
-    \ with guardrails `8031`,\nekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed\
-    \ outside the cluster.\n\n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.**\
+    ## The flow\n\n1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id`\
+    \ and the document\n   (`file` or `file_url`). This is the only call you make. The guardrails check\
+    \ runs synchronously and\n   always answers **200**:\n   - `data.passed: false`, `data.job: null`\
+    \ -> nothing runs and no callback follows; answer the client\n     with `data.reason`.\n   - `data.passed:\
+    \ true` -> the guardrails service has already handed the document to the OCR stage;\n     `data.job`\
+    \ is that stage's answer. You are done calling.\n2. **Receive callbacks** (see *Webhooks*): `OCR`\
+    \ -> `STRUCTURING` -> `SCORING`, each `DONE` or\n   `FAILED`. The `SCORING` / `DONE` callback carries\
+    \ the **final result**. A `FAILED` callback of any\n   stage ends the request.\n3. **Reconcile when\
+    \ needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.\n\nTime a request\
+    \ out on your side: a stage that crashes mid-job cannot send its callback.\n\n## What the result is,\
+    \ and is not\n\n`fields` holds `nomor_npwp`, `nama`, `nama_badan`. `scoring` holds `npwp_confidence`\
+    \ and\n`name_confidence`: the probability, from the ML team's trust model, that each extracted field\
+    \ is\ncorrect. There is **no document-level score and no approve / reject decision**; thresholds are\
+    \ yours.\n\n## Addresses\n\nEach operation lists the servers of the service that owns it. Inside GKE\
+    \ the four services share one\nService; from another namespace: `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:<port>`\
+    \ with\nguardrails `8031`, ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed\
+    \ outside\nthe cluster.\n\n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.**\
     \ Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.\nA missing or wrong\
     \ key answers `401`. The services are reachable only from inside the cluster.\n\n**Envelope.** Every\
     \ JSON response, success or error, has the same shape:\n`{status_code, status_desc, message, data,\
@@ -38,44 +40,55 @@ info:
     \ a problem with the document itself (unreadable file, no text,\nunsupported document type) shows\
     \ up as a `FAILED` job and callback, not as a `4xx`.\n"
 tags:
-- name: 1. Guardrails (synchronous)
-  description: Ask whether the document may be processed at all.
-- name: 2. Start the pipeline (asynchronous)
-  description: One call starts OCR -> structuring -> scoring. Answers 202; the rest arrives by callback.
-- name: 3. Callbacks (you implement this)
+- name: 1. Start the pipeline
+  description: 'The only call you make: guardrails check, then OCR -> structuring -> scoring. Always 200:
+    rejected -> the reason, nothing runs; accepted -> `job`, the rest arrives by callback.'
+- name: 2. Callbacks (you implement this)
   description: 'Listed under **Webhooks**: the request each stage sends to you when it finishes.'
-- name: 4. Reconciliation
+- name: 3. Reconciliation
   description: Read a stage's status and result directly, e.g. after a missed callback or a timeout.
 - name: Legacy synchronous contract (deprecated)
-  description: generate-request-id -> extract-ocr -> get-ocr-result. Kept until the move to the async
-    flow.
+  description: 'The old synchronous flow on the ekstraksi service. Its `POST /v1/extract-ocr` (port 8030)
+    is left out here: that path now belongs to the guardrails service above.'
 paths:
-  /v1/guardrails/check:
+  /v1/extract-ocr:
     post:
       tags:
-      - 1. Guardrails (synchronous)
-      summary: Decide whether a document may proceed to OCR
-      description: '**Step 1 of the pipeline, synchronous.** Call this first; submit the OCR job only
-        when `data.passed` is true, and pass this response''s `data` along as the `guardrails` form field
-        of `POST /v1/ekstraksi/jobs`.
+      - 1. Start the pipeline
+      summary: Judge a document and, when it passes, start the pipeline
+      description: '**The only call the orchestrator makes.** Runs the guardrails model on the document
+        synchronously, then:
+
+
+        - **passed** -> sends the same document on to the OCR stage (`POST /v1/ekstraksi/jobs` on the
+        ekstraksi service) and returns the report with `data.job`. OCR -> structuring -> scoring then
+        run in the background and report through the `OCR`, `STRUCTURING` and `SCORING` stage callbacks;
+        the final result is in the `SCORING` callback.
+
+        - **rejected** -> returns the report with `data.passed: false`, `data.reason` and `data.job: null`.
+        Nothing else runs and no callback follows; the orchestrator answers the client 422 with `reason`.
+
+
+        Always 200 when the document was judged: read `data.passed`, not the HTTP code.
 
 
         Runs the guardrails model on each page (a PDF is rendered page by page; an image is one page)
         and aggregates a document verdict. The model is either in this process (`efficientnet`) or the
         ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either way.
-        Always returns 200 with a report; `data.passed` tells whether the document should proceed to OCR,
-        and `data.reason` says why not (the orchestrator answers 422 with it). The orchestrator forwards
-        `data` to the OCR service as the guardrails result.
 
 
-        Send `request_id` plus the document as `file`, or as `file_url` and this service fetches it itself;
-        exactly one of the two.'
-      operationId: checkGuardrails
+        Send `request_id` plus the document as `file`, or as `file_url` (downloaded here once, then forwarded
+        as a file, so the URL only has to live for this call); exactly one of the two.
+
+
+        **Idempotency.** The same request_id again re-runs the guardrails check, but the OCR stage answers
+        `duplicate: true` and does not run twice unless the earlier attempt `FAILED`.'
+      operationId: extractOcr
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_checkGuardrails'
+              $ref: '#/components/schemas/Body_extractOcr'
         required: true
       responses:
         '200':
@@ -86,7 +99,7 @@ paths:
                 $ref: '#/components/schemas/GuardrailCheckResponse'
               examples:
                 accepted:
-                  summary: 'Accepted: proceed to OCR'
+                  summary: 'Accepted: the OCR stage was started, `job` is its answer'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -104,9 +117,39 @@ paths:
                         proba_approve: 0.9821
                         proba_reject: 0.0179
                         verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: PROCESSING
+                        duplicate: false
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                duplicate:
+                  summary: 'Same request_id sent again: the OCR stage did not start a second run'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: DONE
+                        duplicate: true
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 rejected:
-                  summary: 'Rejected: stop and answer the client with `reason`'
+                  summary: 'Rejected: nothing was started; answer the client with `reason`'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -152,7 +195,8 @@ paths:
                         verdict: reject
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad file (empty, too large, unsupported type, unreadable) or bad intake
+          description: Bad file (empty, too large, unsupported type, unreadable), bad intake, or rejected
+            by the OCR stage
           content:
             application/json:
               schema:
@@ -185,7 +229,8 @@ paths:
                 message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
         '500':
-          description: Guardrails model service failed or answered in an unexpected shape (backend `remote`)
+          description: The guardrails model or the ekstraksi service failed or answered in an unexpected
+            shape
           content:
             application/json:
               schema:
@@ -196,7 +241,8 @@ paths:
                 message: guardrails model returned an unexpected response
                 errors: guardrails model returned an unexpected response
         '503':
-          description: Guardrails model service unreachable (backend `remote`)
+          description: The ekstraksi service (or the remote guardrails model) is unreachable; nothing
+            was started
           content:
             application/json:
               schema:
@@ -204,10 +250,10 @@ paths:
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: guardrails model is unavailable
-                errors: guardrails model is unavailable
+                message: ekstraksi service is unavailable
+                errors: ekstraksi service is unavailable
         '504':
-          description: Guardrails model service did not answer in time (backend `remote`)
+          description: The ekstraksi service (or the remote guardrails model) did not answer in time
           content:
             application/json:
               schema:
@@ -215,8 +261,8 @@ paths:
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: guardrails model timed out after 30.0s
-                errors: guardrails model timed out after 30.0s
+                message: ekstraksi service timed out after 10.0s
+                errors: ekstraksi service timed out after 10.0s
       security:
       - APIKeyHeader: []
       servers:
@@ -234,123 +280,10 @@ paths:
         description: GKE from the same namespace, or the Docker Compose network
       - url: http://127.0.0.1:8031
         description: Local development
-  /v1/ekstraksi/jobs:
-    post:
-      tags:
-      - 2. Start the pipeline (asynchronous)
-      summary: Start the pipeline for a document (OCR stage)
-      description: '**Step 2 of the pipeline, asynchronous: the entry point of the OCR -> structuring
-        -> scoring chain.** Call it after `POST /v1/guardrails/check` answered `passed: true`.
-
-
-        Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in
-        the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result
-        (`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which
-        hands it to scoring. The caller does nothing more: it receives one callback per stage, and the
-        final result in the `SCORING` callback (see *Webhooks*).
-
-
-        **Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most 5
-        MB. `file_url` is downloaded in the background, so make a presigned URL live longer than the worst
-        queueing time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.
-
-
-        **Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run
-        OCR twice, unless the earlier attempt `FAILED`, in which case it is run again.'
-      operationId: submitOcrJob
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/Body_submitOcrJob'
-        required: true
-      responses:
-        '202':
-          description: The job was accepted (or already existed)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JobAcceptedResponse'
-              examples:
-                accepted:
-                  summary: New job
-                  value:
-                    status_code: 202
-                    status_desc: Accepted
-                    message: Accepted
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: OCR
-                      status: PROCESSING
-                      duplicate: false
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                duplicate:
-                  summary: 'Same request_id sent again: nothing is re-run, `status` is the existing job''s
-                    status'
-                  value:
-                    status_code: 202
-                    status_desc: Accepted
-                    message: Accepted
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: OCR
-                      status: DONE
-                      duplicate: true
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '400':
-          description: Neither or both of file / file_url, or `guardrails` is not a JSON object
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: Send exactly one of file or file_url
-                errors: Send exactly one of file or file_url
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'body.request_id: Field required'
-                errors: VALIDATION_ERROR
-      security:
-      - APIKeyHeader: []
-      servers: &id001
-      - url: http://ekstraksi.nilam-ocr-{environment}.svc.cluster.local:8030
-        description: GKE, from another namespace (e.g. the orchestrator / gateway)
-        variables:
-          environment:
-            enum:
-            - dev
-            - staging
-            - production
-            default: dev
-            description: 'One namespace per environment: nilam-ocr-<environment>'
-      - url: http://ekstraksi:8030
-        description: GKE from the same namespace, or the Docker Compose network
-      - url: http://127.0.0.1:8030
-        description: Local development
   /v1/ekstraksi/jobs/{request_id}:
     get:
       tags:
-      - 4. Reconciliation
+      - 3. Reconciliation
       summary: Status and result of the OCR stage
       description: Status of this stage only, and its raw OCR result once `DONE`. The orchestrator normally
         learns the status from the callback; use this to reconcile after a missed callback, or to debug.
@@ -484,7 +417,21 @@ paths:
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-      servers: *id001
+      servers: &id001
+      - url: http://ekstraksi.nilam-ocr-{environment}.svc.cluster.local:8030
+        description: GKE, from another namespace (e.g. the orchestrator / gateway)
+        variables:
+          environment:
+            enum:
+            - dev
+            - staging
+            - production
+            default: dev
+            description: 'One namespace per environment: nilam-ocr-<environment>'
+      - url: http://ekstraksi:8030
+        description: GKE from the same namespace, or the Docker Compose network
+      - url: http://127.0.0.1:8030
+        description: Local development
   /v1/generate-request-id:
     post:
       tags:
@@ -522,132 +469,6 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
-      deprecated: true
-      security:
-      - APIKeyHeader: []
-      servers: *id001
-  /v1/extract-ocr:
-    post:
-      tags:
-      - Legacy synchronous contract (deprecated)
-      summary: 'Legacy: run the whole chain synchronously'
-      description: '**Legacy synchronous contract**, kept until the orchestrator has moved to the asynchronous
-        pipeline (`POST /v1/ekstraksi/jobs`). Runs the full pipeline (guardrails service -> this service''s
-        OCR -> structuring service -> scoring service) on the uploaded NPWP image for the given request_id
-        (from /v1/generate-request-id). A request_id can only be submitted once.
-
-
-        Send the image as `file`, or send `file_url` and this service fetches it itself; exactly one of
-        the two.'
-      operationId: extractOcr
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/Body_extractOcr'
-        required: true
-      responses:
-        '200':
-          description: The document was read
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExtractOcrResponse'
-              examples:
-                person:
-                  summary: A person's card
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      nomor_npwp:
-                        value: 12.345.678.9-012.345
-                        confidence: 0.9992
-                      nama:
-                        value: BUDI SANTOSO
-                        confidence: 0.9773
-                      nama_badan:
-                        confidence: 0.0
-                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    guardrails: 0.9904
-        '400':
-          description: Unknown request_id, bad file, or rejected by guardrails
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
-                errors: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
-        '409':
-          description: request_id was already processed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 409
-                status_desc: Conflict
-                message: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
-                errors: request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0 has already been processed
-        '500':
-          description: OCR engine or a downstream stage failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 500
-                status_desc: Internal Server Error
-                message: Internal server error while processing OCR
-                errors: Internal server error while processing OCR
-        '503':
-          description: OCR model or a downstream stage unreachable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 503
-                status_desc: Service Unavailable
-                message: ekstraksi OCR model is unavailable
-                errors: ekstraksi OCR model is unavailable
-        '504':
-          description: OCR model or a downstream stage did not answer in time
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 504
-                status_desc: Gateway Timeout
-                message: ekstraksi OCR model timed out after 30.0s
-                errors: ekstraksi OCR model timed out after 30.0s
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'body.request_id: Field required'
-                errors: VALIDATION_ERROR
       deprecated: true
       security:
       - APIKeyHeader: []
@@ -753,7 +574,7 @@ paths:
   /v1/structuring/jobs/{request_id}:
     get:
       tags:
-      - 4. Reconciliation
+      - 3. Reconciliation
       summary: Status and result of the structuring stage
       description: Status of this stage only, and its structured fields once `DONE`. The orchestrator
         normally learns the status from the callback; use this to reconcile after a missed callback, or
@@ -875,7 +696,7 @@ paths:
   /v1/scoring/jobs/{request_id}:
     get:
       tags:
-      - 4. Reconciliation
+      - 3. Reconciliation
       summary: Status and result of the scoring stage
       description: Status of this stage only and, once `DONE`, the two confidences plus the exact payload
         that was scored. The orchestrator normally receives the final result in the `SCORING` callback;
@@ -995,7 +816,7 @@ webhooks:
   stageCallback:
     post:
       tags:
-      - 3. Callbacks (you implement this)
+      - 2. Callbacks (you implement this)
       summary: Stage status callback (implemented by the orchestrator / gateway)
       description: '**This is a request this service SENDS, not one it accepts.** The orchestrator must
         expose it.
@@ -1066,39 +887,29 @@ webhooks:
               schema: {}
 components:
   schemas:
-    Body_checkGuardrails:
-      properties:
-        request_id:
-          type: string
-          title: Request Id
-          description: request_id from the orchestrator
-          examples:
-          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
-        file:
-          anyOf:
-          - type: string
-            format: binary
-          - type: string
-          - type: 'null'
-          title: File
-          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
-        file_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: File Url
-          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
-            Omit when uploading file.
-      type: object
-      required:
-      - request_id
-      title: Body_checkGuardrails
     Body_extractOcr:
       properties:
         request_id:
           type: string
           title: Request Id
-          description: request_id from /v1/generate-request-id
+          description: request_id minted by the orchestrator
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type chosen by the client. Only `npwp` is supported
+          default: npwp
+          examples:
+          - npwp
+        handoff:
+          type: boolean
+          title: Handoff
+          description: 'false: judge only, start nothing, `job` stays null. Used by the legacy `extract-ocr`
+            contract, which runs the stages itself; the orchestrator leaves it out'
+          default: true
+          examples:
+          - true
         file:
           anyOf:
           - type: string
@@ -1118,52 +929,6 @@ components:
       required:
       - request_id
       title: Body_extractOcr
-    Body_submitOcrJob:
-      properties:
-        request_id:
-          type: string
-          title: Request Id
-          description: request_id minted by the orchestrator
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type chosen by the client. Only `npwp` is supported
-          default: npwp
-          examples:
-          - npwp
-        guardrails:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Guardrails
-          description: 'The `data` object of `POST /v1/guardrails/check`, serialised as a JSON string.
-            Forwarded down the chain: scoring uses `document.confidence`, and the final result returns
-            it unchanged. Optional, but without it the scoring model works with one input missing'
-          examples:
-          - '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821,
-            "n_pages": 1, "n_approve": 1, "n_reject": 0}, "pages": [{"page_index": 0, "proba_approve":
-            0.9821, "proba_reject": 0.0179, "verdict": "accepted"}]}'
-        file:
-          anyOf:
-          - type: string
-            format: binary
-          - type: string
-          - type: 'null'
-          title: File
-          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
-        file_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: File Url
-          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
-            Omit when uploading file.
-      type: object
-      required:
-      - request_id
-      title: Body_submitOcrJob
     BoundingBox:
       properties:
         x1:
@@ -1436,58 +1201,6 @@ components:
       - message
       - errors
       title: ErrorResponse
-    ExtractOcrResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          type: string
-          title: Request Id
-          description: The request_id this response belongs to
-          examples:
-          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/NpwpFields'
-        guardrails:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Guardrails
-          description: 'Overall document score (0..1) from the legacy heuristic: OCR confidence per field
-            combined with format checks. NOT produced by the ML team''s trust model; the async pipeline
-            reports per-field confidences instead.'
-          examples:
-          - 0.98
-      type: object
-      required:
-      - request_id
-      - data
-      title: ExtractOcrResponse
     FieldConfidences:
       properties:
         npwp_confidence:
@@ -1770,12 +1483,12 @@ components:
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
-          $ref: '#/components/schemas/GuardrailReport'
+          $ref: '#/components/schemas/GuardrailJobReport'
       type: object
       required:
       - data
       title: GuardrailCheckResponse
-    GuardrailReport:
+    GuardrailJobReport:
       properties:
         passed:
           type: boolean
@@ -1802,12 +1515,18 @@ components:
           type: array
           title: Pages
           description: One entry per page, in page order
+        job:
+          anyOf:
+          - $ref: '#/components/schemas/JobAccepted'
+          - type: 'null'
+          description: The OCR job this service started on the ekstraksi service when `passed`; null when
+            rejected (nothing runs and no callback follows) or when `handoff` was false
       type: object
       required:
       - passed
       - document
       - pages
-      title: GuardrailReport
+      title: GuardrailJobReport
     GuardrailsDocument:
       properties:
         verdict:
@@ -1939,7 +1658,8 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsResult
-      description: '`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline.'
+      description: The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded
+        unchanged down the pipeline.
     JobAccepted:
       properties:
         request_id:
@@ -1984,48 +1704,6 @@ components:
       - stage
       - status
       title: JobAccepted
-    JobAcceptedResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 202
-          examples:
-          - 202
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: Accepted
-          examples:
-          - Accepted
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Accepted
-          examples:
-          - Accepted
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/JobAccepted'
-      type: object
-      required:
-      - data
-      title: JobAcceptedResponse
     NpwpFields:
       properties:
         nomor_npwp:

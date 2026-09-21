@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ocr_common.schemas import SuccessEnvelope
+from ocr_common.schemas import JobAccepted, SuccessEnvelope
 
 Verdict = Literal["accepted", "reject"]
 
@@ -66,6 +66,16 @@ class GuardrailReport(BaseModel):
     pages: list[PageResult] = Field(..., description="One entry per page, in page order")
 
 
+class GuardrailJobReport(GuardrailReport):
+    job: JobAccepted | None = Field(
+        None,
+        description=(
+            "The OCR job this service started on the ekstraksi service when `passed`; null when rejected (nothing "
+            "runs and no callback follows) or when `handoff` was false"
+        ),
+    )
+
+
 class GuardrailCheckResponse(SuccessEnvelope):
     message: str = Field("OK", description="Human-readable outcome", examples=["OK"])
-    data: GuardrailReport
+    data: GuardrailJobReport

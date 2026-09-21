@@ -117,7 +117,7 @@ def test_health_lists_backend(client):
 
 def test_http_check_returns_contract_shape(client, auth):
     response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
+        "/v1/extract-ocr", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
     )
     assert response.status_code == 200
     body = response.json()
@@ -129,12 +129,13 @@ def test_http_check_returns_contract_shape(client, auth):
         "reason": None,
         "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
         "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
+        "job": {"request_id": "OCR_1", "stage": "OCR", "status": "PROCESSING", "duplicate": False},
     }
 
 
 def test_http_check_pdf_reports_every_page(client, auth):
     response = client.post(
-        "/v1/guardrails/check",
+        "/v1/extract-ocr",
         data={"request_id": "OCR_2"},
         files=image_upload("scan.pdf", _pdf(2), "application/pdf"),
         headers=auth,
@@ -148,7 +149,7 @@ def test_http_check_pdf_reports_every_page(client, auth):
 @pytest.mark.parametrize("filename", ["blur.jpg", "invalid.jpg", "notnpwp.jpg"])
 def test_http_mock_scenarios_reject_with_200(client, auth, filename):
     response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_3"}, files=image_upload(filename, _jpeg()), headers=auth
+        "/v1/extract-ocr", data={"request_id": "OCR_3"}, files=image_upload(filename, _jpeg()), headers=auth
     )
     assert response.status_code == 200
     data = response.json()["data"]
@@ -159,7 +160,7 @@ def test_http_mock_scenarios_reject_with_200(client, auth, filename):
 
 
 def test_http_request_id_is_required(client, auth):
-    response = client.post("/v1/guardrails/check", files=image_upload("npwp.jpg", _jpeg()), headers=auth)
+    response = client.post("/v1/extract-ocr", files=image_upload("npwp.jpg", _jpeg()), headers=auth)
     assert response.status_code == 422
     body = response.json()
     assert body["errors"] == "VALIDATION_ERROR"
@@ -173,7 +174,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
 
     monkeypatch.setattr("ocr_common.intake.fetch", fake_fetch)
     response = client.post(
-        "/v1/guardrails/check",
+        "/v1/extract-ocr",
         data={"request_id": "OCR_4", "file_url": "http://minio.local/bucket/npwp.jpg"},
         headers=auth,
     )
@@ -183,7 +184,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
 
 def test_unsupported_content_type_returns_400(client, auth):
     response = client.post(
-        "/v1/guardrails/check",
+        "/v1/extract-ocr",
         data={"request_id": "OCR_5"},
         files=image_upload(content_type="text/plain"),
         headers=auth,
@@ -194,13 +195,13 @@ def test_unsupported_content_type_returns_400(client, auth):
 
 def test_unreadable_image_returns_400(client, auth):
     response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_6"}, files=image_upload("x.jpg", b"garbage"), headers=auth
+        "/v1/extract-ocr", data={"request_id": "OCR_6"}, files=image_upload("x.jpg", b"garbage"), headers=auth
     )
     assert response.status_code == 400
     assert response.json()["message"] == "Uploaded file is not a readable image"
 
 
 def test_missing_api_key_returns_401_envelope(client):
-    response = client.post("/v1/guardrails/check", data={"request_id": "OCR_7"}, files=image_upload())
+    response = client.post("/v1/extract-ocr", data={"request_id": "OCR_7"}, files=image_upload())
     assert response.status_code == 401
     assert response.json()["errors"] == "Invalid or missing API key"

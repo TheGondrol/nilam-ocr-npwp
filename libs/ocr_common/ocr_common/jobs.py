@@ -91,7 +91,7 @@ def build_job_repository(database_url: str | None, table_prefix: str) -> JobRepo
     return SqlJobRepository(database_url, table_prefix)
 
 
-async def _with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
+async def with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
     for attempt in range(1, attempts + 1):
         try:
             return await call()
@@ -149,7 +149,7 @@ class OrchestrationCallback:
             "error_message": error_message,
         }
         try:
-            await _with_retry(lambda: client.post_json(self._path, payload), self._attempts, self._delay)
+            await with_retry(lambda: client.post_json(self._path, payload), self._attempts, self._delay)
         except ServiceError as exc:
             logger.error("callback failed: %s %s %s: %s", request_id, stage, status, exc.message)
             return False
@@ -168,7 +168,7 @@ class NextStageClient:
         self._delay = delay
 
     async def submit(self, payload: dict[str, Any]) -> None:
-        await _with_retry(lambda: self._client.post_json(self._path, payload), self._attempts, self._delay)
+        await with_retry(lambda: self._client.post_json(self._path, payload), self._attempts, self._delay)
 
     async def aclose(self) -> None:
         await self._client.aclose()

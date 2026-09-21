@@ -1,9 +1,10 @@
 openapi: 3.1.0
 info:
   title: OCR NPWP Guardrails API
-  description: 'Pipeline step 1 for Indonesian NPWP documents: classifies every page of the uploaded document
-    (image or PDF) as accepted / reject with the guardrails model and aggregates a document verdict. Called
-    synchronously by ocr-orchestration; always answers 200 with `data.passed` / `data.reason`. The model
+  description: 'Entry point of the OCR NPWP pipeline. `POST /v1/extract-ocr` classifies every page of
+    the document (image or PDF) as accepted / reject with the guardrails model, aggregates a document
+    verdict, and when it passes hands the document to the OCR stage (ekstraksi), which chains to structuring
+    and scoring. The orchestrator makes this one call and then receives the stage callbacks. The model
     runs in this process (`efficientnet`) or in the ML team''s model service (`remote`). All endpoints
     except /health require an X-API-Key header.
 
@@ -132,32 +133,44 @@ paths:
               example:
                 status: not_ready
                 checks: {}
-  /v1/guardrails/check:
+  /v1/extract-ocr:
     post:
       tags:
       - Guardrails
-      summary: Decide whether a document may proceed to OCR
-      description: '**Step 1 of the pipeline, synchronous.** Call this first; submit the OCR job only
-        when `data.passed` is true, and pass this response''s `data` along as the `guardrails` form field
-        of `POST /v1/ekstraksi/jobs`.
+      summary: Judge a document and, when it passes, start the pipeline
+      description: '**The only call the orchestrator makes.** Runs the guardrails model on the document
+        synchronously, then:
+
+
+        - **passed** -> sends the same document on to the OCR stage (`POST /v1/ekstraksi/jobs` on the
+        ekstraksi service) and returns the report with `data.job`. OCR -> structuring -> scoring then
+        run in the background and report through the `OCR`, `STRUCTURING` and `SCORING` stage callbacks;
+        the final result is in the `SCORING` callback.
+
+        - **rejected** -> returns the report with `data.passed: false`, `data.reason` and `data.job: null`.
+        Nothing else runs and no callback follows; the orchestrator answers the client 422 with `reason`.
+
+
+        Always 200 when the document was judged: read `data.passed`, not the HTTP code.
 
 
         Runs the guardrails model on each page (a PDF is rendered page by page; an image is one page)
         and aggregates a document verdict. The model is either in this process (`efficientnet`) or the
         ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either way.
-        Always returns 200 with a report; `data.passed` tells whether the document should proceed to OCR,
-        and `data.reason` says why not (the orchestrator answers 422 with it). The orchestrator forwards
-        `data` to the OCR service as the guardrails result.
 
 
-        Send `request_id` plus the document as `file`, or as `file_url` and this service fetches it itself;
-        exactly one of the two.'
-      operationId: checkGuardrails
+        Send `request_id` plus the document as `file`, or as `file_url` (downloaded here once, then forwarded
+        as a file, so the URL only has to live for this call); exactly one of the two.
+
+
+        **Idempotency.** The same request_id again re-runs the guardrails check, but the OCR stage answers
+        `duplicate: true` and does not run twice unless the earlier attempt `FAILED`.'
+      operationId: extractOcr
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_checkGuardrails'
+              $ref: '#/components/schemas/Body_extractOcr'
         required: true
       responses:
         '200':
@@ -168,7 +181,7 @@ paths:
                 $ref: '#/components/schemas/GuardrailCheckResponse'
               examples:
                 accepted:
-                  summary: 'Accepted: proceed to OCR'
+                  summary: 'Accepted: the OCR stage was started, `job` is its answer'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -186,9 +199,39 @@ paths:
                         proba_approve: 0.9821
                         proba_reject: 0.0179
                         verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: PROCESSING
+                        duplicate: false
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                duplicate:
+                  summary: 'Same request_id sent again: the OCR stage did not start a second run'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: DONE
+                        duplicate: true
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 rejected:
-                  summary: 'Rejected: stop and answer the client with `reason`'
+                  summary: 'Rejected: nothing was started; answer the client with `reason`'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -234,7 +277,8 @@ paths:
                         verdict: reject
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad file (empty, too large, unsupported type, unreadable) or bad intake
+          description: Bad file (empty, too large, unsupported type, unreadable), bad intake, or rejected
+            by the OCR stage
           content:
             application/json:
               schema:
@@ -267,7 +311,8 @@ paths:
                 message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
         '500':
-          description: Guardrails model service failed or answered in an unexpected shape (backend `remote`)
+          description: The guardrails model or the ekstraksi service failed or answered in an unexpected
+            shape
           content:
             application/json:
               schema:
@@ -278,7 +323,8 @@ paths:
                 message: guardrails model returned an unexpected response
                 errors: guardrails model returned an unexpected response
         '503':
-          description: Guardrails model service unreachable (backend `remote`)
+          description: The ekstraksi service (or the remote guardrails model) is unreachable; nothing
+            was started
           content:
             application/json:
               schema:
@@ -286,10 +332,10 @@ paths:
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: guardrails model is unavailable
-                errors: guardrails model is unavailable
+                message: ekstraksi service is unavailable
+                errors: ekstraksi service is unavailable
         '504':
-          description: Guardrails model service did not answer in time (backend `remote`)
+          description: The ekstraksi service (or the remote guardrails model) did not answer in time
           content:
             application/json:
               schema:
@@ -297,20 +343,35 @@ paths:
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: guardrails model timed out after 30.0s
-                errors: guardrails model timed out after 30.0s
+                message: ekstraksi service timed out after 10.0s
+                errors: ekstraksi service timed out after 10.0s
       security:
       - APIKeyHeader: []
 components:
   schemas:
-    Body_checkGuardrails:
+    Body_extractOcr:
       properties:
         request_id:
           type: string
           title: Request Id
-          description: request_id from the orchestrator
+          description: request_id minted by the orchestrator
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type chosen by the client. Only `npwp` is supported
+          default: npwp
+          examples:
+          - npwp
+        handoff:
+          type: boolean
+          title: Handoff
+          description: 'false: judge only, start nothing, `job` stays null. Used by the legacy `extract-ocr`
+            contract, which runs the stages itself; the orchestrator leaves it out'
+          default: true
+          examples:
+          - true
         file:
           anyOf:
           - type: string
@@ -329,7 +390,7 @@ components:
       type: object
       required:
       - request_id
-      title: Body_checkGuardrails
+      title: Body_extractOcr
     DocumentResult:
       properties:
         verdict:
@@ -462,12 +523,12 @@ components:
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         data:
-          $ref: '#/components/schemas/GuardrailReport'
+          $ref: '#/components/schemas/GuardrailJobReport'
       type: object
       required:
       - data
       title: GuardrailCheckResponse
-    GuardrailReport:
+    GuardrailJobReport:
       properties:
         passed:
           type: boolean
@@ -494,12 +555,18 @@ components:
           type: array
           title: Pages
           description: One entry per page, in page order
+        job:
+          anyOf:
+          - $ref: '#/components/schemas/JobAccepted'
+          - type: 'null'
+          description: The OCR job this service started on the ekstraksi service when `passed`; null when
+            rejected (nothing runs and no callback follows) or when `handoff` was false
       type: object
       required:
       - passed
       - document
       - pages
-      title: GuardrailReport
+      title: GuardrailJobReport
     HealthResponse:
       properties:
         status:
@@ -537,6 +604,50 @@ components:
       - device
       - backends
       title: HealthResponse
+    JobAccepted:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: Echo of the submitted request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: Pipeline stage that accepted the job
+          examples:
+          - OCR
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          description: '`PROCESSING` for a newly accepted job. When `duplicate` is true: the current status
+            of the job that already exists for this request_id'
+          examples:
+          - PROCESSING
+        duplicate:
+          type: boolean
+          title: Duplicate
+          description: 'true: this request_id was already accepted before and the work is NOT run again
+            (idempotent). Exception: a job whose status is `FAILED` is re-claimed and run again, and answers
+            `duplicate: false`'
+          default: false
+          examples:
+          - false
+      type: object
+      required:
+      - request_id
+      - stage
+      - status
+      title: JobAccepted
     PageResult:
       properties:
         page_index:
@@ -613,6 +724,6 @@ components:
       name: X-API-Key
 tags:
 - name: Guardrails
-  description: Page-level accepted/reject classification
+  description: 'Single entry point: guardrails check, then the OCR stage'
 - name: Health
   description: Liveness and readiness probes; no API key

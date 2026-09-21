@@ -49,7 +49,7 @@ def test_http_with_real_model(client, auth, classifier, monkeypatch):
     buffer = io.BytesIO()
     _page("NPWP : 12.345.678.9-012.345").save(buffer, format="JPEG")
     response = client.post(
-        "/v1/guardrails/check",
+        "/v1/extract-ocr",
         data={"request_id": "OCR_real"},
         files=image_upload("npwp.jpg", buffer.getvalue()),
         headers=auth,

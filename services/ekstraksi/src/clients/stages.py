@@ -19,11 +19,11 @@ class GuardrailsClient:
 
     async def check(self, request_id: str, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
         body = await self._client.post_multipart(
-            "/v1/guardrails/check",
+            "/v1/extract-ocr",
             filename=filename or "upload",
             content=content,
             content_type=content_type or "image/jpeg",
-            data={"request_id": request_id},
+            data={"request_id": request_id, "handoff": "false"},
         )
         return _data(body, self._client.name)
 

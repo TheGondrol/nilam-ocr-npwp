@@ -77,15 +77,13 @@ def _image() -> bytes:
     return buffer.getvalue()
 
 
-def _guardrails(client: httpx.Client, request_id: str, filename: str, content: bytes) -> dict:
-    response = client.post(
-        f"{URLS['guardrails']}/v1/guardrails/check",
+def _submit(client: httpx.Client, request_id: str, filename: str, content: bytes) -> httpx.Response:
+    return client.post(
+        f"{URLS['guardrails']}/v1/extract-ocr",
         headers=HEADERS,
-        data={"request_id": request_id},
+        data={"request_id": request_id, "document_type": "npwp"},
         files={"file": (filename, content, "image/jpeg")},
     )
-    response.raise_for_status()
-    return response.json()["data"]
 
 
 def _poll(client: httpx.Client, request_id: str) -> dict[str, dict]:
@@ -109,20 +107,12 @@ def async_pipeline(client: httpx.Client) -> bool:
     image = _image()
     print("request_id:", request_id)
 
-    guardrails = _guardrails(client, request_id, "npwp.jpg", image)
-    print(f"guardrails: passed={guardrails['passed']} reason={guardrails['reason']!r}")
-    if not guardrails["passed"]:
-        print("  dokumen sintetis ditolak guardrails; pipeline tidak dilanjutkan")
-        return False
-
-    accepted = client.post(
-        f"{URLS['ekstraksi']}/v1/ekstraksi/jobs",
-        headers=HEADERS,
-        data={"request_id": request_id, "document_type": "npwp", "guardrails": json.dumps(guardrails)},
-        files={"file": ("npwp.jpg", image, "image/jpeg")},
-    )
-    print("ekstraksi/jobs:", accepted.status_code, accepted.json().get("data"))
-    if accepted.status_code != 202:
+    submitted = _submit(client, request_id, "npwp.jpg", image)
+    data = submitted.json().get("data") or {}
+    print(f"guardrails extract-ocr: {submitted.status_code} passed={data.get('passed')} reason={data.get('reason')!r}")
+    print("  job:", data.get("job"))
+    if submitted.status_code != 200 or not data.get("job"):
+        print("  pipeline tidak dimulai")
         return False
 
     jobs = _poll(client, request_id)
@@ -136,13 +126,8 @@ def async_pipeline(client: httpx.Client) -> bool:
         score = jobs["scoring"]["result"]
         print(f"  npwp_confidence = {score['npwp_confidence']}  name_confidence = {score['name_confidence']}")
 
-    again = client.post(
-        f"{URLS['ekstraksi']}/v1/ekstraksi/jobs",
-        headers=HEADERS,
-        data={"request_id": request_id},
-        files={"file": ("npwp.jpg", image, "image/jpeg")},
-    )
-    duplicate = again.json().get("data", {}).get("duplicate")
+    again = _submit(client, request_id, "npwp.jpg", image)
+    duplicate = ((again.json().get("data") or {}).get("job") or {}).get("duplicate")
     print("kirim ulang request_id yang sama -> duplicate =", duplicate)
     ok = ok and duplicate is True
 
@@ -162,9 +147,11 @@ def async_pipeline(client: httpx.Client) -> bool:
 
 def guardrails_reject(client: httpx.Client) -> bool:
     print("== guardrails menolak ==")
-    report = _guardrails(client, f"REQ_{uuid.uuid4()}", "notnpwp.jpg", _image())
-    print(f"notnpwp.jpg -> passed={report['passed']} reason={report['reason']!r}")
-    return True
+    response = _submit(client, f"REQ_{uuid.uuid4()}", "notnpwp.jpg", _image())
+    data = response.json().get("data") or {}
+    print(f"notnpwp.jpg -> {response.status_code} passed={data.get('passed')} job={data.get('job')}")
+    print(f"  reason={data.get('reason')!r}")
+    return response.status_code == 200 and data.get("job") is None
 
 
 def legacy_contract(client: httpx.Client) -> bool:

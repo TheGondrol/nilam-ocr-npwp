@@ -35,10 +35,11 @@ async def test_guardrails_client_posts_multipart_and_returns_data():
 
     report = await GuardrailsClient(_remote(handler)).check("OCR_1", "npwp.jpg", "image/jpeg", b"\xff\xd8")
     assert report == {"document": {"verdict": "accepted"}, "pages": []}
-    assert seen["path"] == "/v1/guardrails/check"
+    assert seen["path"] == "/v1/extract-ocr"
     assert seen["auth"] == "k"
     assert b'filename="npwp.jpg"' in seen["body"]
     assert b'name="request_id"' in seen["body"] and b"OCR_1" in seen["body"]
+    assert b'name="handoff"\r\n\r\nfalse' in seen["body"]
 
 
 async def test_structuring_client_posts_lines():

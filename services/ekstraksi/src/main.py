@@ -37,7 +37,7 @@ app = create_app(
     service_name="ekstraksi",
     description=(
         "OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. "
-        "**Async pipeline:** the orchestrator POSTs /v1/ekstraksi/jobs after guardrails passed and gets 202; "
+        "**Async pipeline:** the guardrails service POSTs /v1/ekstraksi/jobs once a document passed and gets 202; "
         "this service runs OCR in the background, stores the result, POSTs a stage callback to the "
         "orchestrator, and hands the job to the structuring service. "
         "**Legacy contract:** generate-request-id -> extract-ocr -> get-ocr-result runs the whole chain "

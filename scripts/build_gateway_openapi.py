@@ -13,34 +13,37 @@ TARGET = ROOT / "api" / "gateway.openapi.yaml"
 SERVICES = ("guardrails", "ekstraksi", "structuring", "scoring")
 
 OPERATIONS: list[tuple[str, str, str, str]] = [
-    ("guardrails", "post", "/v1/guardrails/check", "1. Guardrails (synchronous)"),
-    ("ekstraksi", "post", "/v1/ekstraksi/jobs", "2. Start the pipeline (asynchronous)"),
-    ("ekstraksi", "get", "/v1/ekstraksi/jobs/{request_id}", "4. Reconciliation"),
-    ("structuring", "get", "/v1/structuring/jobs/{request_id}", "4. Reconciliation"),
-    ("scoring", "get", "/v1/scoring/jobs/{request_id}", "4. Reconciliation"),
+    ("guardrails", "post", "/v1/extract-ocr", "1. Start the pipeline"),
+    ("ekstraksi", "get", "/v1/ekstraksi/jobs/{request_id}", "3. Reconciliation"),
+    ("structuring", "get", "/v1/structuring/jobs/{request_id}", "3. Reconciliation"),
+    ("scoring", "get", "/v1/scoring/jobs/{request_id}", "3. Reconciliation"),
     ("ekstraksi", "post", "/v1/generate-request-id", "Legacy synchronous contract (deprecated)"),
-    ("ekstraksi", "post", "/v1/extract-ocr", "Legacy synchronous contract (deprecated)"),
     ("ekstraksi", "get", "/v1/get-ocr-result/{request_id}", "Legacy synchronous contract (deprecated)"),
 ]
-CALLBACK_TAG = "3. Callbacks (you implement this)"
+CALLBACK_TAG = "2. Callbacks (you implement this)"
 
 TAGS = [
-    {"name": "1. Guardrails (synchronous)", "description": "Ask whether the document may be processed at all."},
     {
-        "name": "2. Start the pipeline (asynchronous)",
-        "description": "One call starts OCR -> structuring -> scoring. Answers 202; the rest arrives by callback.",
+        "name": "1. Start the pipeline",
+        "description": (
+            "The only call you make: guardrails check, then OCR -> structuring -> scoring. "
+            "Always 200: rejected -> the reason, nothing runs; accepted -> `job`, the rest arrives by callback."
+        ),
     },
     {
         "name": CALLBACK_TAG,
         "description": "Listed under **Webhooks**: the request each stage sends to you when it finishes.",
     },
     {
-        "name": "4. Reconciliation",
+        "name": "3. Reconciliation",
         "description": "Read a stage's status and result directly, e.g. after a missed callback or a timeout.",
     },
     {
         "name": "Legacy synchronous contract (deprecated)",
-        "description": "generate-request-id -> extract-ocr -> get-ocr-result. Kept until the move to the async flow.",
+        "description": (
+            "The old synchronous flow on the ekstraksi service. Its `POST /v1/extract-ocr` (port 8030) is left out "
+            "here: that path now belongs to the guardrails service above."
+        ),
     },
 ]
 
@@ -50,15 +53,17 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 
 ## The flow
 
-1. **`POST /v1/guardrails/check`** on the *guardrails* service, synchronous. `data.passed: false` ->
-   stop and answer the client with `data.reason`. `data.passed: true` -> go on.
-2. **`POST /v1/ekstraksi/jobs`** on the *ekstraksi* service with your `request_id`, the document
-   (`file` or `file_url`), and the guardrails `data` from step 1 as the `guardrails` form field.
-   It answers **202** at once. You are done calling.
-3. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or
+1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id` and the document
+   (`file` or `file_url`). This is the only call you make. The guardrails check runs synchronously and
+   always answers **200**:
+   - `data.passed: false`, `data.job: null` -> nothing runs and no callback follows; answer the client
+     with `data.reason`.
+   - `data.passed: true` -> the guardrails service has already handed the document to the OCR stage;
+     `data.job` is that stage's answer. You are done calling.
+2. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or
    `FAILED`. The `SCORING` / `DONE` callback carries the **final result**. A `FAILED` callback of any
    stage ends the request.
-4. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.
+3. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.
 
 Time a request out on your side: a stage that crashes mid-job cannot send its callback.
 
@@ -70,9 +75,10 @@ correct. There is **no document-level score and no approve / reject decision**; 
 
 ## Addresses
 
-Each operation lists the servers of the service that owns it. Inside GKE, from another namespace:
-`http://<service>.nilam-ocr-<environment>.svc.cluster.local:<port>` with guardrails `8031`,
-ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed outside the cluster.
+Each operation lists the servers of the service that owns it. Inside GKE the four services share one
+Service; from another namespace: `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:<port>` with
+guardrails `8031`, ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed outside
+the cluster.
 """
 
 REF = re.compile(r"#/components/schemas/([A-Za-z0-9_]+)")

@@ -2,12 +2,12 @@ openapi: 3.1.0
 info:
   title: OCR NPWP API
   description: 'OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. **Async
-    pipeline:** the orchestrator POSTs /v1/ekstraksi/jobs after guardrails passed and gets 202; this service
-    runs OCR in the background, stores the result, POSTs a stage callback to the orchestrator, and hands
-    the job to the structuring service. **Legacy contract:** generate-request-id -> extract-ocr -> get-ocr-result
-    runs the whole chain synchronously and stays until the orchestrator has moved to the async flow. The
-    raw OCR step is also exposed as /v1/ekstraksi/extract. All endpoints except /health require an X-API-Key
-    header.
+    pipeline:** the guardrails service POSTs /v1/ekstraksi/jobs once a document passed and gets 202; this
+    service runs OCR in the background, stores the result, POSTs a stage callback to the orchestrator,
+    and hands the job to the structuring service. **Legacy contract:** generate-request-id -> extract-ocr
+    -> get-ocr-result runs the whole chain synchronously and stays until the orchestrator has moved to
+    the async flow. The raw OCR step is also exposed as /v1/ekstraksi/extract. All endpoints except /health
+    require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -142,8 +142,9 @@ paths:
       tags:
       - Pipeline
       summary: Start the pipeline for a document (OCR stage)
-      description: '**Step 2 of the pipeline, asynchronous: the entry point of the OCR -> structuring
-        -> scoring chain.** Call it after `POST /v1/guardrails/check` answered `passed: true`.
+      description: '**Step 2 of the pipeline, asynchronous: the start of the OCR -> structuring -> scoring
+        chain.** Called by the guardrails service from its `POST /v1/extract-ocr` once the document passed;
+        the orchestrator does not call it. Calling it directly skips the guardrails check.
 
 
         Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in
@@ -884,9 +885,10 @@ components:
           - type: string
           - type: 'null'
           title: Guardrails
-          description: 'The `data` object of `POST /v1/guardrails/check`, serialised as a JSON string.
-            Forwarded down the chain: scoring uses `document.confidence`, and the final result returns
-            it unchanged. Optional, but without it the scoring model works with one input missing'
+          description: 'The guardrails report (`data` of the guardrails service''s `POST /v1/extract-ocr`),
+            serialised as a JSON string; the guardrails service fills it in. Forwarded down the chain:
+            scoring uses `document.confidence`, and the final result returns it unchanged. Optional, but
+            without it the scoring model works with one input missing'
           examples:
           - '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821,
             "n_pages": 1, "n_approve": 1, "n_reject": 0}, "pages": [{"page_index": 0, "proba_approve":
