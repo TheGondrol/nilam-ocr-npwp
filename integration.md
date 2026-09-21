@@ -17,7 +17,11 @@ Sudah terbukti jalan di cluster:
 - job tercatat `DONE` di ketiga tabel tahap
 
 Belum pernah diuji: **callback ke service kalian**, karena alamatnya belum kami punya.
-Itu satu-satunya potongan yang tersisa. Lihat bagian 9.
+Lihat bagian 9.
+
+Baru: pintu masuk tunggal `POST /v1/extract-ocr` di guardrails (bagian 3 dan 4).
+Angka di atas berasal dari alur lama, yaitu guardrails lalu ekstraksi dipanggil
+terpisah; tahap OCR sampai scoring tidak berubah.
 
 ## 2. Akses
 
@@ -50,46 +54,58 @@ yang perlu di-whitelist. Kami belum bisa menguji panggilan dari namespace kalian
 
     kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp 8030:8030 8031:8031 8032:8032 8033:8033
 
-## 3. Alur yang direkomendasikan
+## 3. Alur
 
-Hanya dua panggilan dari sisi kalian. Sisanya datang sebagai callback.
+Hanya **satu panggilan** dari sisi kalian. Sisanya datang sebagai callback.
 
-    1. POST :8031/v1/guardrails/check     sinkron, tunggu jawabannya
-         data.passed == false  -> berhenti, balas 422 ke client pakai data.reason
-         data.passed == true   -> lanjut
-    2. POST :8030/v1/ekstraksi/jobs       dijawab 202 seketika
-         lalu jalan sendiri: OCR -> structuring -> scoring
+    1. POST :8031/v1/extract-ocr          guardrails dicek sinkron, selalu 200:
+         ditolak  -> data.passed == false, data.job == null
+                     tidak ada yang jalan, tidak ada callback; balas 422 ke client pakai data.reason
+         lolos    -> guardrails sendiri sudah meneruskan dokumen ke tahap OCR
+                     data.passed == true, data.job berisi job OCR
+    2. rantai jalan sendiri: OCR -> structuring -> scoring
     3. kalian menerima 3 callback: OCR, STRUCTURING, SCORING
          hasil akhir ada di callback SCORING
 
 `request_id` dibuat oleh kalian dan menjadi kunci di semua tahap. Bebas formatnya,
 string; contoh yang kami pakai saat uji: `REQ_a0e0fd34ed7a`.
 
-Kalian **tidak perlu** memanggil structuring dan scoring sendiri. Kedua service itu
+Kalian **tidak perlu** memanggil ekstraksi, structuring, dan scoring sendiri. Ketiganya
 dipanggil berantai oleh service sebelumnya. Dokumentasinya tetap kami sertakan di
-bagian 5 dan 6 supaya jelas apa yang terjadi dan bisa dipakai untuk debugging.
+bagian 5 dan 6 supaya jelas apa yang terjadi dan bisa dipakai untuk rekonsiliasi.
 
-## 4. Service guardrails (port 8031)
+## 4. Service guardrails (port 8031): pintu masuk
 
-Menilai layak atau tidaknya dokumen sebelum masuk OCR. Sinkron, tidak membuat job,
-tidak mengirim callback. Model EfficientNet berjalan di dalam container.
+Menilai layak atau tidaknya dokumen, dan kalau layak langsung memulai pipeline. Model
+EfficientNet berjalan di dalam container. Guardrails sendiri tidak membuat job dan
+tidak mengirim callback; callback pertama datang dari tahap OCR.
 
-### POST /v1/guardrails/check
+### POST /v1/extract-ocr — mulai pipeline
 
 Kirim `request_id` plus dokumen sebagai `file` (multipart), **atau** sebagai `file_url`
 supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
-    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8031/v1/guardrails/check \
+    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8031/v1/extract-ocr \
       -H "X-API-Key: changeme" \
       -F "request_id=REQ_001" \
+      -F "document_type=npwp" \
       -F "file=@npwp.jpg"
 
-Format diterima: JPEG, PNG, PDF. Maksimal 5 MB. PDF dinilai per halaman.
+Path ini sama dengan `extract-ocr` lama, tetapi di **port 8031 (guardrails)**, bukan
+8030, dan bentuk jawabannya berbeda: laporan guardrails plus `job`, bukan field hasil OCR.
+Hasil akhir datang lewat callback SCORING.
 
-Selalu menjawab **200** dengan laporan, termasuk saat dokumen ditolak. Yang menentukan
-lanjut atau tidak adalah `data.passed`, bukan kode HTTP.
+| Field | Wajib | Keterangan |
+|---|---|---|
+| `request_id` | ya | dibuat oleh kalian |
+| `document_type` | tidak | default `npwp`; saat ini hanya `npwp` |
+| `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal 5 MB. PDF dinilai per halaman |
+| `handoff` | tidak | default `true`. `false` = hanya menilai, tidak memulai apa pun; untuk debugging |
 
-Contoh dokumen lolos:
+`file_url` diunduh sekali di panggilan ini lalu diteruskan ke tahap OCR sebagai file,
+jadi presigned URL cukup hidup selama panggilan ini saja.
+
+Dokumen lolos, dijawab **200**, pipeline sudah berjalan:
 
     {
       "status_code": 200,
@@ -100,14 +116,16 @@ Contoh dokumen lolos:
       "data": {
         "passed": true,
         "reason": null,
-        "document": {"verdict": "approve", "confidence": 0.9663,
+        "document": {"verdict": "accepted", "confidence": 0.9663,
                      "n_pages": 1, "n_approve": 1, "n_reject": 0},
         "pages": [{"page_index": 0, "proba_approve": 0.9663,
-                   "proba_reject": 0.0337, "verdict": "approve"}]
+                   "proba_reject": 0.0337, "verdict": "accepted"}],
+        "job": {"request_id": "REQ_001", "stage": "OCR",
+                "status": "PROCESSING", "duplicate": false}
       }
     }
 
-Contoh dokumen ditolak (ini hasil sungguhan dari gambar polos):
+Dokumen ditolak, juga **200**, tidak ada yang jalan:
 
     "data": {
       "passed": false,
@@ -115,53 +133,30 @@ Contoh dokumen ditolak (ini hasil sungguhan dari gambar polos):
       "document": {"verdict": "reject", "confidence": 0.9851,
                    "n_pages": 1, "n_approve": 0, "n_reject": 1},
       "pages": [{"page_index": 0, "proba_approve": 0.0149,
-                 "proba_reject": 0.9851, "verdict": "reject"}]
+                 "proba_reject": 0.9851, "verdict": "reject"}],
+      "job": null
     }
 
-Kalau `passed` false, hentikan di situ dan pakai `data.reason` sebagai alasan ke client.
+Error:
 
-**Penting.** Seluruh isi `data` harus kalian simpan dan teruskan apa adanya ke langkah
-berikutnya. Isinya dipakai lagi oleh scoring di tahap akhir sebagai salah satu masukan
-trust model.
+| Kode | Arti | Pipeline jalan? |
+|---|---|---|
+| 400 | file kosong, terlalu besar, format salah, atau `file`/`file_url` dua-duanya / tidak ada | tidak |
+| 401 | `X-API-Key` salah | tidak |
+| 503 / 504 | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
+
+**Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi tahap
+OCR menjawab `job.duplicate: true` dan tidak menjalankan apa pun dua kali, kecuali
+percobaan sebelumnya berstatus `FAILED`; dalam hal itu dijalankan ulang.
 
 ## 5. Service ekstraksi (port 8030)
 
-OCR sekaligus pintu masuk rantai asinkron. Backend OCR-nya PaddleOCR yang berjalan di
-VM terpisah; service ini yang memanggilnya.
+Tahap OCR. Backend OCR-nya PaddleOCR yang berjalan di VM terpisah; service ini yang
+memanggilnya.
 
-### POST /v1/ekstraksi/jobs — mulai pipeline
-
-    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8030/v1/ekstraksi/jobs \
-      -H "X-API-Key: changeme" \
-      -F "request_id=REQ_001" \
-      -F "document_type=npwp" \
-      -F 'guardrails={"passed":true,"reason":null,"document":{...},"pages":[...]}' \
-      -F "file=@npwp.jpg"
-
-| Field | Wajib | Keterangan |
-|---|---|---|
-| `request_id` | ya | dibuat oleh kalian |
-| `document_type` | ya | saat ini hanya `npwp` |
-| `guardrails` | ya | isi `data` dari langkah guardrails, sebagai JSON string |
-| `file` / `file_url` | salah satu | dokumen yang sama dengan yang dinilai guardrails |
-
-Dijawab **202 seketika**, OCR belum jalan:
-
-    {"status_code": 202, "status_desc": "Accepted", "message": "OK", "errors": null,
-     "request_id": "REQ_001",
-     "data": {"request_id": "REQ_001", "stage": "OCR",
-              "status": "PROCESSING", "duplicate": false}}
-
-Setelah itu, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, callback
-`OCR` dikirim, lalu job diserahkan ke structuring, yang kemudian menyerahkan ke scoring.
-
-**Idempoten.** `request_id` yang sama dikirim ulang tetap dijawab 202 dengan
-`duplicate: true` dan OCR tidak dijalankan dua kali, kecuali percobaan sebelumnya
-berstatus `FAILED`; dalam hal itu dijalankan ulang.
-
-**Catatan `file_url`.** URL diunduh di background, jadi presigned URL harus hidup lebih
-lama daripada antrean terburuk. URL kedaluwarsa atau tidak terjangkau menjadi job
-`FAILED`, bukan error 4xx, karena 202 sudah terlanjur dijawab.
+`POST /v1/ekstraksi/jobs` dipanggil oleh guardrails, bukan oleh kalian. Setelah dijawab
+202, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, callback `OCR`
+dikirim, lalu job diserahkan ke structuring, yang kemudian menyerahkan ke scoring.
 
 ### GET /v1/ekstraksi/jobs/{request_id} — status tahap OCR
 
@@ -184,6 +179,7 @@ endpoint `GET` di bawah, untuk rekonsiliasi atau debugging.
 
 | Service | Endpoint | Siapa yang memanggil |
 |---|---|---|
+| ekstraksi | `POST /v1/ekstraksi/jobs` | guardrails, otomatis |
 | structuring | `POST /v1/structuring/jobs` | ekstraksi, otomatis |
 | structuring | `GET /v1/structuring/jobs/{request_id}` | kalian, bila perlu |
 | structuring | `POST /v1/structuring/structure` | debugging, sinkron |

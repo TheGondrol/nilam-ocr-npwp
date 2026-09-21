@@ -4,7 +4,7 @@ Service OCR untuk dokumen NPWP (kartu identitas pajak) Indonesia, dipecah menjad
 
 | Service | Port | Image | Peran |
 |---|---|---|---|
-| **guardrails** | 8031 | `nilam-ocr-guardrails` | "ServiceGuardrails": dipanggil Orkestrasi **sinkron**. Klasifikasi tiap halaman `accepted`/`reject` dengan model EfficientNet-B0 (lokal, CPU) + vonis dokumen; selalu 200 dengan `data.passed` (true/false) + `data.reason` |
+| **guardrails** | 8031 | `nilam-ocr-guardrails` | "ServiceGuardrails", **pintu masuk**: Orkestrasi hanya memanggil `POST /v1/extract-ocr` di sini, sinkron; kalau lolos, dokumen langsung diteruskan ke ekstraksi. Klasifikasi tiap halaman `accepted`/`reject` dengan model EfficientNet-B0 (lokal, CPU) + vonis dokumen; selalu 200 dengan `data.passed` (true/false) + `data.reason` |
 | **ekstraksi** | 8030 | `nilam-ocr-ekstraksi` | "ServiceOCR": tahap pertama pipeline async (`/v1/ekstraksi/jobs` → 202, OCR di background, callback, handoff ke structuring). Juga OCR mentah sinkron (`/v1/ekstraksi/extract`) dan kontrak lama `generate-request-id` → `extract-ocr` → `get-ocr-result` (slot `ocr-npwp`, `OCR_NPWP_SERVICE_URL`) |
 | **structuring** | 8032 | `nilam-ocr-structuring` | "ServiceStructuring": `/v1/structuring/jobs` → 202, baris teks → `nomor_npwp`, `nama`, `nama_badan` dengan confidence per field, callback, handoff ke scoring |
 | **scoring** | 8033 | `nilam-ocr-scoring` | "ServiceScoring", tahap terakhir: `/v1/scoring/jobs` → 202, confidence per field (`npwp_confidence`, `name_confidence`) dari trust model ML engineer; callback-nya membawa **hasil akhir** ke Orkestrasi. Tanpa skor dokumen / keputusan: ambang milik Orkestrasi |
@@ -91,13 +91,17 @@ Batas yang dijaga: **service tidak saling import**. Satu-satunya jalur antar ser
 
 ```
 Client ─► Orkestrasi: generate request_id · POST url file + document_type · POST ekstrak OCR
-Orkestrasi ─► guardrails:8031 POST /v1/guardrails/check (binary)      SINKRON
-           ◄─ 200 {passed, reason, document, pages}
-   passed=false ─► Orkestrasi: requests.status=REJECTED, 422 + reason ke client. Selesai.
-   passed=true  ─► Orkestrasi: requests.status=OCR_PROCESSING, 202 ke client, lalu:
+Orkestrasi ─► guardrails:8031 POST /v1/extract-ocr                    SATU-SATUNYA PANGGILAN
+                (request_id, document_type, file | file_url)
+   guardrails:  model guardrails dijalankan SINKRON
+   passed=false ◄─ 200 {passed: false, reason, document, pages, job: null}
+                ─► Orkestrasi: requests.status=REJECTED, 422 + reason ke client. Selesai.
+   passed=true  ─► ekstraksi:8030 POST /v1/ekstraksi/jobs              202 segera
+                     (request_id, document_type, guardrails, file)
+                ◄─ 200 {passed: true, reason, document, pages, job: {stage: OCR, status, duplicate}}
+                ─► Orkestrasi: requests.status=OCR_PROCESSING, 202 ke client, lalu:
 
-Orkestrasi ─► ekstraksi:8030 POST /v1/ekstraksi/jobs                   202 segera
-                (request_id, document_type, guardrails, file | file_url)
+
    ekstraksi:   INSERT ocr_jobs (PROCESSING) ON CONFLICT DO NOTHING
                 file_url? unduh dari MinIO : pakai file dari payload
                 OCR (paddle / mock)
@@ -147,7 +151,7 @@ Dipertahankan sampai orkestrator pindah ke alur async. `POST /v1/extract-ocr` ke
 
 ```
 orkestrator ──► ekstraksi:8030 /v1/extract-ocr (request_id + file/file_url)
-                 │ 1. POST guardrails:8031 /v1/guardrails/check   ── verdict=reject ──► 400
+                 │ 1. POST guardrails:8031 /v1/extract-ocr (handoff=false)  ── verdict=reject ──► 400
                  │ 2. OCR engine (paddle / mock)
                  │ 3. POST structuring:8032 /v1/structuring/structure
                  │ 4. POST scoring:8033 /v1/scoring/score
@@ -277,8 +281,8 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 |---|---|---|---|
 | semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`). **Liveness**: hanya "proses hidup", tidak menyentuh dependensi |
 | semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk ekstraksi / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
-| guardrails | POST | `/v1/guardrails/check` | form: `request_id` + `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]` {page_index, proba_approve, proba_reject, verdict} |
-| ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, `data` dari guardrails/check), + tepat satu dari `file` / `file_url` |
+| guardrails | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, selalu 200.** form: `request_id`, `document_type` (default `npwp`), `handoff` (default `true`) + tepat satu dari `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`, `job`. Lolos: dokumen diteruskan ke `ekstraksi/jobs`, `job` = jawaban tahap OCR. Ditolak: `job: null`, tidak ada yang jalan. `handoff=false` hanya menilai (dipakai kontrak lama) |
+| ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** Dipanggil guardrails. form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
 | structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}` |
 | scoring | POST | `/v1/scoring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr", "structuring": {"fields": {...}}}` |
 | ketiganya | GET | `/v1/<tahap>/jobs/{request_id}` | – → `{request_id, stage, status: PROCESSING\|DONE\|FAILED, result, error_message, created_at, updated_at}`; untuk debug/rekonsiliasi, sumber status resmi tetap Orkestrasi |
@@ -367,7 +371,7 @@ curl -X POST http://localhost:8081/v1/predict/json -H "X-API-Key: dummy-key" -F 
 #           "pages": [{"page_index", "proba_approve", "proba_reject", "verdict"}]}}
 ```
 
-Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** ke orkestrator (`POST /v1/guardrails/check`) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: `request_id`, `file_url` (unduh dari MinIO), validasi tipe/ukuran sebelum berkas dikirim, envelope, dan `passed`/`reason`. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
+Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** ke orkestrator (`POST /v1/extract-ocr` di guardrails) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: `request_id`, `file_url` (unduh dari MinIO), validasi tipe/ukuran sebelum berkas dikirim, envelope, dan `passed`/`reason`. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
 
 **Ekstraksi, backend `remote` (sudah ada)**: klien ke service model ekstraksi milik ML engineer. Kontrak model:
 
@@ -424,11 +428,10 @@ Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipe
 
 | Bagian | Isi |
 |---|---|
-| 1. Guardrails | `POST /v1/guardrails/check` (sinkron) |
-| 2. Start the pipeline | `POST /v1/ekstraksi/jobs` (202) |
-| 3. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
-| 4. Reconciliation | `GET /v1/<tahap>/jobs/{request_id}` di tiga service, `result` bertipe per tahap |
-| Legacy | `generate-request-id` / `extract-ocr` / `get-ocr-result`, ditandai `deprecated` |
+| 1. Start the pipeline | `POST /v1/extract-ocr` di guardrails (selalu 200; `job` terisi kalau lolos) |
+| 2. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
+| 3. Reconciliation | `GET /v1/<tahap>/jobs/{request_id}` di tiga service, `result` bertipe per tahap |
+| Legacy | `generate-request-id` / `get-ocr-result`, ditandai `deprecated`; `extract-ocr` milik ekstraksi tidak dimasukkan karena path-nya sekarang milik guardrails |
 
 Tiap operasi membawa `servers` milik service pemiliknya (DNS GKE lintas namespace dengan variabel `environment`, DNS satu namespace / Compose, localhost), karena satu spec ini mencakup empat host. Panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`) dan helper sinkron sengaja tidak ikut; semuanya ada di spec per service dan di `/docs` masing-masing.
 
