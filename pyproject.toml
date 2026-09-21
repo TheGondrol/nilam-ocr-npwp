@@ -18,27 +18,15 @@ known-first-party = ["src", "tests"]
 [tool.pyrefly]
 search-path = [
     "libs/ocr_common",
-    "services/guardrails",
-    "services/ekstraksi",
-    "services/structuring",
-    "services/scoring",
 ]
 
 [tool.pyright]
 extraPaths = [
     "libs/ocr_common",
-    "services/guardrails",
-    "services/ekstraksi",
-    "services/structuring",
-    "services/scoring",
 ]
 
 [tool.ty.environment]
 extra-paths = [
     "libs/ocr_common",
-    "services/guardrails",
-    "services/ekstraksi",
-    "services/structuring",
-    "services/scoring",
 ]
 

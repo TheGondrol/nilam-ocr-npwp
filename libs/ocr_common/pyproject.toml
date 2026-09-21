@@ -29,5 +29,12 @@ asyncio_default_fixture_loop_scope = "function"
 root = ["."]
 extra-paths = ["."]
 
+[tool.pyright]
+extraPaths = ["."]
+
+[tool.pyrefly]
+search-path = ["."]
+
 [tool.ty.src]
 exclude = ["ocr_common/fetch_url.py"]
+
