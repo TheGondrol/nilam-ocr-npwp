@@ -14,3 +14,31 @@ known-first-party = ["src", "tests"]
 "services/*/src/api/**" = ["B008", "B904"]
 "libs/ocr_common/ocr_common/intake.py" = ["B008"]
 "libs/ocr_common/ocr_common/fetch_url.py" = ["B904", "UP"]
+
+[tool.pyrefly]
+search-path = [
+    "libs/ocr_common",
+    "services/guardrails",
+    "services/ekstraksi",
+    "services/structuring",
+    "services/scoring",
+]
+
+[tool.pyright]
+extraPaths = [
+    "libs/ocr_common",
+    "services/guardrails",
+    "services/ekstraksi",
+    "services/structuring",
+    "services/scoring",
+]
+
+[tool.ty.environment]
+extra-paths = [
+    "libs/ocr_common",
+    "services/guardrails",
+    "services/ekstraksi",
+    "services/structuring",
+    "services/scoring",
+]
+
