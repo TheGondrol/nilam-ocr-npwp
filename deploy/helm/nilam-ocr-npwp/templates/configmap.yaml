@@ -1,0 +1,14 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nilam-ocr-npwp.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "nilam-ocr-npwp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+data:
+  {{- include "nilam-ocr-npwp.serviceEnv" (dict "root" $ "svc" $svc) | indent 2 }}
+{{- end }}
+{{- end }}

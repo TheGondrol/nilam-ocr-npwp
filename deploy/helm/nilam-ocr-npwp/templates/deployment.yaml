@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nilam-ocr-npwp.fullname" . }}
+  labels:
+    {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "nilam-ocr-npwp.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "nilam-ocr-npwp.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        {{- range $name, $svc := .Values.services }}
+        {{- if $svc.enabled }}
+        - name: {{ $name }}
+          image: "{{ $.Values.image.registry }}/{{ $svc.image.repository }}:{{ $svc.image.tag | default $.Values.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: {{ $name }}
+              containerPort: {{ $svc.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "nilam-ocr-npwp.fullname" $ }}-{{ $name }}
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ $.Values.secretKeys.apiKey }}
+            {{- if $svc.pipeline }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ $.Values.secretKeys.databaseUrl }}
+            - name: ORCHESTRATION_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ $.Values.secretKeys.orchestrationApiKey }}
+                  optional: true
+            {{- end }}
+            - name: HOME
+              value: /tmp
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ $name }}
+            periodSeconds: 2
+            failureThreshold: {{ $svc.startupFailureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $name }}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ $name }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp-{{ $name }}
+              mountPath: /tmp
+        {{- end }}
+        {{- end }}
+      volumes:
+        {{- range $name, $svc := .Values.services }}
+        {{- if $svc.enabled }}
+        - name: tmp-{{ $name }}
+          emptyDir: {}
+        {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

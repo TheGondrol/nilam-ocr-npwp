@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nilam-ocr-npwp
+description: OCR NPWP pipeline (guardrails, ekstraksi, structuring, scoring) running as one pod
+type: application
+version: 0.1.0
+appVersion: "4d02eba"

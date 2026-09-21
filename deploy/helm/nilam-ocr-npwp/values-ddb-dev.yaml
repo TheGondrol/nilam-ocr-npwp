@@ -1,0 +1,21 @@
+environment: production
+
+image:
+  tag: 4d02eba-dirty
+
+existingSecret: nilam-ocr-npwp-secrets
+
+orchestration:
+  # Mode uji coba dengan tools/tracker: tracker ada di laptop dan tidak bisa
+  # dipanggil balik dari pod, jadi ia menarik status tiap tahap sendiri
+  # (polling) dan callback cukup berhenti di service ini sendiri. Dipakai
+  # supaya request uji coba tidak menembak Orkestrasi milik tim lain.
+  url: http://nilam-ocr-npwp:8030
+  # Integrasi sungguhan: komentari baris di atas, aktifkan baris ini. Alamatnya
+  # hasil penelusuran namespace ocr-dev, belum dikonfirmasi tim Orkestrasi.
+  # url: http://ocr-orchestration.ocr-dev.svc.cluster.local
+
+services:
+  ekstraksi:
+    env:
+      EKSTRAKSI_OCR_URL: http://10.213.128.67:8070

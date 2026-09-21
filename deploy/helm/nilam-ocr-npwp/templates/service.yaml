@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nilam-ocr-npwp.fullname" . }}
+  labels:
+    {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- range $name, $svc := .Values.services }}
+    {{- if $svc.enabled }}
+    - name: {{ $name }}
+      port: {{ $svc.port }}
+      targetPort: {{ $name }}
+    {{- end }}
+    {{- end }}

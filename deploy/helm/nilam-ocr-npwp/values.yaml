@@ -1,0 +1,144 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+revisionHistoryLimit: 5
+terminationGracePeriodSeconds: 45
+
+environment: production
+
+image:
+  registry: asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribrain-dev-gar-temp-01
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+existingSecret: nilam-ocr-npwp-secrets
+secretKeys:
+  apiKey: API_KEY
+  databaseUrl: DATABASE_URL
+  orchestrationApiKey: ORCHESTRATION_API_KEY
+
+orchestration:
+  url: ""
+  callbackPath: /v1/callbacks/stage
+  timeoutSeconds: "10"
+
+commonEnv: {}
+
+services:
+  guardrails:
+    enabled: true
+    image:
+      repository: ms-bribrain-nilam-ocr-npwp-guardrails
+      tag: ""
+    port: 8031
+    pipeline: false
+    upstreams: []
+    startupFailureThreshold: 30
+    env:
+      GUARDRAILS_BACKEND: efficientnet
+      GUARDRAILS_MODEL_PATH: weights/best_model.pt
+      GUARDRAILS_DEVICE: cpu
+      GUARDRAILS_TORCH_THREADS: "2"
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  ekstraksi:
+    enabled: true
+    image:
+      repository: ms-bribrain-nilam-ocr-npwp-ekstraksi
+      tag: ""
+    port: 8030
+    pipeline: true
+    upstreams: [guardrails, structuring, scoring]
+    startupFailureThreshold: 15
+    env:
+      EKSTRAKSI_BACKEND: paddle
+      EKSTRAKSI_OCR_URL: ""
+      EKSTRAKSI_OCR_TIMEOUT_SECONDS: "60"
+      PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+  structuring:
+    enabled: true
+    image:
+      repository: ms-bribrain-nilam-ocr-npwp-structuring
+      tag: ""
+    port: 8032
+    pipeline: true
+    upstreams: [scoring]
+    startupFailureThreshold: 15
+    env:
+      STRUCTURING_BACKEND: npwp_rules
+      PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+  scoring:
+    enabled: true
+    image:
+      repository: ms-bribrain-nilam-ocr-npwp-scoring
+      tag: ""
+    port: 8033
+    pipeline: true
+    upstreams: []
+    startupFailureThreshold: 15
+    env:
+      SCORING_BACKEND: heuristic
+      SCORING_APPROVE_THRESHOLD: "0.8"
+      SCORING_REVIEW_THRESHOLD: "0.5"
+      PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+service:
+  type: ClusterIP
+  annotations: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
