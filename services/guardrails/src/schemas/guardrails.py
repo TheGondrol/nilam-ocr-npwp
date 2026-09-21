@@ -2,7 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ocr_common.schemas import JobAccepted, SuccessEnvelope
+from ocr_common.pipeline_schemas import FinalResult
+from ocr_common.schemas import JobAccepted, JobState, Stage, SuccessEnvelope
 
 Verdict = Literal["accepted", "reject"]
 
@@ -66,12 +67,49 @@ class GuardrailReport(BaseModel):
     pages: list[PageResult] = Field(..., description="One entry per page, in page order")
 
 
+class PipelineProgress(BaseModel):
+    stage: Stage = Field(
+        ...,
+        description=(
+            "The stage this is about: `SCORING` when the pipeline is `DONE`, the stage that failed when `FAILED`, "
+            "or the stage still running when the wait ran out"
+        ),
+        examples=["SCORING"],
+    )
+    status: JobState = Field(
+        ...,
+        description=(
+            "`DONE`: `result` holds the final result. `FAILED`: the pipeline stopped at `stage`. `PROCESSING`: still "
+            "running when the wait ran out (HTTP 202); the outcome follows in the stage callbacks"
+        ),
+        examples=["DONE"],
+    )
+    error_message: str | None = Field(
+        None, description="Why `stage` failed; null unless `status` is `FAILED`", examples=[None]
+    )
+
+
 class GuardrailJobReport(GuardrailReport):
     job: JobAccepted | None = Field(
         None,
         description=(
             "The OCR job this service started on the ekstraksi service when `passed`; null when rejected (nothing "
             "runs and no callback follows) or when `handoff` was false"
+        ),
+    )
+    pipeline: PipelineProgress | None = Field(
+        None,
+        description=(
+            "Where the pipeline stood when this response was sent, after waiting up to `PIPELINE_WAIT_SECONDS` "
+            "from the moment the request arrived. Null when rejected, when `handoff` was false, or when waiting is "
+            "disabled (`PIPELINE_WAIT_SECONDS=0`)"
+        ),
+    )
+    result: FinalResult | None = Field(
+        None,
+        description=(
+            "The final result when `pipeline.status` is `DONE`: identical to the `result` of the SCORING callback, "
+            "which is still sent. Null otherwise"
         ),
     )
 

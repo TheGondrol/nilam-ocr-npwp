@@ -4,9 +4,10 @@ info:
   description: 'Entry point of the OCR NPWP pipeline. `POST /v1/extract-ocr` classifies every page of
     the document (image or PDF) as accepted / reject with the guardrails model, aggregates a document
     verdict, and when it passes hands the document to the OCR stage (ekstraksi), which chains to structuring
-    and scoring. The orchestrator makes this one call and then receives the stage callbacks. The model
-    runs in this process (`efficientnet`) or in the ML team''s model service (`remote`). All endpoints
-    except /health require an X-API-Key header.
+    and scoring. The orchestrator makes this one call: it waits up to `PIPELINE_WAIT_SECONDS` for the
+    pipeline and answers 200 with the final result, or 202 while it is still running; the stage callbacks
+    follow either way. The model runs in this process (`efficientnet`) or in the ML team''s model service
+    (`remote`). All endpoints except /health require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -143,34 +144,28 @@ paths:
       tags:
       - Guardrails
       summary: Judge a document and, when it passes, start the pipeline
-      description: '**The only call the orchestrator makes.** Runs the guardrails model on the document
-        synchronously, then:
-
-
-        - **passed** -> sends the same document on to the OCR stage (`POST /v1/ekstraksi/jobs` on the
-        ekstraksi service) and returns the report with `data.job`. OCR -> structuring -> scoring then
-        run in the background and report through the `OCR`, `STRUCTURING` and `SCORING` stage callbacks;
-        the final result is in the `SCORING` callback.
-
-        - **rejected** -> returns the report with `data.passed: false`, `data.reason` and `data.job: null`.
-        Nothing else runs and no callback follows; the orchestrator answers the client 422 with `reason`.
-
-
-        Always 200 when the document was judged: read `data.passed`, not the HTTP code.
-
-
-        Runs the guardrails model on each page (a PDF is rendered page by page; an image is one page)
-        and aggregates a document verdict. The model is either in this process (`efficientnet`) or the
-        ML team''s model service (`remote`, POST /v1/predict/json); the response is the same either way.
-
-
-        Send `request_id` plus the document as `file`, or as `file_url` (downloaded here once, then forwarded
-        as a file, so the URL only has to live for this call); exactly one of the two.
-
-
-        **Idempotency.** The same request_id again re-runs the guardrails check, but the OCR stage answers
-        `duplicate: true` and does not run twice unless the earlier attempt `FAILED` or outlived the job
-        lease (`PIPELINE_JOB_LEASE_SECONDS`).'
+      description: "**The only call the orchestrator makes.** Runs the guardrails model on the document\
+        \ synchronously, then:\n\n- **rejected** -> **200** with `data.passed: false` and `data.reason`;\
+        \ `job`, `pipeline` and `result` are null. Nothing else runs and no callback follows; the orchestrator\
+        \ answers the client 422 with `reason`.\n- **passed** -> sends the same document on to the OCR\
+        \ stage (`POST /v1/ekstraksi/jobs` on the ekstraksi service; its answer is `data.job`), then waits\
+        \ for OCR -> structuring -> scoring for up to `PIPELINE_WAIT_SECONDS` (15 by default), counted\
+        \ from when this request arrived:\n  - finished in time -> **200**: `data.pipeline.status` is\
+        \ `DONE` with the final result in `data.result` (identical to the `result` of the SCORING callback),\
+        \ or `FAILED` with the failed `stage` and `error_message`;\n  - still running -> **202**: `data.pipeline.status`\
+        \ is `PROCESSING`; the outcome follows in the stage callbacks, or read it with `GET /v1/scoring/jobs/{request_id}`.\n\
+        \nThe `OCR`, `STRUCTURING` and `SCORING` callbacks are sent in every case, also when the result\
+        \ is already in this response. The wait is counted from the request's arrival, so the answer normally\
+        \ comes within `PIPELINE_WAIT_SECONDS`; give this call an HTTP timeout well above it (e.g. +15\
+        \ s) to cover a slow guardrails check or hand-off.\n\nRuns the guardrails model on each page (a\
+        \ PDF is rendered page by page; an image is one page) and aggregates a document verdict. The model\
+        \ is either in this process (`efficientnet`) or the ML team's model service (`remote`, POST /v1/predict/json);\
+        \ the response is the same either way.\n\nSend `request_id` plus the document as `file`, or as\
+        \ `file_url` (downloaded here once, then forwarded as a file, so the URL only has to live for\
+        \ this call); exactly one of the two.\n\n**Idempotency.** The same request_id again re-runs the\
+        \ guardrails check, but the OCR stage answers `duplicate: true` and does not run twice unless\
+        \ the earlier attempt `FAILED` or outlived the job lease (`PIPELINE_JOB_LEASE_SECONDS`). A request_id\
+        \ that already finished answers 200 with its stored result."
       operationId: extractOcr
       requestBody:
         content:
@@ -180,14 +175,16 @@ paths:
         required: true
       responses:
         '200':
-          description: 'The document was judged. Always 200, accepted or not: read `data.passed`'
+          description: 'A final answer: rejected, or accepted and the pipeline finished (DONE or FAILED)
+            within the wait'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GuardrailCheckResponse'
               examples:
-                accepted:
-                  summary: 'Accepted: the OCR stage was started, `job` is its answer'
+                done:
+                  summary: 'Accepted and finished within the wait: `result` is the final result (same
+                    as the SCORING callback)'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -210,9 +207,70 @@ paths:
                         stage: OCR
                         status: PROCESSING
                         duplicate: false
+                      pipeline:
+                        stage: SCORING
+                        status: DONE
+                      result:
+                        document_type: npwp
+                        fields:
+                          nomor_npwp:
+                            value: 12.345.678.9-012.345
+                            confidence: 0.9762
+                          nama:
+                            value: BUDI SANTOSO
+                            confidence: 0.9931
+                          nama_badan:
+                            confidence: 0.0
+                        scoring:
+                          npwp_confidence: 0.7296
+                          name_confidence: 0.9471
+                        guardrails:
+                          passed: true
+                          document:
+                            verdict: accepted
+                            confidence: 0.9821
+                            n_pages: 1
+                            n_approve: 1
+                            n_reject: 0
+                          pages:
+                          - page_index: 0
+                            proba_approve: 0.9821
+                            proba_reject: 0.0179
+                            verdict: accepted
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                failed:
+                  summary: 'Accepted, but a stage failed within the wait: the request ends here, as with
+                    a FAILED callback'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OK
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: PROCESSING
+                        duplicate: false
+                      pipeline:
+                        stage: OCR
+                        status: FAILED
+                        error_message: ekstraksi OCR model is unavailable
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 duplicate:
-                  summary: 'Same request_id sent again: the OCR stage did not start a second run'
+                  summary: 'Same request_id sent again after it finished: nothing runs twice, the stored
+                    result is returned'
                   value:
                     status_code: 200
                     status_desc: OK
@@ -235,6 +293,36 @@ paths:
                         stage: OCR
                         status: DONE
                         duplicate: true
+                      pipeline:
+                        stage: SCORING
+                        status: DONE
+                      result:
+                        document_type: npwp
+                        fields:
+                          nomor_npwp:
+                            value: 12.345.678.9-012.345
+                            confidence: 0.9762
+                          nama:
+                            value: BUDI SANTOSO
+                            confidence: 0.9931
+                          nama_badan:
+                            confidence: 0.0
+                        scoring:
+                          npwp_confidence: 0.7296
+                          name_confidence: 0.9471
+                        guardrails:
+                          passed: true
+                          document:
+                            verdict: accepted
+                            confidence: 0.9821
+                            n_pages: 1
+                            n_approve: 1
+                            n_reject: 0
+                          pages:
+                          - page_index: 0
+                            proba_approve: 0.9821
+                            proba_reject: 0.0179
+                            verdict: accepted
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 rejected:
                   summary: 'Rejected: nothing was started; answer the client with `reason`'
@@ -281,6 +369,67 @@ paths:
                         proba_approve: 0.3
                         proba_reject: 0.7
                         verdict: reject
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        '202':
+          description: 'Accepted, but the pipeline was still running when the wait ran out: the outcome
+            follows in the stage callbacks'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailCheckResponse'
+              examples:
+                processing:
+                  summary: Still running after PIPELINE_WAIT_SECONDS
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: PROCESSING
+                        duplicate: false
+                      pipeline:
+                        stage: STRUCTURING
+                        status: PROCESSING
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                no_wait:
+                  summary: 'Waiting disabled (PIPELINE_WAIT_SECONDS=0): answered right after the hand-off'
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                      job:
+                        request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                        stage: OCR
+                        status: PROCESSING
+                        duplicate: false
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
           description: Bad file (empty, too large, unsupported type, unreadable), bad intake, or rejected
@@ -493,6 +642,97 @@ components:
       - message
       - errors
       title: ErrorResponse
+    FieldConfidences:
+      properties:
+        npwp_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Confidence
+          description: P(the NPWP number is correct); null when no number was found
+          examples:
+          - 0.7296
+        name_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Confidence
+          description: P(the name is correct); null when no name was found
+          examples:
+          - 0.9471
+      type: object
+      required:
+      - npwp_confidence
+      - name_confidence
+      title: FieldConfidences
+      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
+    FinalField:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: null when the field was not found
+          examples:
+          - '3201234567890001'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: OCR score of the line the value came from
+          examples:
+          - 0.9762
+      type: object
+      required:
+      - confidence
+      title: FinalField
+    FinalResult:
+      properties:
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type the fields were read as
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/FinalField'
+          type: object
+          title: Fields
+          description: '`nomor_npwp`, `nama`, `nama_badan`. A 15-digit number is formatted `XX.XXX.XXX.X-XXX.XXX`;
+            a 16-digit (NIK-based) number is 16 plain digits. A card printing both reports the 16-digit
+            one'
+          examples:
+          - nama:
+              confidence: 0.9931
+              value: BUDI SANTOSO
+            nama_badan:
+              confidence: 0.0
+            nomor_npwp:
+              confidence: 0.9762
+              value: '3201234567890001'
+        scoring:
+          $ref: '#/components/schemas/FieldConfidences'
+          description: 'Per-field trust. There is NO document-level score and NO approve / reject decision:
+            thresholds belong to the caller'
+        guardrails:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsResult'
+          - type: 'null'
+          description: The guardrails result that was submitted with the job, returned unchanged
+      type: object
+      required:
+      - document_type
+      - fields
+      - scoring
+      title: FinalResult
+      description: What the pipeline produced for one request_id. Carried by the SCORING / DONE callback.
     GuardrailCheckResponse:
       properties:
         status_code:
@@ -568,12 +808,158 @@ components:
           - type: 'null'
           description: The OCR job this service started on the ekstraksi service when `passed`; null when
             rejected (nothing runs and no callback follows) or when `handoff` was false
+        pipeline:
+          anyOf:
+          - $ref: '#/components/schemas/PipelineProgress'
+          - type: 'null'
+          description: Where the pipeline stood when this response was sent, after waiting up to `PIPELINE_WAIT_SECONDS`
+            from the moment the request arrived. Null when rejected, when `handoff` was false, or when
+            waiting is disabled (`PIPELINE_WAIT_SECONDS=0`)
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/FinalResult'
+          - type: 'null'
+          description: 'The final result when `pipeline.status` is `DONE`: identical to the `result` of
+            the SCORING callback, which is still sent. Null otherwise'
       type: object
       required:
       - passed
       - document
       - pages
       title: GuardrailJobReport
+    GuardrailsDocument:
+      properties:
+        verdict:
+          anyOf:
+          - type: string
+            enum:
+            - accepted
+            - reject
+          - type: 'null'
+          title: Verdict
+          description: Document verdict
+          examples:
+          - accepted
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+          description: 'Confidence in the verdict: accepted -> lowest `proba_approve` over the pages.
+            Sent to the scoring model as `guardrail_probability`'
+          examples:
+          - 0.9821
+        n_pages:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Pages
+          description: Pages that were checked
+          examples:
+          - 1
+        n_approve:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Approve
+          description: Pages with verdict `accepted`
+          examples:
+          - 1
+        n_reject:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Reject
+          description: Pages with verdict `rejected`
+          examples:
+          - 0
+      additionalProperties: true
+      type: object
+      title: GuardrailsDocument
+    GuardrailsPage:
+      properties:
+        page_index:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Page Index
+          description: 0-based page number
+          examples:
+          - 0
+        proba_approve:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Proba Approve
+          description: Probability that this page is an acceptable document
+          examples:
+          - 0.9821
+        proba_reject:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Proba Reject
+          description: 1 - `proba_approve`
+          examples:
+          - 0.0179
+        verdict:
+          anyOf:
+          - type: string
+            enum:
+            - accepted
+            - reject
+          - type: 'null'
+          title: Verdict
+          description: Verdict for this page alone
+          examples:
+          - accepted
+      additionalProperties: true
+      type: object
+      title: GuardrailsPage
+    GuardrailsResult:
+      properties:
+        passed:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Passed
+          description: 'true: the document may proceed to OCR'
+          examples:
+          - true
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+          description: Why it was rejected; null when passed
+          examples:
+          - null
+        document:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsDocument'
+          - type: 'null'
+          description: Verdict for the document as a whole
+        pages:
+          items:
+            $ref: '#/components/schemas/GuardrailsPage'
+          type: array
+          title: Pages
+          description: One entry per page, in page order
+      additionalProperties: true
+      type: object
+      title: GuardrailsResult
+      description: The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded
+        unchanged down the pipeline.
     HealthResponse:
       properties:
         status:
@@ -696,6 +1082,44 @@ components:
       - proba_reject
       - verdict
       title: PageResult
+    PipelineProgress:
+      properties:
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: 'The stage this is about: `SCORING` when the pipeline is `DONE`, the stage that
+            failed when `FAILED`, or the stage still running when the wait ran out'
+          examples:
+          - SCORING
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          description: '`DONE`: `result` holds the final result. `FAILED`: the pipeline stopped at `stage`.
+            `PROCESSING`: still running when the wait ran out (HTTP 202); the outcome follows in the stage
+            callbacks'
+          examples:
+          - DONE
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Why `stage` failed; null unless `status` is `FAILED`
+          examples:
+          - null
+      type: object
+      required:
+      - stage
+      - status
+      title: PipelineProgress
     ReadyResponse:
       properties:
         status:

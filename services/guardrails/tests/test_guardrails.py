@@ -124,12 +124,26 @@ def test_http_check_returns_contract_shape(client, auth):
     assert body["status_code"] == 200
     assert body["message"] == "OK"
     assert body["request_id"] == "OCR_1"
-    assert body["data"] == {
+    report = {
         "passed": True,
         "reason": None,
         "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
         "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
+    }
+    assert body["data"] == {
+        **report,
         "job": {"request_id": "OCR_1", "stage": "OCR", "status": "PROCESSING", "duplicate": False},
+        "pipeline": {"stage": "SCORING", "status": "DONE", "error_message": None},
+        "result": {
+            "document_type": "npwp",
+            "fields": {
+                "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.99},
+                "nama": {"value": "BUDI SANTOSO", "confidence": 0.97},
+                "nama_badan": {"value": None, "confidence": 0.0},
+            },
+            "scoring": {"npwp_confidence": 0.7296, "name_confidence": 0.9471},
+            "guardrails": report,
+        },
     }
 
 

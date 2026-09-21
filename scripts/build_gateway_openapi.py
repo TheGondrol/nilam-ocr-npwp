@@ -26,8 +26,9 @@ TAGS = [
     {
         "name": "1. Start the pipeline",
         "description": (
-            "The only call you make: guardrails check, then OCR -> structuring -> scoring. "
-            "Always 200: rejected -> the reason, nothing runs; accepted -> `job`, the rest arrives by callback."
+            "The only call you make: guardrails check, then OCR -> structuring -> scoring, waited on for up to "
+            "PIPELINE_WAIT_SECONDS. 200: a final answer (rejected, DONE with `result`, or FAILED). "
+            "202: still running, the outcome arrives by callback."
         ),
     },
     {
@@ -54,15 +55,17 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 ## The flow
 
 1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id` and the document
-   (`file` or `file_url`). This is the only call you make. The guardrails check runs synchronously and
-   always answers **200**:
-   - `data.passed: false`, `data.job: null` -> nothing runs and no callback follows; answer the client
-     with `data.reason`.
-   - `data.passed: true` -> the guardrails service has already handed the document to the OCR stage;
-     `data.job` is that stage's answer. You are done calling.
+   (`file` or `file_url`). This is the only call you make. The guardrails check runs synchronously:
+   - `data.passed: false` -> **200**, `data.job: null`; nothing runs and no callback follows. Answer the
+     client with `data.reason`.
+   - `data.passed: true` -> the guardrails service hands the document to the OCR stage (`data.job` is that
+     stage's answer) and waits for the pipeline for up to `PIPELINE_WAIT_SECONDS` (15 s by default, counted
+     from the request's arrival). Finished in time -> **200** with `data.pipeline.status` `DONE` and the
+     final result in `data.result`, or `FAILED` with the failed `stage`. Still running -> **202** with
+     `data.pipeline.status` `PROCESSING`. Give this call an HTTP timeout well above the wait.
 2. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or
-   `FAILED`. The `SCORING` / `DONE` callback carries the **final result**. A `FAILED` callback of any
-   stage ends the request.
+   `FAILED`, sent in every case. The `SCORING` / `DONE` callback carries the **final result**, identical to
+   `data.result` of a 200 above. A `FAILED` callback of any stage ends the request.
 3. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.
 
 Time a request out on your side: a stage that crashes mid-job cannot send its callback.

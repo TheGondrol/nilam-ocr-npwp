@@ -98,8 +98,14 @@ Orkestrasi ─► guardrails:8031 POST /v1/extract-ocr                    SATU-S
                 ─► Orkestrasi: requests.status=REJECTED, 422 + reason ke client. Selesai.
    passed=true  ─► ekstraksi:8030 POST /v1/ekstraksi/jobs              202 segera
                      (request_id, document_type, guardrails, file)
-                ◄─ 200 {passed: true, reason, document, pages, job: {stage: OCR, status, duplicate}}
-                ─► Orkestrasi: requests.status=OCR_PROCESSING, 202 ke client, lalu:
+                   guardrails MENUNGGU maks. PIPELINE_WAIT_SECONDS (default 15 dtk, sejak request diterima):
+                   GET /v1/{ekstraksi,structuring,scoring}/jobs/{request_id} berurutan,
+                   tiap PIPELINE_POLL_INTERVAL_SECONDS (default 0,5 dtk)
+                ◄─ 200 {…, job, pipeline: {stage: SCORING, status: DONE}, result: <hasil akhir>}    selesai
+                ◄─ 200 {…, job, pipeline: {stage, status: FAILED, error_message}, result: null}     gagal
+                ◄─ 202 {…, job, pipeline: {stage, status: PROCESSING}, result: null}                belum selesai
+                ─► Orkestrasi: 200 → jawab client; 202 → requests.status=OCR_PROCESSING, 202 ke client
+                   (callback di bawah tetap dikirim dalam semua kasus), lalu:
 
 
    ekstraksi:   INSERT ocr_jobs (PROCESSING) ON CONFLICT DO NOTHING
@@ -143,7 +149,7 @@ Ketiga tahap memakai mesin yang sama, `ocr_common/jobs.py`; tiap service hanya m
  "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}}
 ```
 
-Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/jobs.py` (satu tempat untuk ketiga service).
+Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/jobs.py` (satu tempat untuk ketiga service). Bentuk `result` dirakit di satu tempat, `final_result` di `ocr_common/npwp.py`, yang dipakai callback `SCORING` **dan** respons 200 guardrails, jadi keduanya selalu identik.
 
 ### Kontrak lama (sinkron)
 
@@ -270,6 +276,9 @@ guardrails:
 | `GUARDRAILS_REJECT_THRESHOLD` | Tidak | dari checkpoint (`0.5`) | Backend lokal saja. Halaman reject kalau `proba_reject >= ambang` |
 | `GUARDRAILS_DOCUMENT_POLICY` | Tidak | `all` | Backend lokal saja. `all`: accepted hanya kalau semua halaman accepted; `majority`: accepted > reject |
 | `GUARDRAILS_PDF_DPI` / `GUARDRAILS_MAX_PAGES` | Tidak | `150` / `20` | Backend lokal saja. Render PDF per halaman |
+| `PIPELINE_WAIT_SECONDS` | Tidak | `15` | Berapa lama `/v1/extract-ocr` menunggu pipeline, dihitung sejak request diterima. Selesai dalam waktu ini → **200** dengan `result` (atau `pipeline.status: FAILED`); belum → **202**. `0` = tidak menunggu (selalu 202 setelah hand-off). HTTP timeout pemanggil harus di atas nilai ini |
+| `PIPELINE_POLL_INTERVAL_SECONDS` | Tidak | `0.5` | Jeda antar-cek status tahap selama menunggu. Menambah latensi paling banyak sebesar ini tiap kali sebuah tahap masih berjalan; lebih kecil = lebih cepat tapi lebih banyak `GET` |
+| `STRUCTURING_SERVICE_URL` / `SCORING_SERVICE_URL` | Produksi: ya, selama menunggu | `http://127.0.0.1:8032` / `:8033` | Untuk membaca status tahap saat menunggu (`GET …/jobs/{request_id}`). `STRUCTURING_API_KEY` / `SCORING_API_KEY` = `API_KEY` kalau kosong. Di luar `local` ditolak kalau menunjuk localhost dan `PIPELINE_WAIT_SECONDS > 0` |
 
 structuring: `STRUCTURING_BACKEND` (`npwp_rules`, default: aturan regex + posisi dari ML engineer; atau `rule_based`: regex berbasis label, hanya untuk teks berlabel), `STRUCTURING_PAGE_GUARDRAILS` (`true`: tolak upload berisi KTP/KK/Akta, CAPTCHA, screenshot "Cek NPWP", atau > 2 halaman → 400 / job `FAILED`); tahap berikutnya `SCORING_SERVICE_URL` (`http://127.0.0.1:8033`), `SCORING_API_KEY` (= `API_KEY`), `SCORING_TIMEOUT_SECONDS` (`10.0`).
 
@@ -420,7 +429,7 @@ make openapi       # tulis ulang openapi.yaml tiap service dari kodenya, lalu ap
 make api-docs      # Swagger UI kelima spec tanpa menjalankan service: http://127.0.0.1:8088/api/
 ```
 
-Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipeline async (`tests/test_jobs.py`) mengganti Orkestrasi dan tahap berikutnya dengan perekam dari `ocr_common.testing` (`RecordingCallback`, `RecordingNextStage`) dan menunggu job background dengan `wait_for_job`; kontrak lama di ekstraksi memakai `tests/fakes.py`. Mesin pipelinenya sendiri (`libs/ocr_common/tests/test_jobs.py`) diuji terhadap repository in-memory **dan** SQL (SQLite sungguhan: `ON CONFLICT`, upsert, join). Rantai HTTP sungguhan antar container diuji `make smoke` (`scripts/smoke_e2e.py`). Test live ke PaddleOCR: `cd services/ekstraksi && EKSTRAKSI_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_ekstraksi_live.py`.
+Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipeline async (`tests/test_jobs.py`) mengganti Orkestrasi dan tahap berikutnya dengan perekam dari `ocr_common.testing` (`RecordingCallback`, `RecordingNextStage`) dan menunggu job background dengan `wait_for_job`; kontrak lama di ekstraksi memakai `tests/fakes.py`. Mesin pipelinenya sendiri (`libs/ocr_common/tests/test_jobs.py`) diuji terhadap repository in-memory **dan** SQL (SQLite sungguhan: `ON CONFLICT`, upsert, join). Rantai HTTP sungguhan antar container diuji `make smoke` (`scripts/smoke_e2e.py`). `SMOKE_LATENCY_RUNS=20 make smoke` menambah pengukuran latensi: p50 / p95 / max end-to-end dari sisi klien, jumlah jawaban 200 vs 202, dan durasi tiap tahap di server. Angkanya baru bermakna terhadap backend asli, jadi jalankan di cluster dev dengan `GUARDRAILS_URL`, `EKSTRAKSI_URL`, `STRUCTURING_URL`, `SCORING_URL` menunjuk ke service di sana. Test live ke PaddleOCR: `cd services/ekstraksi && EKSTRAKSI_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_ekstraksi_live.py`.
 
 `openapi.yaml` tiap service adalah turunan kode, dijaga `tests/test_openapi.py`, dan format dump-nya sama dengan `scripts/check_openapi.py` di monorepo orkestrasi.
 

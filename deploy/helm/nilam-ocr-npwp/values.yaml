@@ -38,13 +38,15 @@ services:
       tag: ""
     port: 8031
     pipeline: false
-    upstreams: [ekstraksi]
+    upstreams: [ekstraksi, structuring, scoring]
     startupFailureThreshold: 30
     env:
       GUARDRAILS_BACKEND: efficientnet
       GUARDRAILS_MODEL_PATH: weights/best_model.pt
       GUARDRAILS_DEVICE: cpu
       GUARDRAILS_TORCH_THREADS: "2"
+      # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
+      PIPELINE_WAIT_SECONDS: "15"
     resources:
       requests:
         cpu: "1"

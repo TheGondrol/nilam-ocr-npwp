@@ -1,10 +1,13 @@
 import io
 import json
+import math
 import os
 import sys
 import threading
 import time
 import uuid
+from collections import Counter
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -32,6 +35,8 @@ API_KEY = os.environ.get("API_KEY") or _key_from_env_file()
 HEADERS = {"X-API-Key": API_KEY}
 CALLBACK_PORT = int(os.environ.get("SMOKE_CALLBACK_PORT") or 0)
 TIMEOUT_SECONDS = float(os.environ.get("SMOKE_TIMEOUT_SECONDS") or 60)
+LATENCY_RUNS = int(os.environ.get("SMOKE_LATENCY_RUNS") or 0)
+STAGES = ("ekstraksi", "structuring", "scoring")
 
 callbacks: list[dict] = []
 
@@ -107,19 +112,34 @@ def async_pipeline(client: httpx.Client) -> bool:
     image = _image()
     print("request_id:", request_id)
 
+    started = time.monotonic()
     submitted = _submit(client, request_id, "npwp.jpg", image)
+    elapsed = time.monotonic() - started
     data = submitted.json().get("data") or {}
-    print(f"guardrails extract-ocr: {submitted.status_code} passed={data.get('passed')} reason={data.get('reason')!r}")
+    print(
+        f"guardrails extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s "
+        f"passed={data.get('passed')} reason={data.get('reason')!r}"
+    )
     print("  job:", data.get("job"))
-    if submitted.status_code != 200 or not data.get("job"):
+    print("  pipeline:", data.get("pipeline"))
+    if submitted.status_code not in (200, 202) or not data.get("job"):
         print("  pipeline tidak dimulai")
         return False
+    finished_in_time = submitted.status_code == 200 and (data.get("pipeline") or {}).get("status") == "DONE"
+    if finished_in_time:
+        print("  selesai dalam waktu tunggu; hasil akhir ada di respons 200:")
+        for name, field in data["result"]["fields"].items():
+            print(f"    {name:<12} {field['value']!r:<35} conf={field['confidence']}")
+    elif submitted.status_code == 202:
+        print("  belum selesai saat waktu tunggu habis (202); lanjut polling")
 
     jobs = _poll(client, request_id)
     for stage in ("ekstraksi", "structuring", "scoring"):
         job = jobs.get(stage)
         print(f"  {stage:<12} {job['status'] if job else '(belum ada job)'} {(job or {}).get('error_message') or ''}")
-    ok = all(jobs.get(stage, {}).get("status") == "DONE" for stage in ("ekstraksi", "structuring", "scoring"))
+    ok = all(jobs.get(stage, {}).get("status") == "DONE" for stage in STAGES)
+    if finished_in_time:
+        ok = ok and data["result"]["scoring"]["npwp_confidence"] == jobs["scoring"]["result"]["npwp_confidence"]
     if ok:
         for name, field in jobs["structuring"]["result"]["fields"].items():
             print(f"  {name:<12} {field['value']!r:<35} conf={field['confidence']}")
@@ -128,7 +148,7 @@ def async_pipeline(client: httpx.Client) -> bool:
 
     again = _submit(client, request_id, "npwp.jpg", image)
     duplicate = ((again.json().get("data") or {}).get("job") or {}).get("duplicate")
-    print("kirim ulang request_id yang sama -> duplicate =", duplicate)
+    print(f"kirim ulang request_id yang sama -> {again.status_code}, duplicate = {duplicate}")
     ok = ok and duplicate is True
 
     if CALLBACK_PORT:
@@ -143,6 +163,49 @@ def async_pipeline(client: httpx.Client) -> bool:
     else:
         print("callback tidak diperiksa (SMOKE_CALLBACK_PORT tidak di-set)")
     return ok
+
+
+def _stage_seconds(job: dict) -> float:
+    return (datetime.fromisoformat(job["updated_at"]) - datetime.fromisoformat(job["created_at"])).total_seconds()
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
+
+
+def latency(client: httpx.Client, runs: int) -> bool:
+    print(f"== latensi end-to-end, {runs} request ==")
+    image = _image()
+    totals: list[float] = []
+    codes: Counter[int] = Counter()
+    per_stage: dict[str, list[float]] = {stage: [] for stage in STAGES}
+    failed = 0
+    for _ in range(runs):
+        request_id = f"REQ_{uuid.uuid4()}"
+        started = time.monotonic()
+        response = _submit(client, request_id, "npwp.jpg", image)
+        answered = time.monotonic() - started
+        codes[response.status_code] += 1
+        jobs = _poll(client, request_id)
+        if not all(jobs.get(stage, {}).get("status") == "DONE" for stage in STAGES):
+            failed += 1
+            continue
+        totals.append(answered if response.status_code == 200 else time.monotonic() - started)
+        for stage in STAGES:
+            per_stage[stage].append(_stage_seconds(jobs[stage]))
+    print("  HTTP guardrails:", ", ".join(f"{code} x{count}" for code, count in sorted(codes.items())))
+    if totals:
+        print(
+            f"  end-to-end (klien): p50={_percentile(totals, 0.5):.2f}s  p95={_percentile(totals, 0.95):.2f}s  "
+            f"max={max(totals):.2f}s"
+        )
+        print(
+            "  per tahap (server, p50): "
+            + ", ".join(f"{stage} {_percentile(values, 0.5):.2f}s" for stage, values in per_stage.items())
+        )
+    print(f"  gagal: {failed}")
+    return failed == 0
 
 
 def guardrails_reject(client: httpx.Client) -> bool:
@@ -179,6 +242,8 @@ def main() -> int:
         for name, url in URLS.items():
             print(f"health {name}:", client.get(f"{url}/health").json()["backends"])
         results = [async_pipeline(client), guardrails_reject(client), legacy_contract(client)]
+        if LATENCY_RUNS:
+            results.append(latency(client, LATENCY_RUNS))
     print("HASIL:", "OK" if all(results) else "GAGAL")
     return 0 if all(results) else 1
 

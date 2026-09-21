@@ -13,3 +13,6 @@ configMapGenerator:
       - GUARDRAILS_DEVICE=cpu
       - GUARDRAILS_TORCH_THREADS=2
       - EKSTRAKSI_SERVICE_URL=http://ekstraksi:8030
+      - STRUCTURING_SERVICE_URL=http://structuring:8032
+      - SCORING_SERVICE_URL=http://scoring:8033
+      - PIPELINE_WAIT_SECONDS=15
