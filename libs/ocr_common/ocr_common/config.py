@@ -4,8 +4,11 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ocr_common.fetch_url import UrlPolicy
+
 Environment = Literal["local", "dev", "staging", "production"]
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+DEFAULT_JOB_LEASE_SECONDS = 300.0
 
 
 class BaseServiceSettings(BaseSettings):
@@ -20,10 +23,18 @@ class BaseServiceSettings(BaseSettings):
 
     max_upload_bytes: int = 5 * 1024 * 1024
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
+    file_url_allowed_hosts: str = ""
 
     @property
     def is_local(self) -> bool:
         return self.environment == "local"
+
+    @property
+    def file_url_policy(self) -> UrlPolicy:
+        hosts = tuple(
+            host.strip().lower().rstrip(".") for host in self.file_url_allowed_hosts.split(",") if host.strip()
+        )
+        return UrlPolicy(allowed_hosts=hosts, allow_private=self.is_local)
 
     def require_outside_local(self, **values: object) -> None:
         if self.is_local:
@@ -76,6 +87,7 @@ class PipelineSettings(BaseServiceSettings):
     pipeline_retry_attempts: int = 3
     pipeline_retry_delay_seconds: float = 0.5
     pipeline_drain_timeout_seconds: float = 30.0
+    pipeline_job_lease_seconds: float = Field(DEFAULT_JOB_LEASE_SECONDS, gt=0)
 
     @model_validator(mode="after")
     def _guard_pipeline(self) -> Self:

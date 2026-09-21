@@ -55,7 +55,9 @@ without it the service generates one.
 **Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
 background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
 read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
-`202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED`. Because
+`202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has been
+`PROCESSING` for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the
+process running it died). A job still running when the service shuts down is reported `FAILED`. Because
 the request was already answered `202`, a problem with the document itself (unreadable file, no text,
 unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.
 """

@@ -35,6 +35,3 @@ extraPaths = ["."]
 [tool.pyrefly]
 search-path = ["."]
 
-[tool.ty.src]
-exclude = ["ocr_common/fetch_url.py"]
-

@@ -73,6 +73,23 @@ def test_localhost_database_is_allowed_for_the_sql_auth_proxy_sidecar():
     assert pipeline(environment="production", database_url=sidecar, orchestration_url=ORCH).database_url == sidecar
 
 
+def test_file_url_policy_is_public_only_by_default_and_open_locally():
+    assert base().file_url_policy.allowed_hosts == ()
+    assert base().file_url_policy.allow_private is False
+    assert base(environment="local").file_url_policy.allow_private is True
+
+
+def test_file_url_allowed_hosts_is_a_comma_separated_list():
+    policy = base(file_url_allowed_hosts=" MinIO.internal , .bri.co.id ,").file_url_policy
+    assert policy.allowed_hosts == ("minio.internal", ".bri.co.id")
+
+
+def test_job_lease_must_be_positive():
+    assert pipeline(environment="local").pipeline_job_lease_seconds == 300.0
+    with pytest.raises(ValidationError, match="pipeline_job_lease_seconds"):
+        pipeline(environment="local", pipeline_job_lease_seconds=0)
+
+
 def test_mock_backend_guard():
     settings = base(environment="production")
     with pytest.raises(ValueError, match="GUARDRAILS_BACKEND=mock fabricates results"):

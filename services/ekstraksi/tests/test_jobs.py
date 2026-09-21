@@ -95,7 +95,7 @@ def test_handoff_failure_is_reported_as_structuring_failed(harness, auth):
 def test_file_url_is_downloaded_in_background(harness, auth, monkeypatch):
     client, callback, next_stage = harness
 
-    async def fake_fetch(url, *, limit, timeout=10.0):
+    async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio:9000/bucket/npwp.jpg?sig=x"
         return b"\xff\xd8fake-jpeg-bytes", "npwp.jpg", "image/jpeg"
 

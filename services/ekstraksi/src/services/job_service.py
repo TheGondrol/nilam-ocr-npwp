@@ -1,7 +1,7 @@
 from typing import Any
 
 from ocr_common.errors import ServiceError
-from ocr_common.fetch_url import FetchUrlError, fetch
+from ocr_common.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, fetch
 from ocr_common.jobs import STAGE_STRUCTURING, NextStage, StagePipeline
 from src.services.ekstraksi_service import EkstraksiService
 
@@ -16,11 +16,13 @@ class EkstraksiJobService:
         ekstraksi: EkstraksiService,
         next_stage: NextStage,
         max_upload_bytes: int,
+        url_policy: UrlPolicy = STRICT_URL_POLICY,
     ):
         self._pipeline = pipeline
         self._ekstraksi = ekstraksi
         self._next_stage = next_stage
         self._max_upload_bytes = max_upload_bytes
+        self._url_policy = url_policy
 
     async def submit(
         self, request_id: str, document_type: str, guardrails: dict[str, Any] | None, source: Source
@@ -43,6 +45,6 @@ class EkstraksiJobService:
         if not isinstance(source, str):
             return source
         try:
-            return await fetch(source, limit=self._max_upload_bytes)
+            return await fetch(source, limit=self._max_upload_bytes, policy=self._url_policy)
         except FetchUrlError as exc:
             raise ServiceError(400, str(exc)) from exc

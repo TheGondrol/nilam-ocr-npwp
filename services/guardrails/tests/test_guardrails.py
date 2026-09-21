@@ -168,7 +168,7 @@ def test_http_request_id_is_required(client, auth):
 
 
 def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
-    async def fake_fetch(url, *, limit, timeout=10.0):
+    async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return _jpeg(), "npwp.jpg", "image/jpeg"
 

@@ -100,7 +100,8 @@ def get_job_service(
         "Send `request_id` plus the document as `file`, or as `file_url` (downloaded here once, then forwarded "
         "as a file, so the URL only has to live for this call); exactly one of the two.\n\n"
         "**Idempotency.** The same request_id again re-runs the guardrails check, but the OCR stage answers "
-        "`duplicate: true` and does not run twice unless the earlier attempt `FAILED`."
+        "`duplicate: true` and does not run twice unless the earlier attempt `FAILED` or outlived the job lease "
+        "(`PIPELINE_JOB_LEASE_SECONDS`)."
     ),
     responses={
         200: _EXAMPLES,

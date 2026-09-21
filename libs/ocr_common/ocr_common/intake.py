@@ -7,7 +7,9 @@ FileField = File(None, description="Document image (JPEG/PNG/PDF). Omit when sen
 FileUrlField = Form(
     None,
     description=(
-        "URL this service fetches the document image from (e.g. a presigned MinIO GET). Omit when uploading file."
+        "URL this service fetches the document image from (e.g. a presigned MinIO GET). Omit when uploading file. "
+        "The host must be listed in the service's `FILE_URL_ALLOWED_HOSTS`, or resolve to a public address when "
+        "that is empty; redirects are not followed."
     ),
 )
 
@@ -29,7 +31,8 @@ async def read_image(
 
     if file_url is not None:
         try:
-            return await fetch(file_url, limit=request.app.state.settings.max_upload_bytes)
+            settings = request.app.state.settings
+            return await fetch(file_url, limit=settings.max_upload_bytes, policy=settings.file_url_policy)
         except FetchUrlError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     assert upload is not None

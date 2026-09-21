@@ -36,9 +36,11 @@ info:
     \ answers `202` immediately and does the work in the\nbackground. The outcome is reported by a callback\
     \ to the orchestrator (see *Webhooks*), and can be\nread at any time with `GET .../jobs/{request_id}`.\
     \ Submitting the same request_id again is idempotent:\n`202` with `duplicate: true`, the work is not\
-    \ repeated, unless the earlier attempt `FAILED`. Because\nthe request was already answered `202`,\
-    \ a problem with the document itself (unreadable file, no text,\nunsupported document type) shows\
-    \ up as a `FAILED` job and callback, not as a `4xx`.\n"
+    \ repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING` for longer than the job\
+    \ lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess running it died). A job\
+    \ still running when the service shuts down is reported `FAILED`. Because\nthe request was already\
+    \ answered `202`, a problem with the document itself (unreadable file, no text,\nunsupported document\
+    \ type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
 tags:
 - name: 1. Start the pipeline
   description: 'The only call you make: guardrails check, then OCR -> structuring -> scoring. Always 200:
@@ -82,7 +84,8 @@ paths:
 
 
         **Idempotency.** The same request_id again re-runs the guardrails check, but the OCR stage answers
-        `duplicate: true` and does not run twice unless the earlier attempt `FAILED`.'
+        `duplicate: true` and does not run twice unless the earlier attempt `FAILED` or outlived the job
+        lease (`PIPELINE_JOB_LEASE_SECONDS`).'
       operationId: extractOcr
       requestBody:
         content:
@@ -924,7 +927,8 @@ components:
           - type: 'null'
           title: File Url
           description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
-            Omit when uploading file.
+            Omit when uploading file. The host must be listed in the service's `FILE_URL_ALLOWED_HOSTS`,
+            or resolve to a public address when that is empty; redirects are not followed.
       type: object
       required:
       - request_id

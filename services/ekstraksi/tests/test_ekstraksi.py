@@ -161,7 +161,7 @@ def test_http_extract_empty_file_returns_400(client, auth):
 
 
 def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
-    async def fake_fetch(url, *, limit, timeout=10.0):
+    async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return b"\xff\xd8bytes-from-url", "npwp.jpg", "image/jpeg"
 

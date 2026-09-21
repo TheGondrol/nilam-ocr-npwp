@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 
@@ -11,6 +13,6 @@ async def verify_api_key(request: Request, api_key: str | None = Security(api_ke
     if settings.auth_disabled:
         return api_key or ""
     expected = settings.api_key
-    if not api_key or api_key != expected:
+    if not api_key or not secrets.compare_digest(api_key.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail=API_KEY_ERROR)
     return api_key

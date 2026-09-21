@@ -1,3 +1,4 @@
+import pytest
 from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.testclient import TestClient
 
@@ -46,6 +47,12 @@ def test_missing_api_key_is_401_envelope():
     body = response.json()
     assert body["status_desc"] == "Unauthorized"
     assert body["errors"] == "Invalid or missing API key"
+
+
+@pytest.mark.parametrize("key", ["salah", "kk", "ké"])
+def test_wrong_api_key_is_401_including_non_ascii(key):
+    response = client.post("/v1/json", json={}, headers={"X-API-Key": key.encode("latin-1")})
+    assert response.status_code == 401
 
 
 def test_auth_disabled_skips_the_api_key_check():
@@ -117,6 +124,12 @@ def test_intake_rejects_bad_url_scheme_as_400():
     response = client.post("/v1/echo", data={"file_url": "file:///etc/passwd"}, headers=AUTH)
     assert response.status_code == 400
     assert "Unsupported URL scheme" in response.json()["message"]
+
+
+def test_intake_refuses_internal_file_url_as_400():
+    response = client.post("/v1/echo", data={"file_url": "http://169.254.169.254/latest/meta-data/"}, headers=AUTH)
+    assert response.status_code == 400
+    assert response.json()["message"] == "file_url host is not allowed: 169.254.169.254"
 
 
 def test_validation_error_uses_envelope_with_code():

@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
-from ocr_common.config import PipelineSettings
+from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS, PipelineSettings
 from ocr_common.errors import ServiceError
 from ocr_common.remote import RemoteModelClient
 
@@ -17,6 +17,8 @@ STATUS_FAILED = "FAILED"
 STAGE_OCR = "OCR"
 STAGE_STRUCTURING = "STRUCTURING"
 STAGE_SCORING = "SCORING"
+
+CANCEL_GRACE_SECONDS = 5.0
 
 Work = Callable[[], Awaitable[dict[str, Any]]]
 Handoff = Callable[[dict[str, Any]], Awaitable[None]]
@@ -51,11 +53,13 @@ def _now_iso() -> str:
 class InMemoryJobRepository:
     name = "memory"
 
-    def __init__(self) -> None:
+    def __init__(self, lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS) -> None:
         self._jobs: dict[str, JobRecord] = {}
+        self._lease = timedelta(seconds=lease_seconds)
 
     async def claim(self, request_id: str) -> bool:
-        now = _now_iso()
+        current = datetime.now(UTC)
+        now = current.isoformat()
         record = self._jobs.get(request_id)
         if record is None:
             self._jobs[request_id] = {
@@ -67,7 +71,11 @@ class InMemoryJobRepository:
                 "updated_at": now,
             }
             return True
-        if record["status"] == STATUS_FAILED:
+        expired = (
+            record["status"] == STATUS_PROCESSING
+            and datetime.fromisoformat(record["updated_at"]) < current - self._lease
+        )
+        if record["status"] == STATUS_FAILED or expired:
             record.update(status=STATUS_PROCESSING, error_message=None, updated_at=now)
             return True
         return False
@@ -83,12 +91,14 @@ class InMemoryJobRepository:
         return record.copy() if record else None
 
 
-def build_job_repository(database_url: str | None, table_prefix: str) -> JobRepository:
+def build_job_repository(
+    database_url: str | None, table_prefix: str, *, lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS
+) -> JobRepository:
     if not database_url:
-        return InMemoryJobRepository()
+        return InMemoryJobRepository(lease_seconds)
     from ocr_common.jobs_sql import SqlJobRepository
 
-    return SqlJobRepository(database_url, table_prefix)
+    return SqlJobRepository(database_url, table_prefix, lease_seconds=lease_seconds)
 
 
 async def with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
@@ -183,12 +193,14 @@ class BackgroundRunner:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def drain(self, timeout: float) -> None:
+    async def drain(self, timeout: float, *, cancel_grace: float = CANCEL_GRACE_SECONDS) -> None:
         if not self._tasks:
             return
         _, pending = await asyncio.wait(self._tasks, timeout=timeout)
         for task in pending:
             task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=cancel_grace)
 
 
 class StagePipeline:
@@ -244,6 +256,12 @@ class StagePipeline:
         try:
             result = await work()
             await self.repository.complete(request_id, result)
+        except asyncio.CancelledError:
+            logger.warning("%s job %s interrupted by shutdown", self.stage, request_id)
+            await self._failed(
+                request_id, f"{self.stage} stage was interrupted by a service shutdown; submit the job again"
+            )
+            raise
         except ServiceError as exc:
             await self._failed(request_id, exc.message)
             return
@@ -252,21 +270,27 @@ class StagePipeline:
             await self._failed(request_id, f"Internal error in {self.stage} stage")
             return
 
-        await self.callback.notify(
-            request_id, self.stage, STATUS_DONE, result=callback_result(result) if callback_result else None
-        )
-        if handoff is None:
-            return
         try:
-            await handoff(result)
-        except ServiceError as exc:
-            logger.error("%s job %s: handoff to %s failed: %s", self.stage, request_id, next_stage, exc.message)
             await self.callback.notify(
-                request_id,
-                next_stage or self.stage,
-                STATUS_FAILED,
-                error_message=f"Handoff to {next_stage} failed: {exc.message}",
+                request_id, self.stage, STATUS_DONE, result=callback_result(result) if callback_result else None
             )
+            if handoff is not None:
+                await handoff(result)
+        except asyncio.CancelledError:
+            if handoff is not None:
+                await self._handoff_failed(request_id, next_stage, "interrupted by a service shutdown")
+            raise
+        except ServiceError as exc:
+            await self._handoff_failed(request_id, next_stage, exc.message)
+
+    async def _handoff_failed(self, request_id: str, next_stage: str | None, reason: str) -> None:
+        logger.error("%s job %s: handoff to %s failed: %s", self.stage, request_id, next_stage, reason)
+        await self.callback.notify(
+            request_id,
+            next_stage or self.stage,
+            STATUS_FAILED,
+            error_message=f"Handoff to {next_stage} failed: {reason}",
+        )
 
     async def _failed(self, request_id: str, error_message: str) -> None:
         try:
@@ -297,9 +321,10 @@ def build_stage_pipeline(settings: PipelineSettings, *, stage: str, table_prefix
         attempts=settings.pipeline_retry_attempts,
         delay=settings.pipeline_retry_delay_seconds,
     )
-    return StagePipeline(
-        stage=stage, repository=build_job_repository(settings.database_url, table_prefix), callback=callback
+    repository = build_job_repository(
+        settings.database_url, table_prefix, lease_seconds=settings.pipeline_job_lease_seconds
     )
+    return StagePipeline(stage=stage, repository=repository, callback=callback)
 
 
 def build_next_stage_client(

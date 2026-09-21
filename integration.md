@@ -103,7 +103,9 @@ Hasil akhir datang lewat callback SCORING.
 | `handoff` | tidak | default `true`. `false` = hanya menilai, tidak memulai apa pun; untuk debugging |
 
 `file_url` diunduh sekali di panggilan ini lalu diteruskan ke tahap OCR sebagai file,
-jadi presigned URL cukup hidup selama panggilan ini saja.
+jadi presigned URL cukup hidup selama panggilan ini saja. Host-nya harus terdaftar di
+`FILE_URL_ALLOWED_HOSTS` service (atau, kalau itu kosong, resolve ke alamat publik), dan
+redirect tidak diikuti.
 
 Dokumen lolos, dijawab **200**, pipeline sudah berjalan:
 
@@ -141,13 +143,16 @@ Error:
 
 | Kode | Arti | Pipeline jalan? |
 |---|---|---|
-| 400 | file kosong, terlalu besar, format salah, atau `file`/`file_url` dua-duanya / tidak ada | tidak |
+| 400 | file kosong, terlalu besar, format salah, `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 401 | `X-API-Key` salah | tidak |
 | 503 / 504 | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi tahap
 OCR menjawab `job.duplicate: true` dan tidak menjalankan apa pun dua kali, kecuali
-percobaan sebelumnya berstatus `FAILED`; dalam hal itu dijalankan ulang.
+percobaan sebelumnya berstatus `FAILED`, atau sudah `PROCESSING` lebih lama dari lease
+(`PIPELINE_JOB_LEASE_SECONDS`, default 5 menit: prosesnya mati di tengah jalan); dalam hal itu
+dijalankan ulang. Job yang masih jalan saat service shutdown dilaporkan `FAILED` lewat callback,
+jadi cukup dikirim ulang.
 
 ## 5. Service ekstraksi (port 8030)
 

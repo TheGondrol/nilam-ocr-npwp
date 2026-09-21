@@ -20,8 +20,13 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "OCR", "created_at": "2026-09
 
 
 def get_job_service() -> EkstraksiJobService:
+    settings = get_settings()
     return EkstraksiJobService(
-        get_pipeline(), get_ekstraksi_service(), get_next_stage(), get_settings().max_upload_bytes
+        get_pipeline(),
+        get_ekstraksi_service(),
+        get_next_stage(),
+        settings.max_upload_bytes,
+        url_policy=settings.file_url_policy,
     )
 
 
@@ -56,7 +61,8 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
         "`file_url` is downloaded in the background, so make a presigned URL live longer than the worst queueing "
         "time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.\n\n"
         "**Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run OCR "
-        "twice, unless the earlier attempt `FAILED`, in which case it is run again."
+        "twice, unless the earlier attempt `FAILED` or has been `PROCESSING` for longer than the job lease "
+        "(`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default), in which case it is run again."
     ),
     responses={
         202: success_examples(

@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, MetaData, String, Table, select, update
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, MetaData, String, Table, and_, or_, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS
 from ocr_common.database import JSON_TYPE, get_engine
 from ocr_common.jobs import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRecord
 
@@ -43,9 +44,10 @@ def _iso(value: datetime) -> str:
 class SqlJobRepository:
     name = "postgres"
 
-    def __init__(self, database_url: str, table_prefix: str):
+    def __init__(self, database_url: str, table_prefix: str, *, lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS):
         self._url = database_url
         self._table_prefix = table_prefix
+        self._lease = timedelta(seconds=lease_seconds)
         self.metadata, self._jobs, self._results = build_tables(table_prefix)
 
     @property
@@ -76,7 +78,13 @@ class SqlJobRepository:
                 return True
             retried = await conn.execute(
                 update(jobs)
-                .where(jobs.c.request_id == request_id, jobs.c.status == STATUS_FAILED)
+                .where(
+                    jobs.c.request_id == request_id,
+                    or_(
+                        jobs.c.status == STATUS_FAILED,
+                        and_(jobs.c.status == STATUS_PROCESSING, jobs.c.updated_at < now - self._lease),
+                    ),
+                )
                 .values(status=STATUS_PROCESSING, error_message=None, attempts=jobs.c.attempts + 1, updated_at=now)
             )
             return retried.rowcount == 1

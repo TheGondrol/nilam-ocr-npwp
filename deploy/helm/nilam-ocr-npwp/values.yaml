@@ -25,7 +25,10 @@ orchestration:
   callbackPath: /v1/callbacks/stage
   timeoutSeconds: "10"
 
-commonEnv: {}
+commonEnv:
+  # Host yang boleh dipakai file_url (presigned MinIO), dipisah koma; ".example.internal" = semua subdomain.
+  # Kosong = hanya host yang resolve ke alamat publik, jadi MinIO di jaringan internal ditolak: isi sebelum deploy.
+  FILE_URL_ALLOWED_HOSTS: ""
 
 services:
   guardrails:
