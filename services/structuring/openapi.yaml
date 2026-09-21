@@ -143,8 +143,8 @@ paths:
       description: '**Step 3 of the pipeline, asynchronous. Called by the OCR service, not by the orchestrator.**
 
 
-        Records the job (`structuring.jobs`, idempotent per request_id), answers **202 immediately**,
-        then in the background: turns the OCR lines into named fields, stores the result (`structuring.results`),
+        Records the job (`structuring_jobs`, idempotent per request_id), answers **202 immediately**,
+        then in the background: turns the OCR lines into named fields, stores the result (`structuring_results`),
         POSTs the `STRUCTURING` callback, and hands the job (guardrails + OCR + structuring results) to
         the scoring service.
 
@@ -910,7 +910,7 @@ components:
       required:
       - blocks
       title: OcrPayload
-      description: Result of the OCR stage (`ocr.results`), forwarded to structuring and scoring.
+      description: Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring.
     ReadyResponse:
       properties:
         status:

@@ -9,12 +9,12 @@ from ocr_common.jobs import (
 )
 from src.core.config import get_settings
 
-DB_SCHEMA = "structuring"
+DB_TABLE_PREFIX = "structuring"
 
 
 @lru_cache
 def get_pipeline() -> StagePipeline:
-    return build_stage_pipeline(get_settings(), stage=STAGE_STRUCTURING, schema=DB_SCHEMA)
+    return build_stage_pipeline(get_settings(), stage=STAGE_STRUCTURING, table_prefix=DB_TABLE_PREFIX)
 
 
 @lru_cache

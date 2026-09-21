@@ -46,9 +46,9 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
     description=(
         "**Step 2 of the pipeline, asynchronous: the entry point of the OCR -> structuring -> scoring chain.** "
         "Call it after `POST /v1/guardrails/check` answered `passed: true`.\n\n"
-        "Records the job (`ocr.jobs`, idempotent per request_id), answers **202 immediately**, then in the "
+        "Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in the "
         "background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result "
-        "(`ocr.results`), POSTs the `OCR` callback, and hands the job to the structuring service, which hands it "
+        "(`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which hands it "
         "to scoring. The caller does nothing more: it receives one callback per stage, and the final result in "
         "the `SCORING` callback (see *Webhooks*).\n\n"
         "**Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most 5 MB. "

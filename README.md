@@ -55,7 +55,7 @@ nilam-ocr-npwp/
 ├── services/
 │   ├── ekstraksi/                    # port 8030 (slot ocr-npwp)
 │   │   ├── Dockerfile · requirements.txt · .env.example · openapi.yaml · pyproject.toml
-│   │   ├── db/schema.sql             # schema ocr (jobs, results) + tabel ocr_npwp_requests (kontrak lama)
+│   │   ├── db/schema.sql             # tabel ocr_jobs, ocr_results + ocr_npwp_requests (kontrak lama)
 │   │   ├── src/
 │   │   │   ├── main.py               # create_app(...) + lifespan
 │   │   │   ├── api/v1/jobs.py        # pipeline async: POST/GET /v1/ekstraksi/jobs
@@ -78,7 +78,7 @@ nilam-ocr-npwp/
 │   └── scoring/                      # port 8033: sama (tanpa handoff; tahap terakhir)
 ├── deploy/k8s/                       # manifest GKE (Kustomize): base + overlays dev / staging / production
 ├── docker-compose.yml                # 4 image, 4 container, satu network
-├── docker-compose.db.yml             # overlay PostgreSQL lokal: satu database, schema ocr / structuring / scoring
+├── docker-compose.db.yml             # overlay PostgreSQL lokal: satu database, semua tabel di schema public
 ├── scripts/smoke_e2e.py              # memerankan Orkestrasi: guardrails -> jobs -> callback, lewat container
 ├── Makefile · pyproject.toml (ruff) · requirements-dev.txt
 ```
@@ -98,18 +98,18 @@ Orkestrasi ─► guardrails:8031 POST /v1/guardrails/check (binary)      SINKRO
 
 Orkestrasi ─► ekstraksi:8030 POST /v1/ekstraksi/jobs                   202 segera
                 (request_id, document_type, guardrails, file | file_url)
-   ekstraksi:   INSERT ocr.jobs (PROCESSING) ON CONFLICT DO NOTHING
+   ekstraksi:   INSERT ocr_jobs (PROCESSING) ON CONFLICT DO NOTHING
                 file_url? unduh dari MinIO : pakai file dari payload
                 OCR (paddle / mock)
-                UPSERT ocr.results + UPDATE ocr.jobs DONE
+                UPSERT ocr_results + UPDATE ocr_jobs DONE
                 ─► Orkestrasi  POST callback {request_id, stage: OCR, status: DONE}
                 ─► structuring:8032 POST /v1/structuring/jobs          202 segera
                      (request_id, document_type, guardrails, ocr)
-   structuring: INSERT structuring.jobs … regex/LLM … UPSERT structuring.results + DONE
+   structuring: INSERT structuring_jobs … regex/LLM … UPSERT structuring_results + DONE
                 ─► Orkestrasi  POST callback {stage: STRUCTURING, status: DONE}
                 ─► scoring:8033 POST /v1/scoring/jobs                  202 segera
                      (request_id, document_type, guardrails, ocr, structuring)
-   scoring:     INSERT scoring.jobs … skor … UPSERT scoring.results + DONE
+   scoring:     INSERT scoring_jobs … skor … UPSERT scoring_results + DONE
                 ─► Orkestrasi  POST callback {stage: SCORING, status: DONE, result: <hasil akhir>}
 
 Client ─► Orkestrasi: GET status by request_id (polling orkestrasi.requests + stage_logs)

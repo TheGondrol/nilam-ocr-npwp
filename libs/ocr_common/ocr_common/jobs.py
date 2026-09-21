@@ -83,12 +83,12 @@ class InMemoryJobRepository:
         return record.copy() if record else None
 
 
-def build_job_repository(database_url: str | None, schema: str) -> JobRepository:
+def build_job_repository(database_url: str | None, table_prefix: str) -> JobRepository:
     if not database_url:
         return InMemoryJobRepository()
     from ocr_common.jobs_sql import SqlJobRepository
 
-    return SqlJobRepository(database_url, schema)
+    return SqlJobRepository(database_url, table_prefix)
 
 
 async def _with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
@@ -282,7 +282,7 @@ def _remote(base_url: str, api_key: str, timeout: float, name: str) -> RemoteMod
     )
 
 
-def build_stage_pipeline(settings: PipelineSettings, *, stage: str, schema: str) -> StagePipeline:
+def build_stage_pipeline(settings: PipelineSettings, *, stage: str, table_prefix: str) -> StagePipeline:
     client = None
     if settings.orchestration_url:
         client = _remote(
@@ -297,7 +297,9 @@ def build_stage_pipeline(settings: PipelineSettings, *, stage: str, schema: str)
         attempts=settings.pipeline_retry_attempts,
         delay=settings.pipeline_retry_delay_seconds,
     )
-    return StagePipeline(stage=stage, repository=build_job_repository(settings.database_url, schema), callback=callback)
+    return StagePipeline(
+        stage=stage, repository=build_job_repository(settings.database_url, table_prefix), callback=callback
+    )
 
 
 def build_next_stage_client(

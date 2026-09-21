@@ -9,10 +9,10 @@ from ocr_common.database import JSON_TYPE, get_engine
 from ocr_common.jobs import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRecord
 
 
-def build_tables(schema: str) -> tuple[MetaData, Table, Table]:
-    metadata = MetaData(schema=schema)
+def build_tables(table_prefix: str) -> tuple[MetaData, Table, Table]:
+    metadata = MetaData()
     jobs = Table(
-        "jobs",
+        f"{table_prefix}_jobs",
         metadata,
         Column("request_id", String, primary_key=True),
         Column("status", String, nullable=False),
@@ -23,7 +23,7 @@ def build_tables(schema: str) -> tuple[MetaData, Table, Table]:
         Column("ds", String, nullable=False),
     )
     results = Table(
-        "results",
+        f"{table_prefix}_results",
         metadata,
         Column("request_id", String, ForeignKey(jobs.c.request_id), primary_key=True),
         Column("result", JSON_TYPE, nullable=False),
@@ -43,17 +43,14 @@ def _iso(value: datetime) -> str:
 class SqlJobRepository:
     name = "postgres"
 
-    def __init__(self, database_url: str, schema: str):
+    def __init__(self, database_url: str, table_prefix: str):
         self._url = database_url
-        self._schema = schema
-        self.metadata, self._jobs, self._results = build_tables(schema)
+        self._table_prefix = table_prefix
+        self.metadata, self._jobs, self._results = build_tables(table_prefix)
 
     @property
     def engine(self) -> AsyncEngine:
-        engine = get_engine(self._url)
-        if engine.dialect.name != "postgresql":
-            return engine.execution_options(schema_translate_map={self._schema: None})
-        return engine
+        return get_engine(self._url)
 
     def _insert(self, table: Table):
         dialect = postgresql if get_engine(self._url).dialect.name == "postgresql" else sqlite

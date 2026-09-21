@@ -146,9 +146,9 @@ paths:
         -> scoring chain.** Call it after `POST /v1/guardrails/check` answered `passed: true`.
 
 
-        Records the job (`ocr.jobs`, idempotent per request_id), answers **202 immediately**, then in
+        Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in
         the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result
-        (`ocr.results`), POSTs the `OCR` callback, and hands the job to the structuring service, which
+        (`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which
         hands it to scoring. The caller does nothing more: it receives one callback per stage, and the
         final result in the `SCORING` callback (see *Webhooks*).
 

@@ -71,7 +71,7 @@ class OcrBlockPayload(_Forwarded):
 class OcrPayload(_Forwarded):
     model_config = ConfigDict(
         json_schema_extra={
-            "description": "Result of the OCR stage (`ocr.results`), forwarded to structuring and scoring."
+            "description": "Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring."
         }
     )
 
@@ -108,7 +108,7 @@ class StructuredFieldPayload(_Forwarded):
 class StructuringPayload(_Forwarded):
     model_config = ConfigDict(
         json_schema_extra={
-            "description": "Result of the structuring stage (`structuring.results`), forwarded to scoring."
+            "description": "Result of the structuring stage (`structuring_results`), forwarded to scoring."
         }
     )
 

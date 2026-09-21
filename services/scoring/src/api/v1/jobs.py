@@ -27,9 +27,9 @@ def get_job_service() -> ScoringJobService:
     description=(
         "**Step 4 of the pipeline, asynchronous, the last stage. Called by the structuring service, not by the "
         "orchestrator.**\n\n"
-        "Records the job (`scoring.jobs`, idempotent per request_id), answers **202 immediately**, then in the "
+        "Records the job (`scoring_jobs`, idempotent per request_id), answers **202 immediately**, then in the "
         "background: builds the ML team's scoring payload from the chained guardrails + OCR + structuring results, "
-        "runs the trust model, stores the result (`scoring.results`), and POSTs the `SCORING` callback, which "
+        "runs the trust model, stores the result (`scoring_results`), and POSTs the `SCORING` callback, which "
         "carries the **final result** of the request.\n\n"
         "The outcome is two per-field confidences. There is no document-level score and no approve / reject "
         "decision: thresholds belong to the orchestrator."
