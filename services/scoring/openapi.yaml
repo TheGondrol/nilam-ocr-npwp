@@ -1,0 +1,1686 @@
+openapi: 3.1.0
+info:
+  title: OCR NPWP Scoring API
+  description: 'Pipeline step 4 (last) for Indonesian NPWP documents: combines per-field confidence and
+    format validation into one document score plus an approve/review/reject decision. **Async pipeline:**
+    the structuring service POSTs /v1/scoring/jobs and gets 202; this service scores in the background,
+    stores the result, and POSTs the stage callback carrying the final result to the orchestrator. /v1/scoring/score
+    is the same work, synchronous. All endpoints except /health require an X-API-Key header.
+
+
+    ## Conventions (the same for every nilam-ocr service)
+
+
+    **Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+
+    A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
+
+
+    **Envelope.** Every JSON response, success or error, has the same shape:
+
+    `{status_code, status_desc, message, data, errors, request_id}`. `status_code` always equals the HTTP
+
+    status. On success `errors` is null; on error `data` is null.
+
+
+    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+
+    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+
+    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+
+    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+
+    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+
+
+    **request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has
+    no
+
+    request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+
+    without it the service generates one.
+
+
+    **Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
+
+    background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
+
+    read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
+
+    `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED`. Because
+
+    the request was already answered `202`, a problem with the document itself (unreadable file, no text,
+
+    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.
+
+    '
+  version: 1.0.0
+servers:
+- url: /
+  description: This host (where this page is served)
+- url: http://scoring.nilam-ocr-{environment}.svc.cluster.local:8033
+  description: GKE, from another namespace (e.g. the orchestrator / gateway)
+  variables:
+    environment:
+      enum:
+      - dev
+      - staging
+      - production
+      default: dev
+      description: 'One namespace per environment: nilam-ocr-<environment>'
+- url: http://scoring:8033
+  description: GKE from the same namespace, or the Docker Compose network
+- url: http://127.0.0.1:8033
+  description: Local development
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Liveness probe
+      description: Says the process is alive and which implementations are active. Never touches a dependency.
+        Does not require an API key.
+      operationId: getHealth
+      responses:
+        '200':
+          description: The process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy
+                  value:
+                    status: healthy
+                    version: 1.0.0
+                    device: cpu
+                    backends:
+                      scoring: trust_model
+                      legacy_score: heuristic
+                      storage: postgres
+  /ready:
+    get:
+      tags:
+      - Health
+      summary: Readiness probe
+      description: 'Liveness vs readiness: /health only says the process is alive and never touches a
+        dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
+        pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
+        otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
+        services are deliberately not checked: their outage is reported per job, not by refusing traffic.
+        Does not require an API key.'
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Every required dependency answers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              examples:
+                ready:
+                  summary: Ready
+                  value:
+                    status: ready
+                    checks:
+                      database: ok
+        '503':
+          description: A required dependency is unavailable; the pod is taken out of the Service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: not_ready
+                checks:
+                  database: failed
+  /v1/scoring/jobs:
+    post:
+      tags:
+      - Pipeline
+      summary: Hand a structured document to the scoring stage (last)
+      description: '**Step 4 of the pipeline, asynchronous, the last stage. Called by the structuring
+        service, not by the orchestrator.**
+
+
+        Records the job (`scoring.jobs`, idempotent per request_id), answers **202 immediately**, then
+        in the background: builds the ML team''s scoring payload from the chained guardrails + OCR + structuring
+        results, runs the trust model, stores the result (`scoring.results`), and POSTs the `SCORING`
+        callback, which carries the **final result** of the request.
+
+
+        The outcome is two per-field confidences. There is no document-level score and no approve / reject
+        decision: thresholds belong to the orchestrator.'
+      operationId: submitScoringJob
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringJobRequest'
+        required: true
+      responses:
+        '202':
+          description: The job was accepted (or already existed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAcceptedResponse'
+              examples:
+                accepted:
+                  summary: New job
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: SCORING
+                      status: PROCESSING
+                      duplicate: false
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                duplicate:
+                  summary: 'Same request_id sent again: nothing is re-run'
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: Accepted
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: SCORING
+                      status: DONE
+                      duplicate: true
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.structuring: Field required'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/scoring/jobs/{request_id}:
+    get:
+      tags:
+      - Pipeline
+      summary: Status and result of the scoring stage
+      description: Status of this stage only and, once `DONE`, the two confidences plus the exact payload
+        that was scored. The orchestrator normally receives the final result in the `SCORING` callback;
+        use this to reconcile after a missed callback, or to audit a score.
+      operationId: getScoringJob
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Request Id
+      responses:
+        '200':
+          description: The job exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringJobStatusResponse'
+              examples:
+                done:
+                  summary: Finished
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: SCORING
+                      created_at: '2026-09-18T04:00:01+00:00'
+                      status: DONE
+                      result:
+                        npwp_confidence: 0.9806
+                        name_confidence: 0.9948
+                        payload:
+                          npwp: '123456789012345'
+                          npwp_score: 0.9992
+                          npwp_has_homoglyph: false
+                          npwp_candidate_count: 1
+                          name: BUDI SANTOSO
+                          name_score: 0.9773
+                          name_corrected: false
+                          n_boxes: 6
+                          num_pages: 1
+                          avg_doc_score: 0.984883
+                          min_doc_score: 0.9747
+                          guardrail_probability: 0.9821
+                      updated_at: '2026-09-18T04:00:01+00:00'
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                failed:
+                  summary: Failed
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      stage: SCORING
+                      created_at: '2026-09-18T04:00:01+00:00'
+                      status: FAILED
+                      error_message: 'Unsupported document_type: ktp. Supported: [''npwp'']'
+                      updated_at: '2026-09-18T04:00:01+00:00'
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No scoring job for this request_id
+          content:
+            application/json:
+              example:
+                status_code: 404
+                status_desc: Not Found
+                message: 'No SCORING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
+                errors: 'No SCORING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
+                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'path.request_id: Field required'
+                errors: VALIDATION_ERROR
+                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/scoring/confidence:
+    post:
+      tags:
+      - Scoring
+      summary: Per-field confidence from the trust model, synchronous (no job, no callback)
+      description: 'The ML team''s scoring contract: the payload carries the chained results of the previous
+        stages, the answer is the probability that each extracted field is correct (`npwp_confidence`,
+        `name_confidence`), from `weights/trust_model.joblib` (imputer -> scaler -> logistic regression,
+        one feature row per field). There is no document score and no approve/reject decision here; thresholds
+        are the caller''s. A field whose value is null gets a null confidence. Any other null is treated
+        as missing and filled by the model''s own median imputer.'
+      operationId: predictConfidence
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfidenceRequest'
+        required: true
+      responses:
+        '200':
+          description: Probability that each extracted field is correct
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfidenceResponse'
+              examples:
+                both:
+                  summary: Both fields present
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      npwp_confidence: 0.9806
+                      name_confidence: 0.9948
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                corrected_name:
+                  summary: '`name_corrected: true`: the model was trained on data where a corrected field
+                    is almost always wrong'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      npwp_confidence: 0.9737
+                      name_confidence: 0.001
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                no_name:
+                  summary: '`name` is null: a field that was not found has no confidence'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      npwp_confidence: 0.9737
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.npwp_score: Input should be a valid number'
+                errors: VALIDATION_ERROR
+      security:
+      - APIKeyHeader: []
+  /v1/scoring/score:
+    post:
+      tags:
+      - Scoring
+      summary: 'Legacy: heuristic document score (used only by the legacy extract-ocr contract)'
+      description: Combines per-field confidence and format validation into one document score (the `guardrails`
+        value of extract-ocr), then applies the configured thresholds to decide approve / review / reject.
+      operationId: scoreDocument
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreRequest'
+        required: true
+      responses:
+        '200':
+          description: The document was scored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreResponse'
+              examples:
+                approve:
+                  summary: 'A person''s card: `nama_badan` is optional, so missing it does not lower the
+                    score'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      score: 0.9904
+                      decision: approve
+                      field_scores:
+                      - name: nomor_npwp
+                        score: 0.9992
+                        issues: []
+                      - name: nama
+                        score: 0.9773
+                        issues: []
+                      - name: nama_badan
+                        score: 0.0
+                        issues:
+                        - missing
+                      reasons: []
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '400':
+          description: Unsupported document_type or no fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: No fields to score
+                errors: No fields to score
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.fields: Field required'
+                errors: VALIDATION_ERROR
+      deprecated: true
+      security:
+      - APIKeyHeader: []
+webhooks:
+  stageCallback:
+    post:
+      tags:
+      - Callbacks
+      summary: Stage status callback (implemented by the orchestrator / gateway)
+      description: '**This is a request this service SENDS, not one it accepts.** The orchestrator must
+        expose it.
+
+
+        `POST {ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}` (default path `/v1/callbacks/stage`),
+        `Content-Type: application/json`.
+
+
+        **When.** Once per job of `POST /v1/scoring/jobs`, the last callback of a request: `stage: SCORING`
+        with `status: DONE` and `result` = the **final result** (fields, per-field confidences, and the
+        guardrails result that was submitted), or `status: FAILED` with `error_message` and `result: null`.
+
+
+        **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
+        retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
+        that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
+        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own.
+
+
+        **What the receiver must tolerate.** The same callback may arrive more than once (treat it as
+        idempotent), and callbacks of different stages come from different services, so they may arrive
+        out of order: only ever move a request''s status forward. Reject callbacks whose `X-API-Key` is
+        wrong.'
+      operationId: stageCallback
+      parameters:
+      - description: '`ORCHESTRATION_API_KEY` of the sending service; when unset, that service''s own
+          `API_KEY`'
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+          description: '`ORCHESTRATION_API_KEY` of the sending service; when unset, that service''s own
+            `API_KEY`'
+        name: x-api-key
+        in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringStageCallback'
+        required: true
+      responses:
+        '200':
+          description: Acknowledged. Any 2xx is accepted and the body is ignored.
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    BoundingBoxPayload:
+      properties:
+        x1:
+          type: number
+          title: X1
+          description: Left edge, pixels
+          examples:
+          - 271
+        y1:
+          type: number
+          title: Y1
+          description: Top edge, pixels
+          examples:
+          - 358
+        x2:
+          type: number
+          title: X2
+          description: Right edge, pixels
+          examples:
+          - 1347
+        y2:
+          type: number
+          title: Y2
+          description: Bottom edge, pixels
+          examples:
+          - 511
+      additionalProperties: true
+      type: object
+      required:
+      - x1
+      - y1
+      - x2
+      - y2
+      title: BoundingBoxPayload
+    ConfidenceRequest:
+      properties:
+        npwp:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Npwp
+          description: Extracted NPWP number, digits only; null when not found
+          examples:
+          - '123456789012000'
+        npwp_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Score
+          description: OCR score of the line the number came from
+          examples:
+          - 0.98
+        npwp_has_homoglyph:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Npwp Has Homoglyph
+          description: An OCR letter/digit mix-up in the number (O->0, S->5, ...) was corrected
+          examples:
+          - false
+        npwp_candidate_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Candidate Count
+          description: NPWP-shaped numbers found in the document (a card may print a 15- and a 16-digit
+            one)
+          examples:
+          - 1
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: Extracted person or company name; null when not found
+          examples:
+          - PT CONTOH INDONESIA
+        name_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Score
+          description: OCR score of the line the name came from
+          examples:
+          - 0.96
+        name_corrected:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Name Corrected
+          description: The name-master correction changed the name
+          examples:
+          - false
+        n_boxes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Boxes
+          description: OCR text lines in the whole document
+          examples:
+          - 34
+        num_pages:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Num Pages
+          description: Pages in the document
+          examples:
+          - 1
+        avg_doc_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Avg Doc Score
+          description: Mean OCR score over all lines
+          examples:
+          - 0.912
+        min_doc_score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Min Doc Score
+          description: Lowest OCR score over all lines
+          examples:
+          - 0.62
+        flag:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Flag
+          description: Document flag defined by the ML team; no pipeline stage produces it yet, so it
+            is sent as null
+          examples:
+          - false
+        guardrail_probability:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Guardrail Probability
+          description: '`document.confidence` of the guardrails result'
+          examples:
+          - 0.9821
+      type: object
+      title: ConfidenceRequest
+    ConfidenceResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/FieldConfidences'
+      type: object
+      required:
+      - data
+      title: ConfidenceResponse
+    ErrorResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          examples:
+          - 400
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          examples:
+          - Bad Request
+        message:
+          type: string
+          title: Message
+          description: Human-readable cause; safe to log
+          examples:
+          - Uploaded file is empty
+        data:
+          type: 'null'
+          title: Data
+          description: Always null on error
+        errors:
+          type: string
+          title: Errors
+          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
+            names a different field every time); for every other status it repeats `message`
+          examples:
+          - Uploaded file is empty
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Present when the error is tied to a known request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      - errors
+      title: ErrorResponse
+    FieldConfidences:
+      properties:
+        npwp_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Confidence
+          description: P(the NPWP number is correct); null when no number was found
+          examples:
+          - 0.7296
+        name_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Confidence
+          description: P(the name is correct); null when no name was found
+          examples:
+          - 0.9471
+      type: object
+      required:
+      - npwp_confidence
+      - name_confidence
+      title: FieldConfidences
+      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
+    FieldScore:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Field name
+          examples:
+          - nomor_npwp
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+          description: OCR confidence, or 0 when missing / badly formatted
+          examples:
+          - 0.96
+        issues:
+          items:
+            type: string
+          type: array
+          title: Issues
+          description: '`missing`, or `invalid format: ...`'
+          examples:
+          - []
+      type: object
+      required:
+      - name
+      - score
+      title: FieldScore
+    FieldValue:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: null when the field was not found
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: OCR score of the line the value came from
+          default: 1.0
+          examples:
+          - 0.96
+      type: object
+      title: FieldValue
+    FinalField:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: null when the field was not found
+          examples:
+          - '3201234567890001'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: OCR score of the line the value came from
+          examples:
+          - 0.9762
+      type: object
+      required:
+      - confidence
+      title: FinalField
+    FinalResult:
+      properties:
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type the fields were read as
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/FinalField'
+          type: object
+          title: Fields
+          description: '`nomor_npwp`, `nama`, `nama_badan`. A 15-digit number is formatted `XX.XXX.XXX.X-XXX.XXX`;
+            a 16-digit (NIK-based) number is 16 plain digits. A card printing both reports the 16-digit
+            one'
+          examples:
+          - nama:
+              confidence: 0.9931
+              value: BUDI SANTOSO
+            nama_badan:
+              confidence: 0.0
+            nomor_npwp:
+              confidence: 0.9762
+              value: '3201234567890001'
+        scoring:
+          $ref: '#/components/schemas/FieldConfidences'
+          description: 'Per-field trust. There is NO document-level score and NO approve / reject decision:
+            thresholds belong to the caller'
+        guardrails:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsResult'
+          - type: 'null'
+          description: The guardrails result that was submitted with the job, returned unchanged
+      type: object
+      required:
+      - document_type
+      - fields
+      - scoring
+      title: FinalResult
+      description: What the pipeline produced for one request_id. Carried by the SCORING / DONE callback.
+    GuardrailsDocument:
+      properties:
+        verdict:
+          anyOf:
+          - type: string
+            enum:
+            - accepted
+            - reject
+          - type: 'null'
+          title: Verdict
+          description: Document verdict
+          examples:
+          - accepted
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+          description: 'Confidence in the verdict: accepted -> lowest `proba_approve` over the pages.
+            Sent to the scoring model as `guardrail_probability`'
+          examples:
+          - 0.9821
+        n_pages:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Pages
+          description: Pages that were checked
+          examples:
+          - 1
+        n_approve:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Approve
+          description: Pages with verdict `accepted`
+          examples:
+          - 1
+        n_reject:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: N Reject
+          description: Pages with verdict `rejected`
+          examples:
+          - 0
+      additionalProperties: true
+      type: object
+      title: GuardrailsDocument
+    GuardrailsPage:
+      properties:
+        page_index:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Page Index
+          description: 0-based page number
+          examples:
+          - 0
+        proba_approve:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Proba Approve
+          description: Probability that this page is an acceptable document
+          examples:
+          - 0.9821
+        proba_reject:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Proba Reject
+          description: 1 - `proba_approve`
+          examples:
+          - 0.0179
+        verdict:
+          anyOf:
+          - type: string
+            enum:
+            - accepted
+            - reject
+          - type: 'null'
+          title: Verdict
+          description: Verdict for this page alone
+          examples:
+          - accepted
+      additionalProperties: true
+      type: object
+      title: GuardrailsPage
+    GuardrailsResult:
+      properties:
+        passed:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Passed
+          description: 'true: the document may proceed to OCR'
+          examples:
+          - true
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+          description: Why it was rejected; null when passed
+          examples:
+          - null
+        document:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsDocument'
+          - type: 'null'
+          description: Verdict for the document as a whole
+        pages:
+          items:
+            $ref: '#/components/schemas/GuardrailsPage'
+          type: array
+          title: Pages
+          description: One entry per page, in page order
+      additionalProperties: true
+      type: object
+      title: GuardrailsResult
+      description: '`data` of POST /v1/guardrails/check, forwarded unchanged down the pipeline.'
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: Always `healthy` while the process is alive
+          examples:
+          - healthy
+        version:
+          type: string
+          title: Version
+          description: Service version
+          examples:
+          - 1.0.0
+        device:
+          type: string
+          title: Device
+          description: Where this service computes
+          examples:
+          - cpu
+        backends:
+          additionalProperties:
+            type: string
+          type: object
+          title: Backends
+          description: Active implementation per concern (model backend, storage). Useful to confirm a
+            deployment
+          examples:
+          - ekstraksi: paddle
+            storage: postgres
+      type: object
+      required:
+      - status
+      - version
+      - device
+      - backends
+      title: HealthResponse
+    JobAccepted:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: Echo of the submitted request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: Pipeline stage that accepted the job
+          examples:
+          - OCR
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          description: '`PROCESSING` for a newly accepted job. When `duplicate` is true: the current status
+            of the job that already exists for this request_id'
+          examples:
+          - PROCESSING
+        duplicate:
+          type: boolean
+          title: Duplicate
+          description: 'true: this request_id was already accepted before and the work is NOT run again
+            (idempotent). Exception: a job whose status is `FAILED` is re-claimed and run again, and answers
+            `duplicate: false`'
+          default: false
+          examples:
+          - false
+      type: object
+      required:
+      - request_id
+      - stage
+      - status
+      title: JobAccepted
+    JobAcceptedResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 202
+          examples:
+          - 202
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: Accepted
+          examples:
+          - Accepted
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Accepted
+          examples:
+          - Accepted
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/JobAccepted'
+      type: object
+      required:
+      - data
+      title: JobAcceptedResponse
+    OcrBlockPayload:
+      properties:
+        text:
+          type: string
+          title: Text
+          description: One OCR text line
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: Recognition score of this line
+          default: 1.0
+          examples:
+          - 0.9999
+        bbox:
+          anyOf:
+          - $ref: '#/components/schemas/BoundingBoxPayload'
+          - type: 'null'
+          description: Upright box around the line, in pixels of the ORIENTATION-CORRECTED image the OCR
+            model worked on (not of the uploaded photo). Structuring finds the name by its distance to
+            the NPWP number
+        page:
+          type: integer
+          minimum: 0.0
+          title: Page
+          description: 0-based page number
+          default: 0
+          examples:
+          - 0
+      additionalProperties: true
+      type: object
+      required:
+      - text
+      title: OcrBlockPayload
+    OcrPayload:
+      properties:
+        engine:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Engine
+          description: OCR backend that produced the blocks
+          examples:
+          - paddle
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Model identity reported by the OCR model service
+          examples:
+          - PP-OCRv6_medium_det+PP-OCRv6_medium_rec
+        elapsed_ms:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Elapsed Ms
+          description: Time spent in the OCR model
+          examples:
+          - 412.5
+        full_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Full Text
+          description: All blocks joined by newline
+        blocks:
+          items:
+            $ref: '#/components/schemas/OcrBlockPayload'
+          type: array
+          title: Blocks
+          description: Text lines in reading order (top to bottom)
+      additionalProperties: true
+      type: object
+      required:
+      - blocks
+      title: OcrPayload
+      description: Result of the OCR stage (`ocr.results`), forwarded to structuring and scoring.
+    ReadyResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - not_ready
+          title: Status
+          description: '`ready` (HTTP 200) when every check is `ok`, else `not_ready` (HTTP 503)'
+          examples:
+          - ready
+        checks:
+          additionalProperties:
+            type: string
+            enum:
+            - ok
+            - failed
+          type: object
+          title: Checks
+          description: One entry per REQUIRED dependency of this service; empty when it has none
+          examples:
+          - database: ok
+      type: object
+      required:
+      - status
+      - checks
+      title: ReadyResponse
+    ScoreReport:
+      properties:
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+          description: Weighted mean of the field scores
+          examples:
+          - 0.91
+        decision:
+          type: string
+          enum:
+          - approve
+          - review
+          - reject
+          title: Decision
+          description: '`score` against the configured thresholds (0.8 / 0.5 by default)'
+          examples:
+          - approve
+        field_scores:
+          items:
+            $ref: '#/components/schemas/FieldScore'
+          type: array
+          title: Field Scores
+          description: One entry per scored field
+        reasons:
+          items:
+            type: string
+          type: array
+          title: Reasons
+          description: Why a required field lowered the score
+          examples:
+          - []
+      type: object
+      required:
+      - score
+      - decision
+      - field_scores
+      title: ScoreReport
+    ScoreRequest:
+      properties:
+        document_type:
+          type: string
+          title: Document Type
+          description: Only `npwp` is supported
+          default: npwp
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/FieldValue'
+          type: object
+          title: Fields
+          description: Structured fields (`data.fields` of the structuring service)
+          examples:
+          - nomor_npwp:
+              confidence: 0.96
+              value: 12.345.678.9-012.345
+      type: object
+      required:
+      - fields
+      title: ScoreRequest
+    ScoreResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/ScoreReport'
+      type: object
+      required:
+      - data
+      title: ScoreResponse
+    ScoringJobRequest:
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          title: Request Id
+          description: request_id of the pipeline run
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Only `npwp` is supported; anything else fails the job
+          default: npwp
+          examples:
+          - npwp
+        guardrails:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsResult'
+          - type: 'null'
+          description: Guardrails result submitted with the OCR job; returned unchanged in the final result
+        ocr:
+          anyOf:
+          - $ref: '#/components/schemas/OcrPayload'
+          - type: 'null'
+          description: Result of the OCR stage; `n_boxes`, `num_pages`, `avg/min_doc_score` are computed
+            from `blocks`
+        structuring:
+          $ref: '#/components/schemas/StructuringPayload'
+          description: Result of the structuring stage
+      type: object
+      required:
+      - request_id
+      - structuring
+      title: ScoringJobRequest
+    ScoringJobResult:
+      properties:
+        npwp_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Npwp Confidence
+          description: P(the NPWP number is correct); null when no number was found
+          examples:
+          - 0.7296
+        name_confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Name Confidence
+          description: P(the name is correct); null when no name was found
+          examples:
+          - 0.9471
+        payload:
+          $ref: '#/components/schemas/ConfidenceRequest'
+          description: 'Exactly what was scored, built from the chained results: an audit trail for the
+            two numbers'
+      type: object
+      required:
+      - npwp_confidence
+      - name_confidence
+      - payload
+      title: ScoringJobResult
+      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
+    ScoringJobStatus:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id of the pipeline run
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          const: SCORING
+          title: Stage
+          description: Always `SCORING` on this service
+          default: SCORING
+          examples:
+          - SCORING
+        status:
+          type: string
+          enum:
+          - PROCESSING
+          - DONE
+          - FAILED
+          title: Status
+          description: '`PROCESSING` -> `DONE` | `FAILED`. A `FAILED` job may go back to `PROCESSING`
+            when resubmitted'
+          examples:
+          - DONE
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Why the stage failed; null unless `status` is `FAILED`. Same text as the FAILED
+            callback
+          examples:
+          - null
+        created_at:
+          type: string
+          title: Created At
+          description: When the job was first accepted (ISO 8601, UTC)
+          examples:
+          - '2026-09-18T04:00:00+00:00'
+        updated_at:
+          type: string
+          title: Updated At
+          description: Last status change (ISO 8601, UTC)
+          examples:
+          - '2026-09-18T04:00:01+00:00'
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/ScoringJobResult'
+          - type: 'null'
+          description: Confidences once `status` is `DONE`; null otherwise
+      type: object
+      required:
+      - request_id
+      - status
+      - created_at
+      - updated_at
+      title: ScoringJobStatus
+    ScoringJobStatusResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/ScoringJobStatus'
+      type: object
+      required:
+      - data
+      title: ScoringJobStatusResponse
+    ScoringStageCallback:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        stage:
+          type: string
+          const: SCORING
+          title: Stage
+          description: 'Always `SCORING`: the last stage'
+          default: SCORING
+          examples:
+          - SCORING
+        status:
+          type: string
+          enum:
+          - DONE
+          - FAILED
+          title: Status
+          description: Outcome of the stage. `FAILED` of any stage ends the request
+          examples:
+          - DONE
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/FinalResult'
+          - type: 'null'
+          description: The final result of the request when `status` is `DONE`; null when `FAILED`
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+          description: Why it failed; null when `status` is `DONE`
+          examples:
+          - null
+      type: object
+      required:
+      - request_id
+      - status
+      title: ScoringStageCallback
+      description: Body of the callback a stage POSTs to the orchestrator when it finishes.
+    StructuredFieldPayload:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: null when the field was not found
+          examples:
+          - '3201234567890001'
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          description: OCR score of the line the value came from
+          default: 1.0
+          examples:
+          - 0.9762
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+          description: Raw OCR line the value came from
+          examples:
+          - NPWP16:3201 2345 6789 0001
+        signals:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Signals
+          description: 'Inputs for the scoring model. nomor_npwp: `has_homoglyph` (an OCR letter/digit
+            mix-up such as O->0 was corrected), `candidate_count` (NPWP-shaped numbers found in the document).
+            nama / nama_badan: `corrected` (the name was changed by the name-master correction)'
+          examples:
+          - candidate_count: 2
+            has_homoglyph: false
+      additionalProperties: true
+      type: object
+      title: StructuredFieldPayload
+    StructuringPayload:
+      properties:
+        document_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Document Type
+          description: Document type the fields were read as
+          examples:
+          - npwp
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/StructuredFieldPayload'
+          type: object
+          title: Fields
+          description: Always `nomor_npwp`, `nama`, `nama_badan`. A person's card fills `nama`, a company's
+            `nama_badan`
+      additionalProperties: true
+      type: object
+      required:
+      - fields
+      title: StructuringPayload
+      description: Result of the structuring stage (`structuring.results`), forwarded to scoring.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      description: API key for this service
+      in: header
+      name: X-API-Key
+tags:
+- name: Pipeline
+  description: 'Asynchronous pipeline stage: 202, background work, callback'
+- name: Callbacks
+  description: Requests this service SENDS to the orchestrator (see Webhooks)
+- name: Scoring
+  description: Document score & approve/review/reject decision, synchronous
+- name: Health
+  description: Liveness and readiness probes; no API key

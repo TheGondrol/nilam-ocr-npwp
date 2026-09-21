@@ -1,0 +1,63 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nilam-ocr-dev
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: guardrails-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+  - name: ekstraksi-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - EKSTRAKSI_OCR_URL=http://10.213.128.67:8070
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+  - name: structuring-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+  - name: scoring-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=dev
+      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+
+images:
+  - name: nilam-ocr-guardrails
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/guardrails
+    newTag: REPLACE_ME
+  - name: nilam-ocr-ekstraksi
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/ekstraksi
+    newTag: REPLACE_ME
+  - name: nilam-ocr-structuring
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/structuring
+    newTag: REPLACE_ME
+  - name: nilam-ocr-scoring
+    newName: asia-southeast2-docker.pkg.dev/edm-bribrain-dev-01/nilam-ocr/scoring
+    newTag: REPLACE_ME
+
+replicas:
+  - name: guardrails
+    count: 1
+  - name: ekstraksi
+    count: 1
+  - name: structuring
+    count: 1
+  - name: scoring
+    count: 1
+
+patches:
+  - target: {kind: ServiceAccount, name: nilam-ocr}
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/iam.gke.io~1gcp-service-account
+        value: nilam-ocr@edm-bribrain-dev-01.iam.gserviceaccount.com
+  - target: {kind: NetworkPolicy, name: allow-orchestration}
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        value: REPLACE_ME-orchestration-namespace

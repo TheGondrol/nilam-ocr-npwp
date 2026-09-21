@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+configMapGenerator:
+  - name: scoring-config
+    literals:
+      - PORT=8033
+      - SCORING_BACKEND=heuristic
+      - SCORING_APPROVE_THRESHOLD=0.8
+      - SCORING_REVIEW_THRESHOLD=0.5
+      - PIPELINE_DRAIN_TIMEOUT_SECONDS=30

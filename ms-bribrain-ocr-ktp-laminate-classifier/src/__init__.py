@@ -1,1 +1,0 @@
-# Lamination Detection Service

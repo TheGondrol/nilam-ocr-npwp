@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocr-common"
+version = "0.1.0"
+description = "Kode bersama untuk service OCR NPWP (guardrails, ekstraksi, structuring, scoring)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic-settings>=2.5",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+db = ["sqlalchemy>=2.0", "greenlet>=3.0"]
+
+[tool.setuptools.packages.find]
+include = ["ocr_common*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ty.environment]
+root = ["."]
+extra-paths = ["."]
+
+[tool.ty.src]
+exclude = ["ocr_common/fetch_url.py"]

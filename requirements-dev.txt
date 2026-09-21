@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-e libs/ocr_common[db]
+-r services/guardrails/requirements.txt
+-r services/ekstraksi/requirements.txt
+-r services/structuring/requirements.txt
+-r services/scoring/requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.24.0
+aiosqlite==0.21.0
+pyyaml==6.0.2
+ruff==0.6.8
+ty==0.0.81
+Pillow==12.3.0

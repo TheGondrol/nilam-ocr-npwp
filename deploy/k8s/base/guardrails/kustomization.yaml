@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+configMapGenerator:
+  - name: guardrails-config
+    literals:
+      - PORT=8031
+      - GUARDRAILS_BACKEND=efficientnet
+      - GUARDRAILS_MODEL_PATH=weights/best_model.pt
+      - GUARDRAILS_DEVICE=cpu
+      - GUARDRAILS_TORCH_THREADS=2

@@ -1,0 +1,67 @@
+x-common: &common
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  guardrails:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/guardrails/Dockerfile
+    image: nilam-ocr-guardrails:latest
+    container_name: nilam-ocr-guardrails
+    env_file: services/guardrails/.env
+    environment:
+      PORT: "8031"
+    ports:
+      - "127.0.0.1:8031:8031"
+
+  structuring:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/structuring/Dockerfile
+    image: nilam-ocr-structuring:latest
+    container_name: nilam-ocr-structuring
+    env_file: services/structuring/.env
+    environment:
+      PORT: "8032"
+      SCORING_SERVICE_URL: http://scoring:8033
+    ports:
+      - "127.0.0.1:8032:8032"
+    depends_on:
+      - scoring
+
+  scoring:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/scoring/Dockerfile
+    image: nilam-ocr-scoring:latest
+    container_name: nilam-ocr-scoring
+    env_file: services/scoring/.env
+    environment:
+      PORT: "8033"
+    ports:
+      - "127.0.0.1:8033:8033"
+
+  ekstraksi:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/ekstraksi/Dockerfile
+    image: nilam-ocr-ekstraksi:latest
+    container_name: nilam-ocr-ekstraksi
+    env_file: services/ekstraksi/.env
+    environment:
+      PORT: "8030"
+      GUARDRAILS_SERVICE_URL: http://guardrails:8031
+      STRUCTURING_SERVICE_URL: http://structuring:8032
+      SCORING_SERVICE_URL: http://scoring:8033
+    ports:
+      - "127.0.0.1:8030:8030"
+    depends_on:
+      - guardrails
+      - structuring
+      - scoring

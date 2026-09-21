@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["libs/ocr_common", "services/guardrails", "services/ekstraksi", "services/structuring", "services/scoring"]
+extend-exclude = ["services/*/src/vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"services/*/src/api/**" = ["B008", "B904"]
+"libs/ocr_common/ocr_common/intake.py" = ["B008"]
+"libs/ocr_common/ocr_common/fetch_url.py" = ["B904", "UP"]

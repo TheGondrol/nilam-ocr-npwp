@@ -1,11 +1,29 @@
-.DS_Store
-
-# Secrets: only templates are committed
 .env
-.env.*
-!.env.template
+*.env
+!.env.example
 
-# Real KTP images (PII) used by local tests
-**/tests/data/*.png
-**/tests/data/*.jpg
-**/tests/data/*.jpeg
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+weights/*
+!weights/.gitkeep
+
+.DS_Store
+.vscode/
+.idea/
+
+*.egg-info/
+
+services/*/weights/*
+!services/*/weights/.gitkeep
+!services/scoring/weights/trust_model.joblib
+
+tools/tracker/
+
+docs/
