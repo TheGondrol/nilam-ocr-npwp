@@ -35,7 +35,7 @@ services:
       tag: ""
     port: 8031
     pipeline: false
-    upstreams: []
+    upstreams: [ekstraksi]
     startupFailureThreshold: 30
     env:
       GUARDRAILS_BACKEND: efficientnet

@@ -12,3 +12,4 @@ configMapGenerator:
       - GUARDRAILS_MODEL_PATH=weights/best_model.pt
       - GUARDRAILS_DEVICE=cpu
       - GUARDRAILS_TORCH_THREADS=2
+      - EKSTRAKSI_SERVICE_URL=http://ekstraksi:8030
