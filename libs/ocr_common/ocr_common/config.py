@@ -24,6 +24,7 @@ class BaseServiceSettings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
     file_url_allowed_hosts: str = ""
+    field_confidence_threshold: float = Field(0.5, ge=0, le=1)
 
     @property
     def is_local(self) -> bool:
@@ -88,6 +89,12 @@ class PipelineSettings(BaseServiceSettings):
     pipeline_retry_delay_seconds: float = 0.5
     pipeline_drain_timeout_seconds: float = 30.0
     pipeline_job_lease_seconds: float = Field(DEFAULT_JOB_LEASE_SECONDS, gt=0)
+    orchestration_outcome_table: str = ""
+    pipeline_outbox: bool = False
+    pipeline_outbox_interval_seconds: float = Field(1.0, gt=0)
+    pipeline_outbox_batch: int = Field(20, gt=0)
+    pipeline_outbox_lease_seconds: float = Field(30.0, gt=0)
+    pipeline_outbox_max_attempts: int = Field(20, gt=0)
 
     @model_validator(mode="after")
     def _guard_pipeline(self) -> Self:

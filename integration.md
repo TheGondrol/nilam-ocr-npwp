@@ -74,6 +74,13 @@ kasus; kalau hasil sudah diterima di respons 200, callback-nya boleh diabaikan. 
 callback SCORING membawa hasil akhir dalam bentuk internal (bagian 7); petakan ke `data`
 dengan aturan yang sama seperti di bagian 4.
 
+**Callback bisa datang tidak berurutan.** Sejak pengiriman callback dipindah ke outbox yang
+tahan restart, tiap tahap mengirim callback-nya sendiri tanpa menunggu tahap lain, jadi
+`SCORING` bisa tiba sebelum `OCR`. Perlakukan callback sebagai update status per tahap yang
+idempoten (boleh datang dua kali), dan tentukan keadaan akhir dari `SCORING`/`DONE` atau
+`FAILED` mana pun. Callback yang gagal di sisi kalian akan dikirim ulang, dan **tidak lagi
+memperlambat pipeline**.
+
 Pasang HTTP timeout panggilan ini di atas `PIPELINE_WAIT_SECONDS`, mis. **30 detik** untuk
 default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu.
 

@@ -53,6 +53,9 @@ class RecordingCallback:
         )
         return True
 
+    async def send(self, body: dict) -> None:
+        self.calls.append(body)
+
     async def aclose(self) -> None:
         pass
 
@@ -66,6 +69,9 @@ class RecordingNextStage:
         if self.error is not None:
             raise self.error
         self.payloads.append(payload)
+
+    async def send(self, payload: dict) -> None:
+        await self.submit(payload)
 
     async def aclose(self) -> None:
         pass

@@ -4,14 +4,15 @@ from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import ServiceError
 from ocr_common.jobs import StagePipeline
-from ocr_common.npwp import DOCUMENT_TYPE, final_result
+from ocr_common.npwp import DOCUMENT_TYPE, contract_fields, final_result
 from src.services.confidence_service import ConfidenceService
 
 
 class ScoringJobService:
-    def __init__(self, pipeline: StagePipeline, confidence: ConfidenceService):
+    def __init__(self, pipeline: StagePipeline, confidence: ConfidenceService, confidence_threshold: float = 0.5):
         self._pipeline = pipeline
         self._confidence = confidence
+        self._confidence_threshold = confidence_threshold
 
     async def submit(
         self,
@@ -28,10 +29,14 @@ class ScoringJobService:
             result = await run_in_threadpool(self._confidence.predict, payload)
             return {**result, "payload": payload}
 
+        def final(scoring: dict[str, Any]) -> dict[str, Any]:
+            return final_result(document_type, guardrails, structuring, scoring)
+
         return await self._pipeline.submit(
             request_id,
             work,
-            callback_result=lambda scoring: final_result(document_type, guardrails, structuring, scoring),
+            callback_result=final,
+            outcome_data=lambda scoring: contract_fields(final(scoring), self._confidence_threshold),
         )
 
     async def get(self, request_id: str) -> dict[str, Any]:

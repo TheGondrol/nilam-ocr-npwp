@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS
 from ocr_common.database import get_engine
 from ocr_common.jobs import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRecord
+from ocr_common.outbox import Outbox, OutboxMessage
+from ocr_common.outcomes import StageOutcome
 from ocr_common.tables import pipeline_tables
 
 
@@ -26,10 +29,22 @@ def _iso(value: datetime) -> str:
 class SqlJobRepository:
     name = "postgres"
 
-    def __init__(self, database_url: str, table_prefix: str, *, lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS):
+    def __init__(
+        self,
+        database_url: str,
+        table_prefix: str,
+        *,
+        lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS,
+        outcome: StageOutcome | None = None,
+        outbox: Outbox | None = None,
+        stage: str = "",
+    ):
         self._url = database_url
         self._table_prefix = table_prefix
         self._lease = timedelta(seconds=lease_seconds)
+        self._outcome = outcome
+        self._outbox = outbox
+        self._stage = stage or table_prefix.upper()
         self.metadata, self._jobs, self._results = build_tables(table_prefix)
 
     @property
@@ -56,22 +71,32 @@ class SqlJobRepository:
                 )
                 .on_conflict_do_nothing(index_elements=["request_id"])
             )
-            if inserted.rowcount == 1:
-                return True
-            retried = await conn.execute(
-                update(jobs)
-                .where(
-                    jobs.c.request_id == request_id,
-                    or_(
-                        jobs.c.status == STATUS_FAILED,
-                        and_(jobs.c.status == STATUS_PROCESSING, jobs.c.updated_at < now - self._lease),
-                    ),
+            claimed = inserted.rowcount == 1
+            if not claimed:
+                retried = await conn.execute(
+                    update(jobs)
+                    .where(
+                        jobs.c.request_id == request_id,
+                        or_(
+                            jobs.c.status == STATUS_FAILED,
+                            and_(jobs.c.status == STATUS_PROCESSING, jobs.c.updated_at < now - self._lease),
+                        ),
+                    )
+                    .values(status=STATUS_PROCESSING, error_message=None, attempts=jobs.c.attempts + 1, updated_at=now)
                 )
-                .values(status=STATUS_PROCESSING, error_message=None, attempts=jobs.c.attempts + 1, updated_at=now)
-            )
-            return retried.rowcount == 1
+                claimed = retried.rowcount == 1
+            if claimed and self._outcome is not None:
+                await self._outcome.claimed(conn, request_id)
+            return claimed
 
-    async def complete(self, request_id: str, result: dict[str, Any]) -> None:
+    async def complete(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        *,
+        outcome_data: dict[str, Any] | None = None,
+        messages: Sequence[OutboxMessage] = (),
+    ) -> None:
         now = datetime.now(UTC)
         jobs, results = self._jobs, self._results
         async with self.engine.begin() as conn:
@@ -83,8 +108,12 @@ class SqlJobRepository:
             await conn.execute(
                 update(jobs).where(jobs.c.request_id == request_id).values(status=STATUS_DONE, updated_at=now)
             )
+            if self._outcome is not None:
+                await self._outcome.completed(conn, request_id, outcome_data)
+            if self._outbox is not None:
+                await self._outbox.add(conn, request_id, self._stage, messages)
 
-    async def fail(self, request_id: str, error_message: str) -> None:
+    async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None:
         jobs = self._jobs
         async with self.engine.begin() as conn:
             await conn.execute(
@@ -92,6 +121,10 @@ class SqlJobRepository:
                 .where(jobs.c.request_id == request_id)
                 .values(status=STATUS_FAILED, error_message=error_message, updated_at=datetime.now(UTC))
             )
+            if self._outcome is not None:
+                await self._outcome.failed(conn, request_id, error_message)
+            if self._outbox is not None:
+                await self._outbox.add(conn, request_id, self._stage, messages)
 
     async def get(self, request_id: str) -> JobRecord | None:
         jobs, results = self._jobs, self._results

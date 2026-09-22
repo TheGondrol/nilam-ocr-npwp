@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,7 +8,7 @@ from ocr_common.pipeline_schemas import ScoringStageCallback
 from src.api.v1 import jobs, scoring
 from src.api.v1.scoring import get_trust_model
 from src.core.config import get_settings
-from src.core.pipeline import get_pipeline
+from src.core.pipeline import get_pipeline, get_relay
 from src.models.scoring import get_scorer
 
 settings = get_settings()
@@ -22,7 +23,11 @@ async def lifespan(app: FastAPI):
 
         await check_connection(settings.database_url)
     pipeline = get_pipeline()
+    relay = get_relay()
+    relay_task = asyncio.create_task(relay.run()) if relay is not None else None
     yield
+    if relay_task is not None:
+        relay_task.cancel()
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
     if settings.database_url:
         from ocr_common.database import dispose_engines

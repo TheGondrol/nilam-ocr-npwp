@@ -40,6 +40,8 @@ db-check:
 	$(PY) -m alembic -c db/alembic.ini check
 db-revision:
 	$(PY) -m alembic -c db/alembic.ini revision --autogenerate -m "$(m)"
+db-external:
+	$(PY) db/external/apply.py
 
 weights:
 	$(PY) scripts/fetch_weights.py || [ $$? -eq 2 ]
@@ -62,4 +64,4 @@ logs-%:
 smoke:
 	$(PY) scripts/smoke_e2e.py
 
-.PHONY: dev test lint format typecheck openapi openapi-gateway api-docs test-lib typecheck-lib db-upgrade db-check db-revision weights build up up-db down ps smoke
+.PHONY: dev test lint format typecheck openapi openapi-gateway api-docs test-lib typecheck-lib db-upgrade db-check db-revision db-external weights build up up-db down ps smoke

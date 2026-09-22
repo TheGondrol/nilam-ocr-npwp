@@ -11,16 +11,20 @@ Satu database PostgreSQL dipakai bersama oleh repo ini **dan** oleh service orke
 | `structuring_jobs`, `structuring_results` | **repo ini** | structuring | structuring lewat API-nya | status dan field hasil structuring |
 | `scoring_jobs`, `scoring_results` | **repo ini** | scoring | scoring lewat API-nya | status dan skor trust model |
 | `ocr_npwp_requests` | **repo ini** | ekstraksi | ekstraksi | khusus kontrak lama sinkron (`generate-request-id` → `extract-ocr` → `get-ocr-result`) |
+| `pipeline_outbox` | **repo ini** | ketiga tahap (dalam transaksi job) | relay tiap service | callback dan handoff yang belum terkirim (`PIPELINE_OUTBOX`); baris dihapus setelah terkirim |
 | `ocr_npwp_alembic_version` | **repo ini** | Alembic | Alembic | versi migrasi repo ini; namanya sengaja tidak `alembic_version` supaya tidak bentrok dengan migrasi tim lain |
 | `orchestration_*`, `auth_*`, `datahub_lookup_log` | **orkestrasi** | orkestrasi | orkestrasi | di luar repo ini. Migrasi di sini tidak pernah membuat atau mengubahnya |
 | `ocr.*`, `structuring.*`, `scoring.*` (schema terpisah) | — | tidak ada | tidak ada | sisa desain lama sebelum tabel pindah ke schema `public`. Kandidat dihapus lewat migrasi setelah dipastikan tidak dipakai siapa pun |
 
 Guardrails tidak punya tabel: ia membaca status tahap lewat API, bukan lewat database.
 
-Rencana yang belum dikerjakan: ketiga tahap juga menulis hasil akhir ke
-`orchestration_extract_ocr` (kolom `downstream_status`, `downstream_stage`) di transaksi
-yang sama dengan penyimpanan hasilnya. Tabel itu milik orkestrasi, jadi kolomnya mereka
-yang menambahkan, bukan migrasi di sini.
+Ketiga tahap juga bisa menulis status request ke `orchestration_extract_ocr` di transaksi
+yang sama dengan penyimpanan hasilnya, kalau `ORCHESTRATION_OUTCOME_TABLE` diisi (default
+mati). Yang ditulis: `processing` + tahapnya saat job diklaim, `completed` + `result_data`
+oleh scoring, dan `failed` + `error_code` saat gagal. Tabel itu **milik orkestrasi**, jadi
+kolomnya mereka yang menambahkan; DDL yang dibutuhkan (termasuk `request_id` unik) ada di
+[external/orchestration_extract_ocr.sql](external/orchestration_extract_ocr.sql) dan bisa
+dipasang ke PostgreSQL lokal dengan `make db-external`.
 
 ## Sumber kebenaran
 

@@ -22,8 +22,10 @@ OCR = {
 @pytest.fixture
 def harness():
     callback, next_stage = RecordingCallback(), RecordingNextStage()
-    pipeline = StagePipeline(stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback)
-    service = StructuringJobService(pipeline, get_structuring_service(), next_stage)
+    pipeline = StagePipeline(
+        stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = StructuringJobService(pipeline, get_structuring_service())
     app.dependency_overrides[get_job_service] = lambda: service
     with make_client(app) as client:
         yield client, callback, next_stage

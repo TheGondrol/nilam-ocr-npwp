@@ -10,7 +10,7 @@ from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResp
 from ocr_common.security import verify_api_key
 from src.api.v1.ekstraksi import OCR_RESULT_EXAMPLE, get_ekstraksi_service
 from src.core.config import get_settings
-from src.core.pipeline import get_next_stage, get_pipeline
+from src.core.pipeline import get_pipeline
 from src.schemas.ekstraksi import OcrJobStatusResponse
 from src.services.job_service import EkstraksiJobService, Source
 
@@ -24,7 +24,6 @@ def get_job_service() -> EkstraksiJobService:
     return EkstraksiJobService(
         get_pipeline(),
         get_ekstraksi_service(),
-        get_next_stage(),
         settings.max_upload_bytes,
         url_policy=settings.file_url_policy,
     )

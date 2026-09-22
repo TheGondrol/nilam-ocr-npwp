@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     Double,
@@ -63,9 +64,47 @@ OCR_NPWP_REQUESTS = Table(
 )
 
 
+def outbox_table(metadata: MetaData) -> Table:
+    return Table(
+        "pipeline_outbox",
+        metadata,
+        Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
+        Column("request_id", Text, nullable=False),
+        Column("stage", Text, nullable=False),
+        Column("kind", Text, nullable=False),
+        Column("payload", JSON_TYPE, nullable=False),
+        Column("attempts", Integer, nullable=False, server_default=text("0")),
+        Column("next_attempt_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("ds", Text, nullable=False),
+        Index("idx_pipeline_outbox_due", "next_attempt_at", "id"),
+        Index("idx_pipeline_outbox_request_id", "request_id"),
+    )
+
+
+def orchestration_outcome_table(name: str) -> Table:
+    return Table(
+        name,
+        MetaData(),
+        Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
+        Column("request_id", Text, nullable=False, unique=True),
+        Column("document_type", Text, nullable=False),
+        Column("status_code", Integer, nullable=False),
+        Column("downstream_status", Text, nullable=True),
+        Column("downstream_stage", Text, nullable=True),
+        Column("error_code", Text, nullable=True),
+        Column("error_message", Text, nullable=True),
+        Column("result_data", JSON_TYPE, nullable=True),
+        Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("ds", Text, nullable=False),
+    )
+
+
 def repo_metadata() -> MetaData:
     metadata = MetaData()
     for table_prefix in PIPELINE_TABLE_PREFIXES:
         pipeline_tables(table_prefix, metadata)
+    outbox_table(metadata)
     OCR_NPWP_REQUESTS.to_metadata(metadata)
     return metadata

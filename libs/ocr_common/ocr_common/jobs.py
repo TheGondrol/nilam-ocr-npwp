@@ -1,11 +1,13 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS, PipelineSettings
 from ocr_common.errors import ServiceError
+from ocr_common.outbox import Outbox, OutboxMessage, OutboxRelay, SqlOutbox, callback_message, handoff_message
+from ocr_common.outcomes import StageOutcome, build_stage_outcome
 from ocr_common.remote import RemoteModelClient
 
 logger = logging.getLogger(__name__)
@@ -21,8 +23,8 @@ STAGE_SCORING = "SCORING"
 CANCEL_GRACE_SECONDS = 5.0
 
 Work = Callable[[], Awaitable[dict[str, Any]]]
-Handoff = Callable[[dict[str, Any]], Awaitable[None]]
 CallbackResult = Callable[[dict[str, Any]], dict[str, Any]]
+HandoffPayload = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class JobRecord(TypedDict):
@@ -39,9 +41,16 @@ class JobRepository(Protocol):
 
     async def claim(self, request_id: str) -> bool: ...
 
-    async def complete(self, request_id: str, result: dict[str, Any]) -> None: ...
+    async def complete(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        *,
+        outcome_data: dict[str, Any] | None = None,
+        messages: Sequence[OutboxMessage] = (),
+    ) -> None: ...
 
-    async def fail(self, request_id: str, error_message: str) -> None: ...
+    async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None: ...
 
     async def get(self, request_id: str) -> JobRecord | None: ...
 
@@ -80,10 +89,17 @@ class InMemoryJobRepository:
             return True
         return False
 
-    async def complete(self, request_id: str, result: dict[str, Any]) -> None:
+    async def complete(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        *,
+        outcome_data: dict[str, Any] | None = None,
+        messages: Sequence[OutboxMessage] = (),
+    ) -> None:
         self._jobs[request_id].update(status=STATUS_DONE, result=result, updated_at=_now_iso())
 
-    async def fail(self, request_id: str, error_message: str) -> None:
+    async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None:
         self._jobs[request_id].update(status=STATUS_FAILED, error_message=error_message, updated_at=_now_iso())
 
     async def get(self, request_id: str) -> JobRecord | None:
@@ -92,13 +108,21 @@ class InMemoryJobRepository:
 
 
 def build_job_repository(
-    database_url: str | None, table_prefix: str, *, lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS
+    database_url: str | None,
+    table_prefix: str,
+    *,
+    lease_seconds: float = DEFAULT_JOB_LEASE_SECONDS,
+    outcome: StageOutcome | None = None,
+    outbox: Outbox | None = None,
+    stage: str = "",
 ) -> JobRepository:
     if not database_url:
         return InMemoryJobRepository(lease_seconds)
     from ocr_common.jobs_sql import SqlJobRepository
 
-    return SqlJobRepository(database_url, table_prefix, lease_seconds=lease_seconds)
+    return SqlJobRepository(
+        database_url, table_prefix, lease_seconds=lease_seconds, outcome=outcome, outbox=outbox, stage=stage
+    )
 
 
 async def with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
@@ -122,11 +146,15 @@ class StageCallback(Protocol):
         error_message: str | None = None,
     ) -> bool: ...
 
+    async def send(self, body: dict[str, Any]) -> None: ...
+
     async def aclose(self) -> None: ...
 
 
 class NextStage(Protocol):
     async def submit(self, payload: dict[str, Any]) -> None: ...
+
+    async def send(self, payload: dict[str, Any]) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -165,6 +193,12 @@ class OrchestrationCallback:
             return False
         return True
 
+    async def send(self, body: dict[str, Any]) -> None:
+        if self._client is None:
+            logger.info("callback skipped (ORCHESTRATION_URL not set): %s", body.get("request_id"))
+            return
+        await self._client.post_json(self._path, body)
+
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -179,6 +213,9 @@ class NextStageClient:
 
     async def submit(self, payload: dict[str, Any]) -> None:
         await with_retry(lambda: self._client.post_json(self._path, payload), self._attempts, self._delay)
+
+    async def send(self, payload: dict[str, Any]) -> None:
+        await self._client.post_json(self._path, payload)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -210,11 +247,15 @@ class StagePipeline:
         stage: str,
         repository: JobRepository,
         callback: StageCallback,
+        next_stage_client: NextStage | None = None,
+        outbox: Outbox | None = None,
         runner: BackgroundRunner | None = None,
     ):
         self.stage = stage
         self.repository = repository
         self.callback = callback
+        self.next_stage_client = next_stage_client
+        self.outbox = outbox
         self.runner = runner or BackgroundRunner()
 
     async def submit(
@@ -222,14 +263,15 @@ class StagePipeline:
         request_id: str,
         work: Work,
         *,
-        handoff: Handoff | None = None,
+        handoff_payload: HandoffPayload | None = None,
         next_stage: str | None = None,
         callback_result: CallbackResult | None = None,
+        outcome_data: CallbackResult | None = None,
     ) -> dict[str, Any]:
         claimed = await self.repository.claim(request_id)
         status = STATUS_PROCESSING
         if claimed:
-            self.runner.spawn(self._run(request_id, work, handoff, next_stage, callback_result))
+            self.runner.spawn(self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data))
         else:
             record = await self.repository.get(request_id)
             status = record["status"] if record else STATUS_PROCESSING
@@ -249,13 +291,23 @@ class StagePipeline:
         self,
         request_id: str,
         work: Work,
-        handoff: Handoff | None,
+        handoff_payload: HandoffPayload | None,
         next_stage: str | None,
         callback_result: CallbackResult | None,
+        outcome_data: CallbackResult | None = None,
     ) -> None:
+        payload: dict[str, Any] | None = None
+        final: dict[str, Any] | None = None
         try:
             result = await work()
-            await self.repository.complete(request_id, result)
+            payload = handoff_payload(result) if handoff_payload else None
+            final = callback_result(result) if callback_result else None
+            await self.repository.complete(
+                request_id,
+                result,
+                outcome_data=outcome_data(result) if outcome_data else None,
+                messages=self._messages(request_id, final, payload, next_stage),
+            )
         except asyncio.CancelledError:
             logger.warning("%s job %s interrupted by shutdown", self.stage, request_id)
             await self._failed(
@@ -270,18 +322,38 @@ class StagePipeline:
             await self._failed(request_id, f"Internal error in {self.stage} stage")
             return
 
+        if self.outbox is not None:
+            return
+
         try:
-            await self.callback.notify(
-                request_id, self.stage, STATUS_DONE, result=callback_result(result) if callback_result else None
-            )
-            if handoff is not None:
-                await handoff(result)
+            await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
+            if payload is not None:
+                await self._hand_off(payload)
         except asyncio.CancelledError:
-            if handoff is not None:
+            if payload is not None:
                 await self._handoff_failed(request_id, next_stage, "interrupted by a service shutdown")
             raise
         except ServiceError as exc:
             await self._handoff_failed(request_id, next_stage, exc.message)
+
+    def _messages(
+        self,
+        request_id: str,
+        final: dict[str, Any] | None,
+        payload: dict[str, Any] | None,
+        next_stage: str | None,
+    ) -> list[OutboxMessage]:
+        if self.outbox is None:
+            return []
+        messages = [callback_message(request_id, self.stage, STATUS_DONE, result=final)]
+        if payload is not None and next_stage is not None:
+            messages.append(handoff_message(next_stage, payload))
+        return messages
+
+    async def _hand_off(self, payload: dict[str, Any]) -> None:
+        if self.next_stage_client is None:
+            raise ServiceError(500, f"the {self.stage} stage has no next stage to hand off to")
+        await self.next_stage_client.submit(payload)
 
     async def _handoff_failed(self, request_id: str, next_stage: str | None, reason: str) -> None:
         logger.error("%s job %s: handoff to %s failed: %s", self.stage, request_id, next_stage, reason)
@@ -293,11 +365,20 @@ class StagePipeline:
         )
 
     async def _failed(self, request_id: str, error_message: str) -> None:
+        reported = self.outbox is not None
         try:
-            await self.repository.fail(request_id, error_message)
+            await self.repository.fail(
+                request_id,
+                error_message,
+                messages=[callback_message(request_id, self.stage, STATUS_FAILED, error_message=error_message)]
+                if self.outbox is not None
+                else [],
+            )
         except Exception:
             logger.exception("%s job %s: could not record failure", self.stage, request_id)
-        await self.callback.notify(request_id, self.stage, STATUS_FAILED, error_message=error_message)
+            reported = False
+        if not reported:
+            await self.callback.notify(request_id, self.stage, STATUS_FAILED, error_message=error_message)
 
 
 def _remote(base_url: str, api_key: str, timeout: float, name: str) -> RemoteModelClient:
@@ -306,7 +387,9 @@ def _remote(base_url: str, api_key: str, timeout: float, name: str) -> RemoteMod
     )
 
 
-def build_stage_pipeline(settings: PipelineSettings, *, stage: str, table_prefix: str) -> StagePipeline:
+def build_stage_pipeline(
+    settings: PipelineSettings, *, stage: str, table_prefix: str, next_stage: NextStage | None = None
+) -> StagePipeline:
     client = None
     if settings.orchestration_url:
         client = _remote(
@@ -321,10 +404,34 @@ def build_stage_pipeline(settings: PipelineSettings, *, stage: str, table_prefix
         attempts=settings.pipeline_retry_attempts,
         delay=settings.pipeline_retry_delay_seconds,
     )
+    outbox = SqlOutbox(settings.database_url) if settings.pipeline_outbox and settings.database_url else None
     repository = build_job_repository(
-        settings.database_url, table_prefix, lease_seconds=settings.pipeline_job_lease_seconds
+        settings.database_url,
+        table_prefix,
+        lease_seconds=settings.pipeline_job_lease_seconds,
+        outcome=build_stage_outcome(settings, stage=stage),
+        outbox=outbox,
+        stage=stage,
     )
-    return StagePipeline(stage=stage, repository=repository, callback=callback)
+    return StagePipeline(
+        stage=stage, repository=repository, callback=callback, next_stage_client=next_stage, outbox=outbox
+    )
+
+
+def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> OutboxRelay | None:
+    if not isinstance(pipeline.outbox, SqlOutbox):
+        return None
+    return OutboxRelay(
+        pipeline.outbox,
+        stage=pipeline.stage,
+        callback=pipeline.callback,
+        next_stage=pipeline.next_stage_client,
+        interval_seconds=settings.pipeline_outbox_interval_seconds,
+        batch=settings.pipeline_outbox_batch,
+        lease_seconds=settings.pipeline_outbox_lease_seconds,
+        retry_delay_seconds=settings.pipeline_retry_delay_seconds,
+        max_attempts=settings.pipeline_outbox_max_attempts,
+    )
 
 
 def build_next_stage_client(

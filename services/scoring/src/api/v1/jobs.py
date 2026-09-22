@@ -5,6 +5,7 @@ from ocr_common.errors import ServiceError
 from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, error, success_examples
 from ocr_common.security import verify_api_key
 from src.api.v1.scoring import CONFIDENCE_PAYLOAD_EXAMPLE, get_confidence_service
+from src.core.config import get_settings
 from src.core.pipeline import get_pipeline
 from src.schemas.scoring import ScoringJobRequest, ScoringJobStatusResponse
 from src.services.job_service import ScoringJobService
@@ -15,7 +16,7 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "created_at": "202
 
 
 def get_job_service() -> ScoringJobService:
-    return ScoringJobService(get_pipeline(), get_confidence_service())
+    return ScoringJobService(get_pipeline(), get_confidence_service(), get_settings().field_confidence_threshold)
 
 
 @router.post(

@@ -2,6 +2,7 @@ from typing import Any
 
 from ocr_common.envelope import envelope
 from ocr_common.jobs import STATUS_DONE, STATUS_FAILED
+from ocr_common.npwp import contract_fields
 
 COMPLETED_MESSAGE = "OCR extraction completed successfully"
 PROCESSING_MESSAGE = "OCR job accepted; still processing"
@@ -26,16 +27,6 @@ def extract_body(
         "job_status": job_status,
         "guardrails": guardrails,
         "params": params,
-    }
-
-
-def contract_fields(result: dict[str, Any], threshold: float) -> dict[str, dict[str, Any]]:
-    fields = result["fields"]
-    scoring = result["scoring"]
-    name = fields.get("nama") if _has_value(fields.get("nama")) else fields.get("nama_badan")
-    return {
-        "nomor_npwp": _field(fields.get("nomor_npwp"), scoring.get("npwp_confidence"), threshold),
-        "nama": _field(name, scoring.get("name_confidence"), threshold),
     }
 
 
@@ -88,13 +79,3 @@ def extract_response(
         document_type=document_type,
         params=params,
     )
-
-
-def _has_value(field: dict[str, Any] | None) -> bool:
-    return bool(field and field.get("value") is not None and str(field["value"]).strip())
-
-
-def _field(field: dict[str, Any] | None, score: float | None, threshold: float) -> dict[str, Any]:
-    value = field["value"] if field and _has_value(field) else None
-    confident = value is not None and score is not None and score >= threshold
-    return {"value": value, "confidence": 1 if confident else 0}

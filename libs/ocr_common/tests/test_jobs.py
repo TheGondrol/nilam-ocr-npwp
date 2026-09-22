@@ -16,7 +16,7 @@ from ocr_common.jobs import (
 )
 from ocr_common.jobs_sql import SqlJobRepository
 from ocr_common.remote import RemoteModelClient
-from ocr_common.testing import RecordingCallback
+from ocr_common.testing import RecordingCallback, RecordingNextStage
 
 
 @pytest.fixture(params=["memory", "sql"])
@@ -85,28 +85,35 @@ async def test_get_unknown_returns_none(repository):
     assert await repository.get("REQ_missing") is None
 
 
-def _pipeline(repository) -> tuple[StagePipeline, RecordingCallback]:
+def _pipeline(repository, next_stage=None) -> tuple[StagePipeline, RecordingCallback]:
     callback = RecordingCallback()
-    return StagePipeline(stage=STAGE_OCR, repository=repository, callback=callback), callback
+    pipeline = StagePipeline(stage=STAGE_OCR, repository=repository, callback=callback, next_stage_client=next_stage)
+    return pipeline, callback
 
 
 async def test_pipeline_success_writes_result_then_callback_then_handoff(repository):
-    pipeline, callback = _pipeline(repository)
-    events: list[str] = []
+    seen: list[tuple[str, list[str]]] = []
+
+    class Checking(RecordingNextStage):
+        async def submit(self, payload):
+            record = await repository.get("REQ_10")
+            seen.append((record["status"], [call["status"] for call in callback.calls]))
+            await super().submit(payload)
+
+    next_stage = Checking()
+    pipeline, callback = _pipeline(repository, next_stage)
 
     async def work():
         return {"full_text": "NPWP"}
 
-    async def handoff(result):
-        assert (await repository.get("REQ_10"))["status"] == "DONE"
-        assert [c["status"] for c in callback.calls] == ["DONE"]
-        events.append(result["full_text"])
-
-    accepted = await pipeline.submit("REQ_10", work, handoff=handoff, next_stage=STAGE_STRUCTURING)
+    accepted = await pipeline.submit(
+        "REQ_10", work, handoff_payload=lambda result: {"ocr": result}, next_stage=STAGE_STRUCTURING
+    )
     assert accepted == {"request_id": "REQ_10", "stage": "OCR", "status": "PROCESSING", "duplicate": False}
     await pipeline.runner.drain(5)
 
-    assert events == ["NPWP"]
+    assert seen == [("DONE", ["DONE"])]
+    assert next_stage.payloads == [{"ocr": {"full_text": "NPWP"}}]
     assert callback.calls == [
         {"request_id": "REQ_10", "stage": "OCR", "status": "DONE", "result": None, "error_message": None}
     ]
@@ -133,20 +140,16 @@ async def test_pipeline_duplicate_does_not_run_work_twice(repository):
 
 
 async def test_pipeline_work_failure_is_recorded_and_reported(repository):
-    pipeline, callback = _pipeline(repository)
-    handed_off = False
+    next_stage = RecordingNextStage()
+    pipeline, callback = _pipeline(repository, next_stage)
 
     async def work():
         raise ServiceError(503, "ekstraksi OCR model is unavailable")
 
-    async def handoff(result):
-        nonlocal handed_off
-        handed_off = True
-
-    await pipeline.submit("REQ_12", work, handoff=handoff, next_stage=STAGE_STRUCTURING)
+    await pipeline.submit("REQ_12", work, handoff_payload=lambda result: result, next_stage=STAGE_STRUCTURING)
     await pipeline.runner.drain(5)
 
-    assert handed_off is False
+    assert next_stage.payloads == []
     assert (await repository.get("REQ_12"))["status"] == "FAILED"
     assert callback.calls[0]["stage"] == "OCR"
     assert callback.calls[0]["status"] == "FAILED"
@@ -165,15 +168,13 @@ async def test_pipeline_unexpected_exception_does_not_leak_details(repository):
 
 
 async def test_pipeline_handoff_failure_reports_next_stage_failed(repository):
-    pipeline, callback = _pipeline(repository)
+    next_stage = RecordingNextStage(error=ServiceError(503, "structuring service is unavailable"))
+    pipeline, callback = _pipeline(repository, next_stage)
 
     async def work():
         return {}
 
-    async def handoff(result):
-        raise ServiceError(503, "structuring service is unavailable")
-
-    await pipeline.submit("REQ_14", work, handoff=handoff, next_stage=STAGE_STRUCTURING)
+    await pipeline.submit("REQ_14", work, handoff_payload=lambda result: result, next_stage=STAGE_STRUCTURING)
     await pipeline.runner.drain(5)
 
     assert (await repository.get("REQ_14"))["status"] == "DONE"
@@ -209,17 +210,19 @@ async def test_shutdown_fails_the_interrupted_job_so_it_can_run_again(repository
 
 
 async def test_shutdown_during_handoff_reports_next_stage_failed(repository):
-    pipeline, callback = _pipeline(repository)
     started = asyncio.Event()
+
+    class Slow(RecordingNextStage):
+        async def submit(self, payload):
+            started.set()
+            await asyncio.sleep(60)
+
+    pipeline, callback = _pipeline(repository, Slow())
 
     async def work():
         return {}
 
-    async def slow_handoff(result):
-        started.set()
-        await asyncio.sleep(60)
-
-    await pipeline.submit("REQ_17", work, handoff=slow_handoff, next_stage=STAGE_STRUCTURING)
+    await pipeline.submit("REQ_17", work, handoff_payload=lambda result: result, next_stage=STAGE_STRUCTURING)
     await started.wait()
     await pipeline.runner.drain(0.01)
 

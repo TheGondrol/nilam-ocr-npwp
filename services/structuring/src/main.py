@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,7 +7,7 @@ from ocr_common.app import add_stage_callback_webhook, create_app, database_read
 from ocr_common.pipeline_schemas import StageCallback
 from src.api.v1 import jobs, structuring
 from src.core.config import get_settings
-from src.core.pipeline import get_next_stage, get_pipeline
+from src.core.pipeline import get_next_stage, get_pipeline, get_relay
 from src.models.structuring import get_structurer
 
 settings = get_settings()
@@ -21,7 +22,11 @@ async def lifespan(app: FastAPI):
         await check_connection(settings.database_url)
     pipeline = get_pipeline()
     next_stage = get_next_stage()
+    relay = get_relay()
+    relay_task = asyncio.create_task(relay.run()) if relay is not None else None
     yield
+    if relay_task is not None:
+        relay_task.cancel()
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
     await next_stage.aclose()
     if settings.database_url:

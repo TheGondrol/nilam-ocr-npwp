@@ -16,8 +16,10 @@ GUARDRAILS = {"passed": True, "reason": None}
 @pytest.fixture
 def harness():
     callback, next_stage = RecordingCallback(), RecordingNextStage()
-    pipeline = StagePipeline(stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback)
-    service = EkstraksiJobService(pipeline, get_ekstraksi_service(), next_stage, 5 * 1024 * 1024)
+    pipeline = StagePipeline(
+        stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = EkstraksiJobService(pipeline, get_ekstraksi_service(), 5 * 1024 * 1024)
     app.dependency_overrides[get_job_service] = lambda: service
     with make_client(app) as client:
         yield client, callback, next_stage

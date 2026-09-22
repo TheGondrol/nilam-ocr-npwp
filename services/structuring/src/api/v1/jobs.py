@@ -5,7 +5,7 @@ from ocr_common.errors import ServiceError
 from ocr_common.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, error, success_examples
 from ocr_common.security import verify_api_key
 from src.api.v1.structuring import STRUCTURED_EXAMPLE, get_structuring_service
-from src.core.pipeline import get_next_stage, get_pipeline
+from src.core.pipeline import get_pipeline
 from src.schemas.structuring import StructuringJobRequest, StructuringJobStatusResponse
 from src.services.job_service import StructuringJobService
 
@@ -15,7 +15,7 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "STRUCTURING", "created_at": 
 
 
 def get_job_service() -> StructuringJobService:
-    return StructuringJobService(get_pipeline(), get_structuring_service(), get_next_stage())
+    return StructuringJobService(get_pipeline(), get_structuring_service())
 
 
 @router.post(

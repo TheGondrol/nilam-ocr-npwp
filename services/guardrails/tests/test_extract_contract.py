@@ -4,7 +4,7 @@ import json
 import pytest
 from PIL import Image
 
-from src.api.v1.extract_contract import contract_fields
+from ocr_common.npwp import contract_fields
 from src.core.config import get_settings
 from src.main import app
 
