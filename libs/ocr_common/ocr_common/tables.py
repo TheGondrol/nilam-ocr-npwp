@@ -75,10 +75,25 @@ def outbox_table(metadata: MetaData) -> Table:
         Column("payload", JSON_TYPE, nullable=False),
         Column("attempts", Integer, nullable=False, server_default=text("0")),
         Column("next_attempt_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("failed_at", DateTime(timezone=True), nullable=True),
+        Column("last_error", Text, nullable=True),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
-        Index("idx_pipeline_outbox_due", "next_attempt_at", "id"),
+        Index(
+            "idx_pipeline_outbox_due",
+            "stage",
+            "next_attempt_at",
+            "id",
+            postgresql_where=text("failed_at IS NULL"),
+            sqlite_where=text("failed_at IS NULL"),
+        ),
+        Index(
+            "idx_pipeline_outbox_dead",
+            "stage",
+            postgresql_where=text("failed_at IS NOT NULL"),
+            sqlite_where=text("failed_at IS NOT NULL"),
+        ),
         Index("idx_pipeline_outbox_request_id", "request_id"),
     )
 

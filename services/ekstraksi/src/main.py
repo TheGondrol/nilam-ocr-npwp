@@ -1,10 +1,10 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from ocr_common.app import add_stage_callback_webhook, create_app, database_readiness
 from ocr_common.database import check_connection, dispose_engines
+from ocr_common.outbox_api import outbox_status_router
 from ocr_common.pipeline_schemas import StageCallback
 from src.api.v1 import ekstraksi, jobs, ocr
 from src.clients.stages import get_stage_clients
@@ -24,11 +24,10 @@ async def lifespan(app: FastAPI):
     pipeline = get_pipeline()
     next_stage = get_next_stage()
     relay = get_relay()
-    relay_task = asyncio.create_task(relay.run()) if relay is not None else None
+    if relay is not None:
+        relay.start()
     yield
-    if relay_task is not None:
-        relay_task.cancel()
-    await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
+    await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
     await next_stage.aclose()
     if hasattr(ocr_engine, "aclose"):
         await ocr_engine.aclose()
@@ -59,7 +58,7 @@ app = create_app(
         },
         {"name": "Ekstraksi", "description": "Raw OCR text, synchronous"},
     ],
-    routers=[jobs.router, ocr.router, ekstraksi.router],
+    routers=[jobs.router, ocr.router, ekstraksi.router, outbox_status_router("/v1/ekstraksi", get_pipeline)],
     backends={
         "ekstraksi": settings.ekstraksi_backend,
         "storage": "postgres" if settings.database_url else "memory",
@@ -74,9 +73,11 @@ add_stage_callback_webhook(
     app,
     body_model=StageCallback,
     sent=(
-        "Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` after the OCR result is "
-        "stored and BEFORE the job is handed to structuring, or `status: FAILED` with `error_message` when the "
-        "document could not be read (the chain stops there). Additionally `stage: STRUCTURING`, "
-        "`status: FAILED` when OCR succeeded but the structuring service could not be reached after retries."
+        "Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once the OCR result is "
+        "stored, or `status: FAILED` with `error_message` when the document could not be read (the chain stops "
+        "there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR succeeded but the structuring "
+        "service could not be reached after retries. Without `PIPELINE_OUTBOX` the `OCR` callback is sent before "
+        "the hand-off to structuring; with it the hand-off goes first, so the `STRUCTURING` callback may arrive "
+        "before this one."
     ),
 )

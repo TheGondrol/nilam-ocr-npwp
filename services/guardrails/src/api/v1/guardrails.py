@@ -41,14 +41,13 @@ _COMPLETED = extract_body(
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
     },
-    job_status="completed",
     guardrails=1,
+    errors=None,
     request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
+    document_type="npwp"
 )
 _PROCESSING = extract_body(
-    202, PROCESSING_MESSAGE, job_status="processing", request_id=RID, document_type="npwp", params=_PARAMS
+    202, PROCESSING_MESSAGE, job_status="processing", request_id=RID, document_type="npwp",
 )
 _REJECTED = extract_body(
     400,
@@ -58,7 +57,6 @@ _REJECTED = extract_body(
     guardrails=0,
     request_id=RID,
     document_type="npwp",
-    params=_PARAMS,
 )
 _FAILED = extract_body(
     422,
@@ -68,7 +66,6 @@ _FAILED = extract_body(
     guardrails=1,
     request_id=RID,
     document_type="npwp",
-    params=_PARAMS,
 )
 
 _ACCEPTED_PAGE = {"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}
@@ -231,7 +228,6 @@ async def extract_ocr(
             errors="INVALID_PARAMS",
             request_id=request_id,
             document_type=document_type,
-            params=None,
         )
     if document_type != DOCUMENT_TYPE:
         response.status_code = 400
@@ -241,7 +237,6 @@ async def extract_ocr(
             errors="UNSUPPORTED_DOCUMENT_TYPE",
             request_id=request_id,
             document_type=document_type,
-            params=parsed_params,
         )
 
     content, filename, content_type = await read_image(request, file, file_url)

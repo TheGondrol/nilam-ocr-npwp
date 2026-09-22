@@ -6,7 +6,7 @@ from typing import Any, Protocol, TypedDict
 
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS, PipelineSettings
 from ocr_common.errors import ServiceError
-from ocr_common.outbox import Outbox, OutboxMessage, OutboxRelay, SqlOutbox, callback_message, handoff_message
+from ocr_common.outbox import Outbox, OutboxMessage, OutboxRelay, callback_message, handoff_message
 from ocr_common.outcomes import StageOutcome, build_stage_outcome
 from ocr_common.remote import RemoteModelClient
 
@@ -51,6 +51,8 @@ class JobRepository(Protocol):
     ) -> None: ...
 
     async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None: ...
+
+    async def handoff_failed(self, request_id: str, next_stage: str, error_message: str) -> None: ...
 
     async def get(self, request_id: str) -> JobRecord | None: ...
 
@@ -101,6 +103,9 @@ class InMemoryJobRepository:
 
     async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None:
         self._jobs[request_id].update(status=STATUS_FAILED, error_message=error_message, updated_at=_now_iso())
+
+    async def handoff_failed(self, request_id: str, next_stage: str, error_message: str) -> None:
+        pass
 
     async def get(self, request_id: str) -> JobRecord | None:
         record = self._jobs.get(request_id)
@@ -250,13 +255,18 @@ class StagePipeline:
         next_stage_client: NextStage | None = None,
         outbox: Outbox | None = None,
         runner: BackgroundRunner | None = None,
+        callbacks: bool = True,
     ):
+        """`callbacks=False` when the orchestrator has no callback endpoint: no callback is sent or
+        queued, and the outcome reaches the orchestrator through its table (ORCHESTRATION_OUTCOME_TABLE)
+        and GET .../jobs/{request_id}."""
         self.stage = stage
         self.repository = repository
         self.callback = callback
         self.next_stage_client = next_stage_client
         self.outbox = outbox
         self.runner = runner or BackgroundRunner()
+        self.callbacks = callbacks
 
     async def submit(
         self,
@@ -283,8 +293,12 @@ class StagePipeline:
             raise ServiceError(404, f"No {self.stage} job found for request_id: {request_id}")
         return {"stage": self.stage, **record}
 
-    async def aclose(self, drain_timeout: float) -> None:
+    async def aclose(self, drain_timeout: float, *, relay: OutboxRelay | None = None) -> None:
+        """Shutdown order: finish the jobs, then let the relay send what those jobs queued, then close
+        the clients the relay uses."""
         await self.runner.drain(drain_timeout)
+        if relay is not None:
+            await relay.stop()
         await self.callback.aclose()
 
     async def _run(
@@ -326,7 +340,8 @@ class StagePipeline:
             return
 
         try:
-            await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
+            if self.callbacks:
+                await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
             if payload is not None:
                 await self._hand_off(payload)
         except asyncio.CancelledError:
@@ -345,7 +360,9 @@ class StagePipeline:
     ) -> list[OutboxMessage]:
         if self.outbox is None:
             return []
-        messages = [callback_message(request_id, self.stage, STATUS_DONE, result=final)]
+        messages = []
+        if self.callbacks:
+            messages.append(callback_message(request_id, self.stage, STATUS_DONE, result=final))
         if payload is not None and next_stage is not None:
             messages.append(handoff_message(next_stage, payload))
         return messages
@@ -357,12 +374,13 @@ class StagePipeline:
 
     async def _handoff_failed(self, request_id: str, next_stage: str | None, reason: str) -> None:
         logger.error("%s job %s: handoff to %s failed: %s", self.stage, request_id, next_stage, reason)
-        await self.callback.notify(
-            request_id,
-            next_stage or self.stage,
-            STATUS_FAILED,
-            error_message=f"Handoff to {next_stage} failed: {reason}",
-        )
+        message = f"Handoff to {next_stage} failed: {reason}"
+        try:
+            await self.repository.handoff_failed(request_id, next_stage or self.stage, message)
+        except Exception:
+            logger.exception("%s job %s: could not record the failed handoff", self.stage, request_id)
+        if self.callbacks:
+            await self.callback.notify(request_id, next_stage or self.stage, STATUS_FAILED, error_message=message)
 
     async def _failed(self, request_id: str, error_message: str) -> None:
         reported = self.outbox is not None
@@ -371,13 +389,13 @@ class StagePipeline:
                 request_id,
                 error_message,
                 messages=[callback_message(request_id, self.stage, STATUS_FAILED, error_message=error_message)]
-                if self.outbox is not None
+                if self.outbox is not None and self.callbacks
                 else [],
             )
         except Exception:
             logger.exception("%s job %s: could not record failure", self.stage, request_id)
             reported = False
-        if not reported:
+        if not reported and self.callbacks:
             await self.callback.notify(request_id, self.stage, STATUS_FAILED, error_message=error_message)
 
 
@@ -404,7 +422,11 @@ def build_stage_pipeline(
         attempts=settings.pipeline_retry_attempts,
         delay=settings.pipeline_retry_delay_seconds,
     )
-    outbox = SqlOutbox(settings.database_url) if settings.pipeline_outbox and settings.database_url else None
+    outbox = None
+    if settings.pipeline_outbox and settings.database_url:
+        from ocr_common.outbox_sql import SqlOutbox
+
+        outbox = SqlOutbox(settings.database_url)
     repository = build_job_repository(
         settings.database_url,
         table_prefix,
@@ -414,11 +436,18 @@ def build_stage_pipeline(
         stage=stage,
     )
     return StagePipeline(
-        stage=stage, repository=repository, callback=callback, next_stage_client=next_stage, outbox=outbox
+        stage=stage,
+        repository=repository,
+        callback=callback,
+        next_stage_client=next_stage,
+        outbox=outbox,
+        callbacks=settings.callbacks_enabled,
     )
 
 
 def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> OutboxRelay | None:
+    from ocr_common.outbox_sql import SqlOutbox
+
     if not isinstance(pipeline.outbox, SqlOutbox):
         return None
     return OutboxRelay(
@@ -426,11 +455,15 @@ def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> O
         stage=pipeline.stage,
         callback=pipeline.callback,
         next_stage=pipeline.next_stage_client,
+        callbacks=pipeline.callbacks,
+        handoff_failed=pipeline.repository.handoff_failed,
         interval_seconds=settings.pipeline_outbox_interval_seconds,
         batch=settings.pipeline_outbox_batch,
         lease_seconds=settings.pipeline_outbox_lease_seconds,
         retry_delay_seconds=settings.pipeline_retry_delay_seconds,
-        max_attempts=settings.pipeline_outbox_max_attempts,
+        max_backoff_seconds=settings.pipeline_outbox_max_backoff_seconds,
+        max_age_seconds=settings.pipeline_outbox_max_age_seconds,
+        stale_after_seconds=settings.pipeline_outbox_stale_after_seconds,
     )
 
 

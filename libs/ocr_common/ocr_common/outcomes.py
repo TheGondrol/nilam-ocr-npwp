@@ -1,13 +1,14 @@
-from datetime import UTC, datetime
-from typing import Any, Protocol
+from __future__ import annotations
 
-from sqlalchemy import Table
-from sqlalchemy.dialects import postgresql, sqlite
-from sqlalchemy.ext.asyncio import AsyncConnection
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.config import PipelineSettings
 from ocr_common.npwp import DOCUMENT_TYPE
-from ocr_common.tables import orchestration_outcome_table
+
+if TYPE_CHECKING:
+    from sqlalchemy import Table
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
 STATUS_PROCESSING = "processing"
 STATUS_COMPLETED = "completed"
@@ -19,7 +20,9 @@ class StageOutcome(Protocol):
 
     async def completed(self, conn: AsyncConnection, request_id: str, data: dict[str, Any] | None) -> None: ...
 
-    async def failed(self, conn: AsyncConnection, request_id: str, error_message: str) -> None: ...
+    async def failed(
+        self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
+    ) -> None: ...
 
 
 class OrchestrationOutcome:
@@ -36,13 +39,18 @@ class OrchestrationOutcome:
             return
         await self._write(conn, request_id, 200, STATUS_COMPLETED, result_data=data)
 
-    async def failed(self, conn: AsyncConnection, request_id: str, error_message: str) -> None:
+    async def failed(
+        self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
+    ) -> None:
+        """`stage` names the stage that failed when it is not this one: a hand-off that the next stage
+        never accepted is reported as that stage's failure, like the FAILED callback would be."""
         await self._write(
             conn,
             request_id,
             422,
             STATUS_FAILED,
-            error_code=f"{self._stage}_FAILED",
+            stage=stage,
+            error_code=f"{stage or self._stage}_FAILED",
             error_message=error_message,
         )
 
@@ -53,6 +61,7 @@ class OrchestrationOutcome:
         status_code: int,
         downstream_status: str,
         *,
+        stage: str | None = None,
         result_data: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
@@ -60,11 +69,13 @@ class OrchestrationOutcome:
         values: dict[str, Any] = {
             "status_code": status_code,
             "downstream_status": downstream_status,
-            "downstream_stage": self._stage,
+            "downstream_stage": stage or self._stage,
             "error_code": error_code,
             "error_message": error_message,
             "result_data": result_data,
         }
+        from sqlalchemy.dialects import postgresql, sqlite
+
         dialect = postgresql if conn.dialect.name == "postgresql" else sqlite
         statement = dialect.insert(self.table).values(
             request_id=request_id,
@@ -78,4 +89,6 @@ class OrchestrationOutcome:
 def build_stage_outcome(settings: PipelineSettings, *, stage: str) -> OrchestrationOutcome | None:
     if not settings.orchestration_outcome_table:
         return None
+    from ocr_common.tables import orchestration_outcome_table
+
     return OrchestrationOutcome(orchestration_outcome_table(settings.orchestration_outcome_table), stage=stage)

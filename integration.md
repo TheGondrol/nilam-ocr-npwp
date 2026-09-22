@@ -69,7 +69,13 @@ orchestrator. Guardrails menunggu pipeline sampai `PIPELINE_WAIT_SECONDS` (defau
       lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
                                          hasil menyusul di callback SCORING
 
-Setelah dokumen lolos, callback `OCR`, `STRUCTURING`, `SCORING` tetap dikirim dalam semua
+Callback bersifat **opsional**: kalau kalian tidak menyediakan endpoint callback, kami
+jalankan tanpa `ORCHESTRATION_URL`, tidak ada callback yang dikirim, dan hasil tiap request
+sampai ke kalian lewat baris `request_id` di tabel `orchestration_extract_ocr` milik kalian
+(`processing` saat tahap berjalan, `completed` + `result_data` dari scoring, `failed` +
+`<TAHAP>_FAILED` kalau gagal, termasuk tahap yang tidak pernah bisa dihubungi). Di jalur 202
+kalian tinggal membaca baris itu saat client polling. Kalau endpoint callback ada, setelah
+dokumen lolos callback `OCR`, `STRUCTURING`, `SCORING` dikirim dalam semua
 kasus; kalau hasil sudah diterima di respons 200, callback-nya boleh diabaikan. Di jalur 202,
 callback SCORING membawa hasil akhir dalam bentuk internal (bagian 7); petakan ke `data`
 dengan aturan yang sama seperti di bagian 4.
@@ -80,6 +86,14 @@ tahan restart, tiap tahap mengirim callback-nya sendiri tanpa menunggu tahap lai
 idempoten (boleh datang dua kali), dan tentukan keadaan akhir dari `SCORING`/`DONE` atau
 `FAILED` mana pun. Callback yang gagal di sisi kalian akan dikirim ulang, dan **tidak lagi
 memperlambat pipeline**.
+
+Rinciannya: jawaban `5xx`, timeout, atau host tidak terjangkau dikirim ulang dengan backoff
+sampai 5 menit sekali, selama 24 jam. Jawaban **`4xx` tidak dikirim ulang**: callback-nya
+disimpan sebagai *dead letter* di sisi kami dan harus dilepas manual, jadi jawab `4xx` hanya
+kalau body-nya memang salah, bukan karena `request_id`-nya belum kalian kenal. Pengiriman
+*at-least-once*: hand-off antar-tahap juga bisa terkirim dua kali; tahap berikutnya tidak
+menjalankan ulang job yang sudah `DONE`/`PROCESSING`, tapi job yang sudah `FAILED` akan
+dijalankan lagi (sama seperti kalau kalian mengirim ulang `request_id` itu).
 
 Pasang HTTP timeout panggilan ini di atas `PIPELINE_WAIT_SECONDS`, mis. **30 detik** untuk
 default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu.

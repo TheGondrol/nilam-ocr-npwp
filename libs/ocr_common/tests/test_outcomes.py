@@ -133,3 +133,16 @@ def test_the_outcome_row_is_off_until_the_table_is_configured():
     writer = build_stage_outcome(on, stage=STAGE_SCORING)
     assert writer is not None
     assert writer.table.name == TABLE
+
+
+async def test_a_failed_handoff_marks_the_request_failed_at_the_next_stage(repository):
+    repo, _ = repository
+    await repo.claim(RID)
+    await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
+
+    await repo.handoff_failed(RID, "STRUCTURING", "Handoff to STRUCTURING failed: structuring service is unavailable")
+
+    row = await _row(repository)
+    assert (row["status_code"], row["downstream_status"], row["downstream_stage"]) == (422, "failed", "STRUCTURING")
+    assert row["error_code"] == "STRUCTURING_FAILED"
+    assert row["error_message"] == "Handoff to STRUCTURING failed: structuring service is unavailable"

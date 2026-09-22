@@ -112,6 +112,7 @@ class SqlJobRepository:
                 await self._outcome.completed(conn, request_id, outcome_data)
             if self._outbox is not None:
                 await self._outbox.add(conn, request_id, self._stage, messages)
+        self._wake(messages)
 
     async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None:
         jobs = self._jobs
@@ -125,6 +126,18 @@ class SqlJobRepository:
                 await self._outcome.failed(conn, request_id, error_message)
             if self._outbox is not None:
                 await self._outbox.add(conn, request_id, self._stage, messages)
+        self._wake(messages)
+
+    async def handoff_failed(self, request_id: str, next_stage: str, error_message: str) -> None:
+        if self._outcome is None:
+            return
+        async with self.engine.begin() as conn:
+            await self._outcome.failed(conn, request_id, error_message, stage=next_stage)
+
+    def _wake(self, messages: Sequence[OutboxMessage]) -> None:
+        # After the commit: a relay woken inside the transaction would poll before the rows are visible.
+        if self._outbox is not None and messages:
+            self._outbox.wake()
 
     async def get(self, request_id: str) -> JobRecord | None:
         jobs, results = self._jobs, self._results

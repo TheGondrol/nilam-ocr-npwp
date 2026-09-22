@@ -26,6 +26,7 @@ def get_job_service() -> EkstraksiJobService:
         get_ekstraksi_service(),
         settings.max_upload_bytes,
         url_policy=settings.file_url_policy,
+        simulate_delay=settings.is_local,
     )
 
 

@@ -23,7 +23,7 @@ def test_environment_defaults_to_production(monkeypatch):
 
 def test_dev_is_a_deployed_environment_not_the_laptop_mode():
     assert base(environment="dev").is_local is False
-    with pytest.raises(ValidationError, match="DATABASE_URL, ORCHESTRATION_URL must be set when ENVIRONMENT=dev"):
+    with pytest.raises(ValidationError, match="DATABASE_URL must be set when ENVIRONMENT=dev"):
         pipeline(environment="dev")
 
 
@@ -47,14 +47,14 @@ def test_pipeline_locally_needs_nothing():
     assert settings.database_url is None and settings.orchestration_url is None
 
 
-def test_pipeline_outside_local_requires_database_and_orchestration():
-    with pytest.raises(
-        ValidationError, match="DATABASE_URL, ORCHESTRATION_URL must be set when ENVIRONMENT=production"
-    ):
+def test_pipeline_outside_local_requires_database_and_a_way_to_report_the_outcome():
+    with pytest.raises(ValidationError, match="DATABASE_URL must be set when ENVIRONMENT=production"):
         pipeline(environment="production")
-    with pytest.raises(ValidationError, match="ORCHESTRATION_URL must be set"):
+    with pytest.raises(ValidationError, match="ORCHESTRATION_URL or ORCHESTRATION_OUTCOME_TABLE must be set"):
         pipeline(environment="staging", database_url=DB)
-    assert pipeline(environment="production", database_url=DB, orchestration_url=ORCH).environment == "production"
+    assert pipeline(environment="production", database_url=DB, orchestration_url=ORCH).callbacks_enabled is True
+    table_only = pipeline(environment="production", database_url=DB, orchestration_outcome_table="orchestration_x")
+    assert table_only.callbacks_enabled is False
 
 
 def test_empty_string_counts_as_missing():

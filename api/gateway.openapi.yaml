@@ -814,17 +814,19 @@ webhooks:
         **When.** Once per stage, from the service that ran it:
 
 
-        - **ekstraksi**: Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` after
-        the OCR result is stored and BEFORE the job is handed to structuring, or `status: FAILED` with
-        `error_message` when the document could not be read (the chain stops there). Additionally `stage:
-        STRUCTURING`, `status: FAILED` when OCR succeeded but the structuring service could not be reached
-        after retries.
+        - **ekstraksi**: Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once
+        the OCR result is stored, or `status: FAILED` with `error_message` when the document could not
+        be read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR
+        succeeded but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX`
+        the `OCR` callback is sent before the hand-off to structuring; with it the hand-off goes first,
+        so the `STRUCTURING` callback may arrive before this one.
 
         - **structuring**: Once per job of `POST /v1/structuring/jobs`: `stage: STRUCTURING` with `status:
-        DONE` after the fields are stored and BEFORE the job is handed to scoring, or `status: FAILED`
-        with `error_message` when the upload is not a lone NPWP card or has no text (the chain stops there).
-        Additionally `stage: SCORING`, `status: FAILED` when structuring succeeded but the scoring service
-        could not be reached after retries.
+        DONE` once the fields are stored, or `status: FAILED` with `error_message` when the upload is
+        not a lone NPWP card or has no text (the chain stops there). Additionally `stage: SCORING`, `status:
+        FAILED` when structuring succeeded but the scoring service could not be reached after retries.
+        Without `PIPELINE_OUTBOX` the `STRUCTURING` callback is sent before the hand-off to scoring; with
+        it the hand-off goes first, so the `SCORING` callback may arrive before this one.
 
         - **scoring**: Once per job of `POST /v1/scoring/jobs`, the last callback of a request: `stage:
         SCORING` with `status: DONE` and `result` = the **final result** (fields, per-field confidences,
@@ -835,7 +837,10 @@ webhooks:
         **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
         retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
         that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
-        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own.
+        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own. With `PIPELINE_OUTBOX`
+        the callback is instead queued in the same transaction as the result and retried with back-off
+        (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS` (24 h by default); a `4xx`,
+        or that age, makes it a dead letter that stays in the table and is counted by `GET .../outbox`.
 
 
         **What the receiver must tolerate.** The same callback may arrive more than once (treat it as

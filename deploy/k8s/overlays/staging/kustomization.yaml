@@ -14,17 +14,23 @@ configMapGenerator:
     literals:
       - ENVIRONMENT=staging
       - EKSTRAKSI_OCR_URL=http://REPLACE_ME:8070
-      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      # Hanya kalau Orkestrasi punya endpoint callback; kosong = hasil lewat ORCHESTRATION_OUTCOME_TABLE
+      # - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      - ORCHESTRATION_OUTCOME_TABLE=orchestration_extract_ocr
   - name: structuring-config
     behavior: merge
     literals:
       - ENVIRONMENT=staging
-      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      # Hanya kalau Orkestrasi punya endpoint callback; kosong = hasil lewat ORCHESTRATION_OUTCOME_TABLE
+      # - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      - ORCHESTRATION_OUTCOME_TABLE=orchestration_extract_ocr
   - name: scoring-config
     behavior: merge
     literals:
       - ENVIRONMENT=staging
-      - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      # Hanya kalau Orkestrasi punya endpoint callback; kosong = hasil lewat ORCHESTRATION_OUTCOME_TABLE
+      # - ORCHESTRATION_URL=http://REPLACE_ME-orchestration.REPLACE_ME-namespace.svc.cluster.local:8000
+      - ORCHESTRATION_OUTCOME_TABLE=orchestration_extract_ocr
 
 images:
   - name: nilam-ocr-guardrails

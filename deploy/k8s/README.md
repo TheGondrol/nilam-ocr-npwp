@@ -29,7 +29,7 @@ Cari `REPLACE_ME`: `grep -rn REPLACE_ME deploy/k8s/overlays/<env>`.
 |---|---|---|
 | Tag image | `images[].newTag` | Git SHA atau semver. Jangan `latest`: rollback jadi mustahil |
 | Project Artifact Registry | `images[].newName` | `dev` sudah memakai `edm-bribrain-dev-01`; nama repo `nilam-ocr` adalah asumsi |
-| `ORCHESTRATION_URL` | `configMapGenerator` (ekstraksi, structuring, scoring) | Service k8s Orkestrasi. Wajib: tanpa ini pod menolak start |
+| `ORCHESTRATION_OUTCOME_TABLE` / `ORCHESTRATION_URL` | `configMapGenerator` (ekstraksi, structuring, scoring) | Cara hasil sampai ke Orkestrasi: tabel miliknya (default, `orchestration_extract_ocr`) dan/atau endpoint callback-nya. Salah satu wajib: tanpa keduanya pod menolak start. `ORCHESTRATION_URL` kosong = tidak ada callback sama sekali |
 | `EKSTRAKSI_OCR_URL` | `configMapGenerator` ekstraksi | `dev` memakai `http://10.213.128.67:8070` (IP internal VM model); cluster dan VM harus satu VPC / di-peer |
 | Namespace Orkestrasi | patch `NetworkPolicy allow-orchestration` | Tanpa ini Orkestrasi diblokir di lapis jaringan |
 | GSA Workload Identity | patch `ServiceAccount` | Bind: `roles/iam.workloadIdentityUser` untuk `nilam-ocr-<env>/nilam-ocr` |

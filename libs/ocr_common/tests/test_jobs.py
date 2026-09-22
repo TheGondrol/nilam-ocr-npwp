@@ -309,3 +309,67 @@ async def test_next_stage_gives_up_after_attempts():
     with pytest.raises(ServiceError):
         await next_stage.submit({"request_id": "REQ_23"})
     assert calls == 3
+
+
+class RecordingHandoffFailures(InMemoryJobRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures: list[tuple[str, str, str]] = []
+
+    async def handoff_failed(self, request_id: str, next_stage: str, error_message: str) -> None:
+        self.failures.append((request_id, next_stage, error_message))
+
+
+async def test_without_callbacks_nothing_is_sent_and_the_handoff_still_happens():
+    repository = RecordingHandoffFailures()
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_OCR, repository=repository, callback=callback, next_stage_client=next_stage, callbacks=False
+    )
+
+    async def work():
+        return {"ok": True}
+
+    await pipeline.submit("REQ_nocb", work, handoff_payload=lambda r: r, next_stage=STAGE_STRUCTURING)
+    await pipeline.runner.drain(5)
+
+    assert callback.calls == []
+    assert next_stage.payloads == [{"ok": True}]
+    record = await repository.get("REQ_nocb")
+    assert record is not None and record["status"] == "DONE"
+
+
+async def test_without_callbacks_a_failed_handoff_is_recorded_for_the_next_stage():
+    repository = RecordingHandoffFailures()
+    callback = RecordingCallback()
+    next_stage = RecordingNextStage(error=ServiceError(503, "structuring service is unavailable"))
+    pipeline = StagePipeline(
+        stage=STAGE_OCR, repository=repository, callback=callback, next_stage_client=next_stage, callbacks=False
+    )
+
+    async def work():
+        return {}
+
+    await pipeline.submit("REQ_nocb2", work, handoff_payload=lambda r: r, next_stage=STAGE_STRUCTURING)
+    await pipeline.runner.drain(5)
+
+    assert callback.calls == []
+    assert repository.failures == [
+        ("REQ_nocb2", STAGE_STRUCTURING, "Handoff to STRUCTURING failed: structuring service is unavailable")
+    ]
+
+
+async def test_without_callbacks_a_failed_job_is_not_reported_by_callback():
+    repository = RecordingHandoffFailures()
+    callback = RecordingCallback()
+    pipeline = StagePipeline(stage=STAGE_OCR, repository=repository, callback=callback, callbacks=False)
+
+    async def work():
+        raise ServiceError(503, "model down")
+
+    await pipeline.submit("REQ_nocb3", work)
+    await pipeline.runner.drain(5)
+
+    assert callback.calls == []
+    record = await repository.get("REQ_nocb3")
+    assert record is not None and record["status"] == "FAILED"

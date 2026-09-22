@@ -1,9 +1,9 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from ocr_common.app import add_stage_callback_webhook, create_app, database_readiness
+from ocr_common.outbox_api import outbox_status_router
 from ocr_common.pipeline_schemas import StageCallback
 from src.api.v1 import jobs, structuring
 from src.core.config import get_settings
@@ -23,11 +23,10 @@ async def lifespan(app: FastAPI):
     pipeline = get_pipeline()
     next_stage = get_next_stage()
     relay = get_relay()
-    relay_task = asyncio.create_task(relay.run()) if relay is not None else None
+    if relay is not None:
+        relay.start()
     yield
-    if relay_task is not None:
-        relay_task.cancel()
-    await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
+    await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
     await next_stage.aclose()
     if settings.database_url:
         from ocr_common.database import dispose_engines
@@ -52,7 +51,7 @@ app = create_app(
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
         {"name": "Structuring", "description": "Raw text -> named fields, synchronous"},
     ],
-    routers=[jobs.router, structuring.router],
+    routers=[jobs.router, structuring.router, outbox_status_router("/v1/structuring", get_pipeline)],
     backends={
         "structuring": settings.structuring_backend,
         "storage": "postgres" if settings.database_url else "memory",
@@ -67,9 +66,11 @@ add_stage_callback_webhook(
     app,
     body_model=StageCallback,
     sent=(
-        "Once per job of `POST /v1/structuring/jobs`: `stage: STRUCTURING` with `status: DONE` after the fields "
-        "are stored and BEFORE the job is handed to scoring, or `status: FAILED` with `error_message` when the "
-        "upload is not a lone NPWP card or has no text (the chain stops there). Additionally `stage: SCORING`, "
-        "`status: FAILED` when structuring succeeded but the scoring service could not be reached after retries."
+        "Once per job of `POST /v1/structuring/jobs`: `stage: STRUCTURING` with `status: DONE` once the fields "
+        "are stored, or `status: FAILED` with `error_message` when the upload is not a lone NPWP card or has no "
+        "text (the chain stops there). Additionally `stage: SCORING`, `status: FAILED` when structuring succeeded "
+        "but the scoring service could not be reached after retries. Without `PIPELINE_OUTBOX` the `STRUCTURING` "
+        "callback is sent before the hand-off to scoring; with it the hand-off goes first, so the `SCORING` "
+        "callback may arrive before this one."
     ),
 )

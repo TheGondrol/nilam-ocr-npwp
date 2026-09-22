@@ -38,7 +38,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $svc := .svc }}
 {{- $env := dict "PORT" ($svc.port | toString) "ENVIRONMENT" $root.Values.environment }}
 {{- if $svc.pipeline }}
-{{- $_ := set $env "ORCHESTRATION_URL" (required "orchestration.url is required: ekstraksi, structuring and scoring refuse to start without it" $root.Values.orchestration.url) }}
+{{- $_ := set $env "ORCHESTRATION_URL" $root.Values.orchestration.url }}
 {{- $_ := set $env "ORCHESTRATION_CALLBACK_PATH" $root.Values.orchestration.callbackPath }}
 {{- $_ := set $env "ORCHESTRATION_TIMEOUT_SECONDS" ($root.Values.orchestration.timeoutSeconds | toString) }}
 {{- end }}

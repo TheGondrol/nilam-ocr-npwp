@@ -410,6 +410,78 @@ paths:
                 errors: VALIDATION_ERROR
       security:
       - APIKeyHeader: []
+  /v1/structuring/outbox:
+    get:
+      tags:
+      - Pipeline
+      summary: Backlog of this stage's undelivered callbacks and hand-offs
+      description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
+        and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
+        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
+        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
+        or a dead letter is waiting.'
+      operationId: getStructuringOutboxStatus
+      responses:
+        '200':
+          description: The backlog of this stage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxStatusResponse'
+              examples:
+                idle:
+                  summary: Nothing waiting
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: OCR
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                backlog:
+                  summary: The orchestrator has been down for a while
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: OCR
+                      pending: 12
+                      retrying: 12
+                      oldest_pending_seconds: 754.3
+                      dead_letters: 1
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                disabled:
+                  summary: '`PIPELINE_OUTBOX` is off'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: false
+                      stage: OCR
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+      security:
+      - APIKeyHeader: []
 webhooks:
   stageCallback:
     post:
@@ -425,16 +497,20 @@ webhooks:
 
 
         **When.** Once per job of `POST /v1/structuring/jobs`: `stage: STRUCTURING` with `status: DONE`
-        after the fields are stored and BEFORE the job is handed to scoring, or `status: FAILED` with
-        `error_message` when the upload is not a lone NPWP card or has no text (the chain stops there).
-        Additionally `stage: SCORING`, `status: FAILED` when structuring succeeded but the scoring service
-        could not be reached after retries.
+        once the fields are stored, or `status: FAILED` with `error_message` when the upload is not a
+        lone NPWP card or has no text (the chain stops there). Additionally `stage: SCORING`, `status:
+        FAILED` when structuring succeeded but the scoring service could not be reached after retries.
+        Without `PIPELINE_OUTBOX` the `STRUCTURING` callback is sent before the hand-off to scoring; with
+        it the hand-off goes first, so the `SCORING` callback may arrive before this one.
 
 
         **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
         retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
         that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
-        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own.
+        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own. With `PIPELINE_OUTBOX`
+        the callback is instead queued in the same transaction as the result and retried with back-off
+        (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS` (24 h by default); a `4xx`,
+        or that age, makes it a dead letter that stays in the table and is counted by `GET .../outbox`.
 
 
         **What the receiver must tolerate.** The same callback may arrive more than once (treat it as
@@ -917,6 +993,102 @@ components:
       - blocks
       title: OcrPayload
       description: Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring.
+    OutboxStatus:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          description: 'false when `PIPELINE_OUTBOX` is off: callbacks are sent directly and nothing is
+            queued'
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: The stage whose messages this service's relay delivers
+          examples:
+          - OCR
+        pending:
+          type: integer
+          title: Pending
+          description: Messages not yet delivered, including the ones a relay is sending right now
+          examples:
+          - 0
+        retrying:
+          type: integer
+          title: Retrying
+          description: 'Of `pending`: messages that already failed at least once'
+          examples:
+          - 0
+        oldest_pending_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Oldest Pending Seconds
+          description: Age of the oldest pending message; null when nothing is pending. Growing past `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
+            means the orchestrator or the next stage is not taking messages
+          examples:
+          - null
+        dead_letters:
+          type: integer
+          title: Dead Letters
+          description: Messages given up on (a 4xx from the receiver, or 5xx for longer than `PIPELINE_OUTBOX_MAX_AGE_SECONDS`).
+            They stay in `pipeline_outbox` with `failed_at` and `last_error` for inspection and are never
+            retried; anything above 0 needs a human
+          examples:
+          - 0
+      type: object
+      required:
+      - enabled
+      - stage
+      - pending
+      - retrying
+      - dead_letters
+      title: OutboxStatus
+    OutboxStatusResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/OutboxStatus'
+      type: object
+      required:
+      - data
+      title: OutboxStatusResponse
     ReadyResponse:
       properties:
         status:

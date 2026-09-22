@@ -1,9 +1,9 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from ocr_common.app import add_stage_callback_webhook, create_app, database_readiness
+from ocr_common.outbox_api import outbox_status_router
 from ocr_common.pipeline_schemas import ScoringStageCallback
 from src.api.v1 import jobs, scoring
 from src.api.v1.scoring import get_trust_model
@@ -24,11 +24,10 @@ async def lifespan(app: FastAPI):
         await check_connection(settings.database_url)
     pipeline = get_pipeline()
     relay = get_relay()
-    relay_task = asyncio.create_task(relay.run()) if relay is not None else None
+    if relay is not None:
+        relay.start()
     yield
-    if relay_task is not None:
-        relay_task.cancel()
-    await pipeline.aclose(settings.pipeline_drain_timeout_seconds)
+    await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
     if settings.database_url:
         from ocr_common.database import dispose_engines
 
@@ -52,7 +51,7 @@ app = create_app(
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
         {"name": "Scoring", "description": "Document score & approve/review/reject decision, synchronous"},
     ],
-    routers=[jobs.router, scoring.router],
+    routers=[jobs.router, scoring.router, outbox_status_router("/v1/scoring", get_pipeline)],
     backends={
         "scoring": "trust_model",
         "legacy_score": settings.scoring_backend,

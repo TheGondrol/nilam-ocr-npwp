@@ -19,7 +19,7 @@ def harness():
     pipeline = StagePipeline(
         stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
     )
-    service = EkstraksiJobService(pipeline, get_ekstraksi_service(), 5 * 1024 * 1024)
+    service = EkstraksiJobService(pipeline, get_ekstraksi_service(), 5 * 1024 * 1024, simulate_delay=True)
     app.dependency_overrides[get_job_service] = lambda: service
     with make_client(app) as client:
         yield client, callback, next_stage
@@ -141,3 +141,12 @@ def test_get_unknown_job_is_404(harness, auth):
 def test_requires_api_key(harness):
     client, _, _ = harness
     assert client.post("/v1/ekstraksi/jobs", data={"request_id": "REQ_8"}).status_code == 401
+
+
+def test_a_delay_token_in_the_file_name_holds_the_job_back_in_local_mode(harness, auth):
+    client, _, _ = harness
+    data = {"request_id": "REQ_slow", "document_type": "npwp", "guardrails": json.dumps(GUARDRAILS)}
+    client.post("/v1/ekstraksi/jobs", headers=auth, data=data, files=image_upload("delay1s-npwp.jpg"))
+
+    assert wait_for_job(client, "/v1/ekstraksi/jobs/REQ_slow", timeout=0.3)["status"] == "PROCESSING"
+    assert wait_for_job(client, "/v1/ekstraksi/jobs/REQ_slow", timeout=3)["status"] == "DONE"
