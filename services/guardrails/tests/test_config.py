@@ -58,7 +58,7 @@ def test_pipeline_wait_defaults_to_15_seconds_and_can_be_changed():
         Settings(api_key="x", _env_file=None, environment="local", pipeline_wait_seconds=8).pipeline_wait_seconds == 8
     )
     with pytest.raises(ValidationError, match="pipeline_wait_seconds"):
-        Settings(api_key="x", _env_file=None, environment="local", **{"pipeline_wait_seconds": -1})
+        Settings(api_key="x", _env_file=None, environment="local", pipeline_wait_seconds=-1)
 
 
 def test_localhost_stage_services_are_refused_outside_local_only_while_waiting():
