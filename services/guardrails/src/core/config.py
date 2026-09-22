@@ -37,6 +37,7 @@ class Settings(BaseServiceSettings):
     pipeline_retry_delay_seconds: float = 0.5
     pipeline_wait_seconds: float = Field(15.0, ge=0)
     pipeline_poll_interval_seconds: float = Field(0.5, gt=0)
+    field_confidence_threshold: float = Field(0.5, ge=0, le=1)
 
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:

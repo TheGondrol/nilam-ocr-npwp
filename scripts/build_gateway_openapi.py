@@ -27,8 +27,8 @@ TAGS = [
         "name": "1. Start the pipeline",
         "description": (
             "The only call you make: guardrails check, then OCR -> structuring -> scoring, waited on for up to "
-            "PIPELINE_WAIT_SECONDS. 200: a final answer (rejected, DONE with `result`, or FAILED). "
-            "202: still running, the outcome arrives by callback."
+            "PIPELINE_WAIT_SECONDS; answers in the orchestrator's extract-ocr contract. 200: `completed` with the "
+            "fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage failed."
         ),
     },
     {
@@ -55,17 +55,19 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 ## The flow
 
 1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id` and the document
-   (`file` or `file_url`). This is the only call you make. The guardrails check runs synchronously:
-   - `data.passed: false` -> **200**, `data.job: null`; nothing runs and no callback follows. Answer the
-     client with `data.reason`.
-   - `data.passed: true` -> the guardrails service hands the document to the OCR stage (`data.job` is that
-     stage's answer) and waits for the pipeline for up to `PIPELINE_WAIT_SECONDS` (15 s by default, counted
-     from the request's arrival). Finished in time -> **200** with `data.pipeline.status` `DONE` and the
-     final result in `data.result`, or `FAILED` with the failed `stage`. Still running -> **202** with
-     `data.pipeline.status` `PROCESSING`. Give this call an HTTP timeout well above the wait.
+   (`file` or `file_url`, optional `params`). This is the only call you make, and it answers in the
+   orchestrator's `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
+   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`;
+     nothing runs and no callback follows.
+   - passed -> the document goes on to the OCR stage and the service waits for the pipeline for up to
+     `PIPELINE_WAIT_SECONDS` (15 s by default, counted from the request's arrival). Finished in time ->
+     **200**, `job_status: completed`, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with
+     confidence 0/1; a stage failed -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still
+     running -> **202**, `job_status: processing`. Give this call an HTTP timeout well above the wait.
 2. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or
-   `FAILED`, sent in every case. The `SCORING` / `DONE` callback carries the **final result**, identical to
-   `data.result` of a 200 above. A `FAILED` callback of any stage ends the request.
+   `FAILED`, sent in every case after a hand-off. The `SCORING` / `DONE` callback carries the **final
+   result** (richer than `data`: OCR scores, trust probabilities, the guardrails report). A `FAILED`
+   callback of any stage ends the request.
 3. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.
 
 Time a request out on your side: a stage that crashes mid-job cannot send its callback.

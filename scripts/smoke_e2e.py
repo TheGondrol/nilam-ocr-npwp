@@ -115,22 +115,20 @@ def async_pipeline(client: httpx.Client) -> bool:
     started = time.monotonic()
     submitted = _submit(client, request_id, "npwp.jpg", image)
     elapsed = time.monotonic() - started
-    data = submitted.json().get("data") or {}
+    body = submitted.json()
     print(
-        f"guardrails extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s "
-        f"passed={data.get('passed')} reason={data.get('reason')!r}"
+        f"guardrails extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s job_status={body.get('job_status')} "
+        f"guardrails={body.get('guardrails')} errors={body.get('errors')} message={body.get('message')!r}"
     )
-    print("  job:", data.get("job"))
-    print("  pipeline:", data.get("pipeline"))
-    if submitted.status_code not in (200, 202) or not data.get("job"):
-        print("  pipeline tidak dimulai")
+    if submitted.status_code not in (200, 202):
+        print("  pipeline tidak dimulai atau gagal")
         return False
-    finished_in_time = submitted.status_code == 200 and (data.get("pipeline") or {}).get("status") == "DONE"
+    finished_in_time = submitted.status_code == 200 and body.get("job_status") == "completed"
     if finished_in_time:
-        print("  selesai dalam waktu tunggu; hasil akhir ada di respons 200:")
-        for name, field in data["result"]["fields"].items():
-            print(f"    {name:<12} {field['value']!r:<35} conf={field['confidence']}")
-    elif submitted.status_code == 202:
+        print("  selesai dalam waktu tunggu; data di respons 200:")
+        for name, field in body["data"].items():
+            print(f"    {name:<12} {field['value']!r:<35} confidence={field['confidence']}")
+    else:
         print("  belum selesai saat waktu tunggu habis (202); lanjut polling")
 
     jobs = _poll(client, request_id)
@@ -139,7 +137,8 @@ def async_pipeline(client: httpx.Client) -> bool:
         print(f"  {stage:<12} {job['status'] if job else '(belum ada job)'} {(job or {}).get('error_message') or ''}")
     ok = all(jobs.get(stage, {}).get("status") == "DONE" for stage in STAGES)
     if finished_in_time:
-        ok = ok and data["result"]["scoring"]["npwp_confidence"] == jobs["scoring"]["result"]["npwp_confidence"]
+        read = jobs["structuring"]["result"]["fields"]["nomor_npwp"]["value"]
+        ok = ok and body["data"]["nomor_npwp"]["value"] == read
     if ok:
         for name, field in jobs["structuring"]["result"]["fields"].items():
             print(f"  {name:<12} {field['value']!r:<35} conf={field['confidence']}")
@@ -147,9 +146,11 @@ def async_pipeline(client: httpx.Client) -> bool:
         print(f"  npwp_confidence = {score['npwp_confidence']}  name_confidence = {score['name_confidence']}")
 
     again = _submit(client, request_id, "npwp.jpg", image)
-    duplicate = ((again.json().get("data") or {}).get("job") or {}).get("duplicate")
-    print(f"kirim ulang request_id yang sama -> {again.status_code}, duplicate = {duplicate}")
-    ok = ok and duplicate is True
+    repeated = again.json()
+    print(f"kirim ulang request_id yang sama -> {again.status_code} job_status={repeated.get('job_status')}")
+    ok = ok and again.status_code == 200 and repeated.get("job_status") == "completed"
+    if finished_in_time:
+        ok = ok and repeated["data"] == body["data"]
 
     if CALLBACK_PORT:
         time.sleep(1.0)
@@ -211,10 +212,10 @@ def latency(client: httpx.Client, runs: int) -> bool:
 def guardrails_reject(client: httpx.Client) -> bool:
     print("== guardrails menolak ==")
     response = _submit(client, f"REQ_{uuid.uuid4()}", "notnpwp.jpg", _image())
-    data = response.json().get("data") or {}
-    print(f"notnpwp.jpg -> {response.status_code} passed={data.get('passed')} job={data.get('job')}")
-    print(f"  reason={data.get('reason')!r}")
-    return response.status_code == 200 and data.get("job") is None
+    body = response.json()
+    print(f"notnpwp.jpg -> {response.status_code} errors={body.get('errors')} guardrails={body.get('guardrails')}")
+    print(f"  message={body.get('message')!r}")
+    return response.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR"
 
 
 def legacy_contract(client: httpx.Client) -> bool:

@@ -98,9 +98,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status_code"] == 200
-    assert body["data"]["passed"] is True
-    assert body["data"]["job"] == {"request_id": RID, "stage": "OCR", "status": "PROCESSING", "duplicate": False}
+    assert (body["status_code"], body["job_status"], body["guardrails"]) == (200, "completed", 1)
 
     [sent] = handler.requests
     assert sent.url.path == "/v1/ekstraksi/jobs"
@@ -120,12 +118,15 @@ def test_rejected_document_stops_here(client, auth, ekstraksi):
 
     response = _submit(client, auth, filename="notnpwp.jpg")
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     body = response.json()
-    assert body["status_code"] == 200
-    assert body["data"]["passed"] is False
-    assert body["data"]["reason"].startswith("Document rejected by guardrails")
-    assert body["data"]["job"] is None
+    assert (body["errors"], body["job_status"], body["guardrails"], body["data"]) == (
+        "DOWNSTREAM_VALIDATION_ERROR",
+        "failed",
+        0,
+        None,
+    )
+    assert body["message"].startswith("Document rejected by guardrails")
     assert handler.requests == []
 
 
@@ -156,15 +157,15 @@ def test_ekstraksi_server_error_is_retried(client, auth, ekstraksi):
     assert len(handler.requests) == 2
 
 
-def test_handoff_false_judges_only(client, auth, stub_ekstraksi):
+def test_check_endpoint_judges_only(client, auth, stub_ekstraksi, stub_waiter):
     response = client.post(
-        "/v1/extract-ocr",
+        "/v1/guardrails/check",
         headers=auth,
-        data={"request_id": RID, "handoff": "false"},
+        data={"request_id": RID},
         files={"file": ("npwp.jpg", _jpeg(), "image/jpeg")},
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["passed"] is True
-    assert response.json()["data"]["job"] is None
     assert stub_ekstraksi.submitted == []
+    assert stub_waiter.calls == []

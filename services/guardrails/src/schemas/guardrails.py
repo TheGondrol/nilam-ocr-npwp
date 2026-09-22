@@ -1,11 +1,11 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ocr_common.pipeline_schemas import FinalResult
-from ocr_common.schemas import JobAccepted, JobState, Stage, SuccessEnvelope
+from ocr_common.schemas import SuccessEnvelope
 
 Verdict = Literal["accepted", "reject"]
+JobStatus = Literal["pending", "processing", "completed", "failed"]
 
 
 class PageResult(BaseModel):
@@ -49,10 +49,7 @@ class DocumentResult(BaseModel):
 class GuardrailReport(BaseModel):
     passed: bool = Field(
         ...,
-        description=(
-            "true: send the document on to the OCR stage. false: stop, and answer the client with `reason` "
-            "(the sequence diagram uses 422 for this)"
-        ),
+        description="true: the document may go on to the OCR stage. false: stop, and answer the client with `reason`",
         examples=[True],
     )
     reason: str | None = Field(
@@ -67,53 +64,67 @@ class GuardrailReport(BaseModel):
     pages: list[PageResult] = Field(..., description="One entry per page, in page order")
 
 
-class PipelineProgress(BaseModel):
-    stage: Stage = Field(
-        ...,
-        description=(
-            "The stage this is about: `SCORING` when the pipeline is `DONE`, the stage that failed when `FAILED`, "
-            "or the stage still running when the wait ran out"
-        ),
-        examples=["SCORING"],
-    )
-    status: JobState = Field(
-        ...,
-        description=(
-            "`DONE`: `result` holds the final result. `FAILED`: the pipeline stopped at `stage`. `PROCESSING`: still "
-            "running when the wait ran out (HTTP 202); the outcome follows in the stage callbacks"
-        ),
-        examples=["DONE"],
-    )
-    error_message: str | None = Field(
-        None, description="Why `stage` failed; null unless `status` is `FAILED`", examples=[None]
-    )
-
-
-class GuardrailJobReport(GuardrailReport):
-    job: JobAccepted | None = Field(
-        None,
-        description=(
-            "The OCR job this service started on the ekstraksi service when `passed`; null when rejected (nothing "
-            "runs and no callback follows) or when `handoff` was false"
-        ),
-    )
-    pipeline: PipelineProgress | None = Field(
-        None,
-        description=(
-            "Where the pipeline stood when this response was sent, after waiting up to `PIPELINE_WAIT_SECONDS` "
-            "from the moment the request arrived. Null when rejected, when `handoff` was false, or when waiting is "
-            "disabled (`PIPELINE_WAIT_SECONDS=0`)"
-        ),
-    )
-    result: FinalResult | None = Field(
-        None,
-        description=(
-            "The final result when `pipeline.status` is `DONE`: identical to the `result` of the SCORING callback, "
-            "which is still sent. Null otherwise"
-        ),
-    )
-
-
-class GuardrailCheckResponse(SuccessEnvelope):
+class GuardrailReportResponse(SuccessEnvelope):
     message: str = Field("OK", description="Human-readable outcome", examples=["OK"])
-    data: GuardrailJobReport
+    data: GuardrailReport
+
+
+class ContractField(BaseModel):
+    value: str | None = Field(
+        None, description="The value read; null when the field was not found", examples=["12.345.678.9-012.345"]
+    )
+    confidence: Literal[0, 1] = Field(
+        ...,
+        description=(
+            "1 when the ML team's trust model gives this value a probability of being correct of at least "
+            "`FIELD_CONFIDENCE_THRESHOLD` (0.5 by default); 0 when it is lower, or when there is no value"
+        ),
+        examples=[1],
+    )
+
+
+class NpwpData(BaseModel):
+    nomor_npwp: ContractField = Field(
+        ...,
+        description="15-digit number as `XX.XXX.XXX.X-XXX.XXX`, or a 16-digit NIK-based number as 16 plain digits",
+    )
+    nama: ContractField = Field(
+        ..., description="The name on the card: the taxpayer's name, or the registered name on a company's card"
+    )
+
+
+class ExtractOcrResponse(BaseModel):
+    status_code: int = Field(..., description="Same as the HTTP status code", examples=[200])
+    status_desc: str = Field(..., description="Reason phrase of `status_code`", examples=["OK"])
+    message: str = Field(
+        ...,
+        description="Human-readable; its wording may change, so branch on `errors` instead",
+        examples=["OCR extraction completed successfully"],
+    )
+    data: NpwpData | None = Field(None, description="The OCR fields when `job_status` is `completed`; null otherwise")
+    errors: str | None = Field(
+        None, description="Failure code when the request failed or was refused; null otherwise", examples=[None]
+    )
+    request_id: str | None = Field(None, description="The request_id this response belongs to")
+    document_type: str | None = Field(None, description="Document type of the request", examples=["npwp"])
+    job_status: JobStatus | None = Field(
+        None,
+        description=(
+            "`completed` (200), `processing` (202), or `failed`; null when the request was refused before "
+            "anything was processed"
+        ),
+        examples=["completed"],
+    )
+    guardrails: Literal[0, 1] | None = Field(
+        None,
+        description=(
+            "1: the document passed the guardrails model; 0: it was rejected. Null on 202, and when the request "
+            "was refused before the check"
+        ),
+        examples=[1],
+    )
+    params: Any = Field(
+        None,
+        description="The `params` sent with this request, returned unchanged; null when not sent",
+        examples=[{"nik": "3123456711950001", "refno": "PK19039Y8U"}],
+    )

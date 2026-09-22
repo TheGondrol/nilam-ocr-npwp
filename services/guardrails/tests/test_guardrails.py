@@ -115,41 +115,46 @@ def test_health_lists_backend(client):
     assert body["backends"] == {"guardrails": "mock"}
 
 
-def test_http_check_returns_contract_shape(client, auth):
+def test_extract_ocr_follows_the_orchestrator_contract(client, auth):
     response = client.post(
         "/v1/extract-ocr", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
     )
     assert response.status_code == 200
+    assert response.json() == {
+        "status_code": 200,
+        "status_desc": "OK",
+        "message": "OCR extraction completed successfully",
+        "data": {
+            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
+            "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+        },
+        "errors": None,
+        "request_id": "OCR_1",
+        "document_type": "npwp",
+        "job_status": "completed",
+        "guardrails": 1,
+        "params": None,
+    }
+
+
+def test_check_returns_the_guardrails_report(client, auth):
+    response = client.post(
+        "/v1/guardrails/check", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
+    )
+    assert response.status_code == 200
     body = response.json()
-    assert body["status_code"] == 200
-    assert body["message"] == "OK"
-    assert body["request_id"] == "OCR_1"
-    report = {
+    assert (body["message"], body["request_id"]) == ("OK", "OCR_1")
+    assert body["data"] == {
         "passed": True,
         "reason": None,
         "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
         "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
     }
-    assert body["data"] == {
-        **report,
-        "job": {"request_id": "OCR_1", "stage": "OCR", "status": "PROCESSING", "duplicate": False},
-        "pipeline": {"stage": "SCORING", "status": "DONE", "error_message": None},
-        "result": {
-            "document_type": "npwp",
-            "fields": {
-                "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.99},
-                "nama": {"value": "BUDI SANTOSO", "confidence": 0.97},
-                "nama_badan": {"value": None, "confidence": 0.0},
-            },
-            "scoring": {"npwp_confidence": 0.7296, "name_confidence": 0.9471},
-            "guardrails": report,
-        },
-    }
 
 
-def test_http_check_pdf_reports_every_page(client, auth):
+def test_check_pdf_reports_every_page(client, auth):
     response = client.post(
-        "/v1/extract-ocr",
+        "/v1/guardrails/check",
         data={"request_id": "OCR_2"},
         files=image_upload("scan.pdf", _pdf(2), "application/pdf"),
         headers=auth,
@@ -161,9 +166,9 @@ def test_http_check_pdf_reports_every_page(client, auth):
 
 
 @pytest.mark.parametrize("filename", ["blur.jpg", "invalid.jpg", "notnpwp.jpg"])
-def test_http_mock_scenarios_reject_with_200(client, auth, filename):
+def test_check_mock_scenarios_reject_with_200(client, auth, filename):
     response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_3"}, files=image_upload(filename, _jpeg()), headers=auth
+        "/v1/guardrails/check", data={"request_id": "OCR_3"}, files=image_upload(filename, _jpeg()), headers=auth
     )
     assert response.status_code == 200
     data = response.json()["data"]
@@ -171,6 +176,25 @@ def test_http_mock_scenarios_reject_with_200(client, auth, filename):
     assert data["document"]["n_reject"] == 1
     assert data["passed"] is False
     assert data["reason"] == "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"
+
+
+def test_extract_ocr_rejection_is_400_with_guardrails_0(client, auth):
+    response = client.post(
+        "/v1/extract-ocr", data={"request_id": "OCR_3"}, files=image_upload("notnpwp.jpg", _jpeg()), headers=auth
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "status_code": 400,
+        "status_desc": "Bad Request",
+        "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
+        "data": None,
+        "errors": "DOWNSTREAM_VALIDATION_ERROR",
+        "request_id": "OCR_3",
+        "document_type": "npwp",
+        "job_status": "failed",
+        "guardrails": 0,
+        "params": None,
+    }
 
 
 def test_http_request_id_is_required(client, auth):
@@ -193,7 +217,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
         headers=auth,
     )
     assert response.status_code == 200
-    assert response.json()["data"]["document"]["verdict"] == "accepted"
+    assert response.json()["job_status"] == "completed"
 
 
 def test_unsupported_content_type_returns_400(client, auth):

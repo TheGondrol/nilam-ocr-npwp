@@ -5,7 +5,6 @@ import httpx
 from PIL import Image
 
 from ocr_common.errors import ServiceError
-from ocr_common.npwp import final_result
 from ocr_common.remote import RemoteModelClient
 from src.api.v1.guardrails import get_guardrails_service
 from src.clients.ekstraksi import EkstraksiJobClient
@@ -52,13 +51,12 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
     response = _submit(client, auth)
 
     assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["pipeline"] == {"stage": "SCORING", "status": "DONE", "error_message": None}
-    report = {key: data[key] for key in ("passed", "reason", "document", "pages")}
-    results = stub_waiter.outcome.results
-    assert data["result"] == final_result("npwp", report, results["STRUCTURING"], results["SCORING"])
-    assert data["result"]["fields"]["nama"] == {"value": "BUDI SANTOSO", "confidence": 0.97}
-    assert data["result"]["scoring"] == {"npwp_confidence": 0.7296, "name_confidence": 0.9471}
+    body = response.json()
+    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 1, None)
+    assert body["data"] == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+    }
     [(request_id, timeout)] = stub_waiter.calls
     assert request_id == RID
     assert 10 < timeout <= 15
@@ -71,33 +69,30 @@ def test_still_running_when_the_wait_runs_out_is_202(client, auth, stub_waiter):
 
     assert response.status_code == 202
     body = response.json()
-    assert (body["status_code"], body["status_desc"]) == (202, "Accepted")
-    assert body["data"]["job"]["stage"] == "OCR"
-    assert body["data"]["pipeline"] == {"stage": "STRUCTURING", "status": "PROCESSING", "error_message": None}
-    assert body["data"]["result"] is None
+    assert (body["status_code"], body["status_desc"], body["message"]) == (
+        202,
+        "Accepted",
+        "OCR job accepted; still processing",
+    )
+    assert (body["job_status"], body["data"], body["guardrails"], body["errors"]) == ("processing", None, None, None)
 
 
-def test_failure_within_the_wait_is_200_with_the_failed_stage(client, auth, stub_waiter):
+def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub_waiter):
     stub_waiter.outcome = WaitOutcome("OCR", "FAILED", "ekstraksi OCR model is unavailable")
 
     response = _submit(client, auth)
 
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["pipeline"] == {
-        "stage": "OCR",
-        "status": "FAILED",
-        "error_message": "ekstraksi OCR model is unavailable",
-    }
-    assert data["result"] is None
+    assert response.status_code == 422
+    body = response.json()
+    assert (body["errors"], body["message"]) == ("OCR_FAILED", "ekstraksi OCR model is unavailable")
+    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 1)
 
 
 def test_rejected_document_answers_at_once_without_waiting(client, auth, stub_waiter):
     response = _submit(client, auth, filename="notnpwp.jpg")
 
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert (data["passed"], data["job"], data["pipeline"], data["result"]) == (False, None, None, None)
+    assert response.status_code == 400
+    assert response.json()["errors"] == "DOWNSTREAM_VALIDATION_ERROR"
     assert stub_waiter.calls == []
 
 
@@ -109,7 +104,7 @@ def test_waiting_disabled_answers_202_right_after_the_handoff(client, auth, stub
         app.dependency_overrides.pop(get_settings, None)
 
     assert response.status_code == 202
-    assert response.json()["data"]["pipeline"] is None
+    assert response.json()["job_status"] == "processing"
     assert stub_waiter.calls == []
 
 

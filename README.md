@@ -94,16 +94,16 @@ Client ─► Orkestrasi: generate request_id · POST url file + document_type �
 Orkestrasi ─► guardrails:8031 POST /v1/extract-ocr                    SATU-SATUNYA PANGGILAN
                 (request_id, document_type, file | file_url)
    guardrails:  model guardrails dijalankan SINKRON
-   passed=false ◄─ 200 {passed: false, reason, document, pages, job: null}
-                ─► Orkestrasi: requests.status=REJECTED, 422 + reason ke client. Selesai.
+   passed=false ◄─ 400 {errors: DOWNSTREAM_VALIDATION_ERROR, job_status: failed, guardrails: 0, message: <alasan>}
+                ─► Orkestrasi: requests.status=REJECTED, jawab client. Selesai.
    passed=true  ─► ekstraksi:8030 POST /v1/ekstraksi/jobs              202 segera
                      (request_id, document_type, guardrails, file)
                    guardrails MENUNGGU maks. PIPELINE_WAIT_SECONDS (default 15 dtk, sejak request diterima):
                    GET /v1/{ekstraksi,structuring,scoring}/jobs/{request_id} berurutan,
                    tiap PIPELINE_POLL_INTERVAL_SECONDS (default 0,5 dtk)
-                ◄─ 200 {…, job, pipeline: {stage: SCORING, status: DONE}, result: <hasil akhir>}    selesai
-                ◄─ 200 {…, job, pipeline: {stage, status: FAILED, error_message}, result: null}     gagal
-                ◄─ 202 {…, job, pipeline: {stage, status: PROCESSING}, result: null}                belum selesai
+                ◄─ 200 {job_status: completed, data: {nomor_npwp, nama}, guardrails: 1, params}   selesai
+                ◄─ 422 {job_status: failed, errors: <TAHAP>_FAILED, guardrails: 1, message}      gagal
+                ◄─ 202 {job_status: processing, data: null, guardrails: null}                    belum selesai
                 ─► Orkestrasi: 200 → jawab client; 202 → requests.status=OCR_PROCESSING, 202 ke client
                    (callback di bawah tetap dikirim dalam semua kasus), lalu:
 
@@ -149,7 +149,7 @@ Ketiga tahap memakai mesin yang sama, `ocr_common/jobs.py`; tiap service hanya m
  "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}}
 ```
 
-Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/jobs.py` (satu tempat untuk ketiga service). Bentuk `result` dirakit di satu tempat, `final_result` di `ocr_common/npwp.py`, yang dipakai callback `SCORING` **dan** respons 200 guardrails, jadi keduanya selalu identik.
+Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/jobs.py` (satu tempat untuk ketiga service). Bentuk `result` dirakit di satu tempat, `final_result` di `ocr_common/npwp.py`. Respons 200 guardrails diturunkan dari hasil yang sama ke bentuk kontrak `extract-ocr` orchestrator (`contract_fields` di `services/guardrails/src/api/v1/extract_contract.py`): `nomor_npwp` dan `nama` (nama badan untuk kartu perusahaan) dengan `confidence` 0/1 dari trust model dan `FIELD_CONFIDENCE_THRESHOLD`.
 
 ### Kontrak lama (sinkron)
 
@@ -157,7 +157,7 @@ Dipertahankan sampai orkestrator pindah ke alur async. `POST /v1/extract-ocr` ke
 
 ```
 orkestrator ──► ekstraksi:8030 /v1/extract-ocr (request_id + file/file_url)
-                 │ 1. POST guardrails:8031 /v1/extract-ocr (handoff=false)  ── verdict=reject ──► 400
+                 │ 1. POST guardrails:8031 /v1/guardrails/check             ── verdict=reject ──► 400
                  │ 2. OCR engine (paddle / mock)
                  │ 3. POST structuring:8032 /v1/structuring/structure
                  │ 4. POST scoring:8033 /v1/scoring/score
@@ -276,7 +276,8 @@ guardrails:
 | `GUARDRAILS_REJECT_THRESHOLD` | Tidak | dari checkpoint (`0.5`) | Backend lokal saja. Halaman reject kalau `proba_reject >= ambang` |
 | `GUARDRAILS_DOCUMENT_POLICY` | Tidak | `all` | Backend lokal saja. `all`: accepted hanya kalau semua halaman accepted; `majority`: accepted > reject |
 | `GUARDRAILS_PDF_DPI` / `GUARDRAILS_MAX_PAGES` | Tidak | `150` / `20` | Backend lokal saja. Render PDF per halaman |
-| `PIPELINE_WAIT_SECONDS` | Tidak | `15` | Berapa lama `/v1/extract-ocr` menunggu pipeline, dihitung sejak request diterima. Selesai dalam waktu ini → **200** dengan `result` (atau `pipeline.status: FAILED`); belum → **202**. `0` = tidak menunggu (selalu 202 setelah hand-off). HTTP timeout pemanggil harus di atas nilai ini |
+| `PIPELINE_WAIT_SECONDS` | Tidak | `15` | Berapa lama `/v1/extract-ocr` menunggu pipeline, dihitung sejak request diterima. Selesai dalam waktu ini → **200** `job_status: completed` dengan `data` (atau **422** `<TAHAP>_FAILED` kalau gagal); belum → **202** `processing`. `0` = tidak menunggu (selalu 202 setelah hand-off). HTTP timeout pemanggil harus di atas nilai ini |
+| `FIELD_CONFIDENCE_THRESHOLD` | Tidak | `0.5` | Probabilitas trust model minimal agar `confidence` sebuah field di respons `/v1/extract-ocr` bernilai `1` (di bawahnya `0`). Keputusan bisnis: sesuaikan setelah divalidasi |
 | `PIPELINE_POLL_INTERVAL_SECONDS` | Tidak | `0.5` | Jeda antar-cek status tahap selama menunggu. Menambah latensi paling banyak sebesar ini tiap kali sebuah tahap masih berjalan; lebih kecil = lebih cepat tapi lebih banyak `GET` |
 | `STRUCTURING_SERVICE_URL` / `SCORING_SERVICE_URL` | Produksi: ya, selama menunggu | `http://127.0.0.1:8032` / `:8033` | Untuk membaca status tahap saat menunggu (`GET …/jobs/{request_id}`). `STRUCTURING_API_KEY` / `SCORING_API_KEY` = `API_KEY` kalau kosong. Di luar `local` ditolak kalau menunjuk localhost dan `PIPELINE_WAIT_SECONDS > 0` |
 
@@ -292,7 +293,8 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 |---|---|---|---|
 | semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`). **Liveness**: hanya "proses hidup", tidak menyentuh dependensi |
 | semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk ekstraksi / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
-| guardrails | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, selalu 200.** form: `request_id`, `document_type` (default `npwp`), `handoff` (default `true`) + tepat satu dari `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`, `job`. Lolos: dokumen diteruskan ke `ekstraksi/jobs`, `job` = jawaban tahap OCR. Ditolak: `job: null`, tidak ada yang jalan. `handoff=false` hanya menilai (dipakai kontrak lama) |
+| guardrails | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, kontrak `extract-ocr` orchestrator.** form: `request_id`, `document_type` (default `npwp`), `params` (opsional, dikembalikan apa adanya) + tepat satu dari `file` / `file_url`. Ditolak → 400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`. Lolos → diteruskan ke `ekstraksi/jobs`, lalu menunggu sampai `PIPELINE_WAIT_SECONDS`: 200 `job_status: completed` + `data` {`nomor_npwp`, `nama`} (`confidence` 0/1), 422 `<TAHAP>_FAILED`, atau 202 `processing` |
+| guardrails | POST | `/v1/guardrails/check` | **Internal, hanya menilai, selalu 200.** `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`. Tidak memulai apa pun; dipakai kontrak lama dan untuk debugging |
 | ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** Dipanggil guardrails. form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
 | structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}` |
 | scoring | POST | `/v1/scoring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr", "structuring": {"fields": {...}}}` |
