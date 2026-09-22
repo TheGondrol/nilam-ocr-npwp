@@ -56,16 +56,26 @@ yang perlu di-whitelist. Kami belum bisa menguji panggilan dari namespace kalian
 
 ## 3. Alur
 
-Hanya **satu panggilan** dari sisi kalian. Sisanya datang sebagai callback.
+Hanya **satu panggilan** dari sisi kalian, dan jawabannya mengikuti kontrak `extract-ocr`
+orchestrator. Guardrails menunggu pipeline sampai `PIPELINE_WAIT_SECONDS` (default
+**15 detik**, dihitung sejak request diterima):
 
-    1. POST :8031/v1/extract-ocr          guardrails dicek sinkron, selalu 200:
-         ditolak  -> data.passed == false, data.job == null
-                     tidak ada yang jalan, tidak ada callback; balas 422 ke client pakai data.reason
-         lolos    -> guardrails sendiri sudah meneruskan dokumen ke tahap OCR
-                     data.passed == true, data.job berisi job OCR
-    2. rantai jalan sendiri: OCR -> structuring -> scoring
-    3. kalian menerima 3 callback: OCR, STRUCTURING, SCORING
-         hasil akhir ada di callback SCORING
+    POST :8031/v1/extract-ocr
+      ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
+                                         tidak ada yang jalan, tidak ada callback
+      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 1
+      lolos, gagal tepat waktu   -> 422  job_status = failed,
+                                         errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
+      lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
+                                         hasil menyusul di callback SCORING
+
+Setelah dokumen lolos, callback `OCR`, `STRUCTURING`, `SCORING` tetap dikirim dalam semua
+kasus; kalau hasil sudah diterima di respons 200, callback-nya boleh diabaikan. Di jalur 202,
+callback SCORING membawa hasil akhir dalam bentuk internal (bagian 7); petakan ke `data`
+dengan aturan yang sama seperti di bagian 4.
+
+Pasang HTTP timeout panggilan ini di atas `PIPELINE_WAIT_SECONDS`, mis. **30 detik** untuk
+default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu.
 
 `request_id` dibuat oleh kalian dan menjadi kunci di semua tahap. Bebas formatnya,
 string; contoh yang kami pakai saat uji: `REQ_a0e0fd34ed7a`.
@@ -76,11 +86,12 @@ bagian 5 dan 6 supaya jelas apa yang terjadi dan bisa dipakai untuk rekonsiliasi
 
 ## 4. Service guardrails (port 8031): pintu masuk
 
-Menilai layak atau tidaknya dokumen, dan kalau layak langsung memulai pipeline. Model
-EfficientNet berjalan di dalam container. Guardrails sendiri tidak membuat job dan
-tidak mengirim callback; callback pertama datang dari tahap OCR.
+Menilai layak atau tidaknya dokumen dengan model guardrails (EfficientNet, di dalam
+container), dan kalau layak memulai pipeline lalu menunggu hasilnya sampai
+`PIPELINE_WAIT_SECONDS`. Guardrails sendiri tidak membuat job dan tidak mengirim callback;
+callback pertama datang dari tahap OCR.
 
-### POST /v1/extract-ocr — mulai pipeline
+### POST /v1/extract-ocr — jalankan pipeline
 
 Kirim `request_id` plus dokumen sebagai `file` (multipart), **atau** sebagai `file_url`
 supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
@@ -89,70 +100,91 @@ supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
       -H "X-API-Key: changeme" \
       -F "request_id=REQ_001" \
       -F "document_type=npwp" \
+      -F 'params={"nik": "3123456711950001", "refno": "PK19039Y8U"}' \
       -F "file=@npwp.jpg"
 
-Path ini sama dengan `extract-ocr` lama, tetapi di **port 8031 (guardrails)**, bukan
-8030, dan bentuk jawabannya berbeda: laporan guardrails plus `job`, bukan field hasil OCR.
-Hasil akhir datang lewat callback SCORING.
+Path ini sama dengan `extract-ocr` lama, tetapi di **port 8031 (guardrails)**, bukan 8030.
+Bentuk jawabannya mengikuti kontrak `extract-ocr` orchestrator: envelope standar ditambah
+`document_type`, `job_status`, `guardrails`, dan `params`.
 
 | Field | Wajib | Keterangan |
 |---|---|---|
 | `request_id` | ya | dibuat oleh kalian |
-| `document_type` | tidak | default `npwp`; saat ini hanya `npwp` |
+| `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
+| `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal 5 MB. PDF dinilai per halaman |
-| `handoff` | tidak | default `true`. `false` = hanya menilai, tidak memulai apa pun; untuk debugging |
 
 `file_url` diunduh sekali di panggilan ini lalu diteruskan ke tahap OCR sebagai file,
 jadi presigned URL cukup hidup selama panggilan ini saja. Host-nya harus terdaftar di
 `FILE_URL_ALLOWED_HOSTS` service (atau, kalau itu kosong, resolve ke alamat publik), dan
 redirect tidak diikuti.
 
-Dokumen lolos, dijawab **200**, pipeline sudah berjalan:
+Selesai dalam waktu tunggu, **200**:
 
     {
       "status_code": 200,
       "status_desc": "OK",
-      "message": "OK",
+      "message": "OCR extraction completed successfully",
+      "data": {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1}
+      },
       "errors": null,
       "request_id": "REQ_001",
-      "data": {
-        "passed": true,
-        "reason": null,
-        "document": {"verdict": "accepted", "confidence": 0.9663,
-                     "n_pages": 1, "n_approve": 1, "n_reject": 0},
-        "pages": [{"page_index": 0, "proba_approve": 0.9663,
-                   "proba_reject": 0.0337, "verdict": "accepted"}],
-        "job": {"request_id": "REQ_001", "stage": "OCR",
-                "status": "PROCESSING", "duplicate": false}
-      }
+      "document_type": "npwp",
+      "job_status": "completed",
+      "guardrails": 1,
+      "params": {"nik": "3123456711950001", "refno": "PK19039Y8U"}
     }
 
-Dokumen ditolak, juga **200**, tidak ada yang jalan:
+- `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
+- `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
+  `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
 
-    "data": {
-      "passed": false,
-      "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
-      "document": {"verdict": "reject", "confidence": 0.9851,
-                   "n_pages": 1, "n_approve": 0, "n_reject": 1},
-      "pages": [{"page_index": 0, "proba_approve": 0.0149,
-                 "proba_reject": 0.9851, "verdict": "reject"}],
-      "job": null
-    }
+Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback SCORING, atau
+baca dengan `GET /v1/scoring/jobs/{request_id}`:
 
-Error:
+    {"status_code": 202, "status_desc": "Accepted", "message": "OCR job accepted; still processing",
+     "data": null, "errors": null, "request_id": "REQ_001", "document_type": "npwp",
+     "job_status": "processing", "guardrails": null, "params": {...}}
 
-| Kode | Arti | Pipeline jalan? |
-|---|---|---|
-| 400 | file kosong, terlalu besar, format salah, `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
-| 401 | `X-API-Key` salah | tidak |
-| 503 / 504 | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
+Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
 
-**Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi tahap
-OCR menjawab `job.duplicate: true` dan tidak menjalankan apa pun dua kali, kecuali
-percobaan sebelumnya berstatus `FAILED`, atau sudah `PROCESSING` lebih lama dari lease
-(`PIPELINE_JOB_LEASE_SECONDS`, default 5 menit: prosesnya mati di tengah jalan); dalam hal itu
-dijalankan ulang. Job yang masih jalan saat service shutdown dilaporkan `FAILED` lewat callback,
-jadi cukup dikirim ulang.
+    {"status_code": 400, "status_desc": "Bad Request",
+     "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
+     "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
+     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+
+Tahap pipeline gagal dalam waktu tunggu, **422**; request berakhir di sini, sama seperti
+callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
+
+    {"status_code": 422, "status_desc": "Unprocessable Entity",
+     "message": "ekstraksi OCR model is unavailable",
+     "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
+     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
+
+Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lain):
+
+| Kode | `errors` | Arti | Pipeline jalan? |
+|---|---|---|---|
+| 400 | `UNSUPPORTED_DOCUMENT_TYPE` | `document_type` bukan `npwp` | tidak |
+| 400 | = `message` | file kosong, terlalu besar, format salah, `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
+| 401 | = `message` | `X-API-Key` salah | tidak |
+| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
+| 503 / 504 | = `message` | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
+
+**Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
+tidak menjalankan apa pun dua kali, kecuali percobaan sebelumnya berstatus `FAILED`, atau sudah
+`PROCESSING` lebih lama dari lease (`PIPELINE_JOB_LEASE_SECONDS`, default 5 menit: prosesnya
+mati di tengah jalan); dalam hal itu dijalankan ulang. Job yang masih jalan saat service
+shutdown dilaporkan `FAILED` lewat callback, jadi cukup dikirim ulang. `request_id` yang sudah
+selesai dijawab 200 dengan hasil yang tersimpan.
+
+### POST /v1/guardrails/check — hanya menilai (internal)
+
+Menjalankan model guardrails tanpa memulai apa pun dan mengembalikan laporan mentahnya
+(`passed`, `reason`, `document`, `pages[]` dengan probabilitas per halaman). Dipakai kontrak
+lama di ekstraksi dan untuk debugging; kalian tidak perlu memanggilnya.
 
 ## 5. Service ekstraksi (port 8030)
 
