@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any, TypedDict
 
-from sqlalchemy import DateTime, Float, Integer, String, select
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import select
+from sqlalchemy.orm import Mapped
 
-from ocr_common.database import JSON_TYPE, Base, get_session_factory
+from ocr_common.database import Base, get_session_factory
+from ocr_common.tables import OCR_NPWP_REQUESTS
 from src.core.config import get_settings
 
 
@@ -55,18 +56,18 @@ class InMemoryRequestRepository:
 
 
 class RequestRow(Base):
-    __tablename__ = "ocr_npwp_requests"
+    __table__ = OCR_NPWP_REQUESTS
 
-    request_id: Mapped[str] = mapped_column(String, primary_key=True)
-    status: Mapped[str] = mapped_column(String, nullable=False)
-    result: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
-    guardrails: Mapped[float | None] = mapped_column(Float, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
-    file_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ds: Mapped[str] = mapped_column(String, nullable=False)
+    request_id: Mapped[str]
+    status: Mapped[str]
+    result: Mapped[dict[str, Any] | None]
+    guardrails: Mapped[float | None]
+    error_message: Mapped[str | None]
+    file_name: Mapped[str | None]
+    file_size_bytes: Mapped[int | None]
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
+    ds: Mapped[str]
 
 
 class SqlRequestRepository:

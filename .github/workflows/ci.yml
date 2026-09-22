@@ -33,6 +33,59 @@ jobs:
       - run: make typecheck
       - run: make test
 
+  migrations:
+    name: Database migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: bribrain_ocr_nilam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:ci@localhost:5432/bribrain_ocr_nilam
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: db/requirements.txt
+      - run: python -m pip install -r db/requirements.txt ./libs/ocr_common
+      - name: Migrate an empty database
+        run: python -m alembic -c db/alembic.ini upgrade head
+      - name: Table definitions in the code and the migrations agree
+        run: python -m alembic -c db/alembic.ini check
+      - name: Adopt a database that already has the tables
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+
+          import asyncpg
+
+
+          async def main():
+              connection = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
+              await connection.execute("DROP TABLE ocr_npwp_alembic_version")
+              await connection.close()
+
+
+          asyncio.run(main())
+          PY
+          python -m alembic -c db/alembic.ini upgrade head
+          python -m alembic -c db/alembic.ini check
+      - name: The migration image builds
+        run: docker build -f db/Dockerfile -t ci/migrate .
+
   image:
     name: Image ${{ matrix.service }}
     runs-on: ubuntu-latest

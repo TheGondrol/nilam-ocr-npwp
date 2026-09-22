@@ -1,37 +1,19 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, MetaData, String, Table, and_, or_, select, update
+from sqlalchemy import MetaData, Table, and_, or_, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS
-from ocr_common.database import JSON_TYPE, get_engine
+from ocr_common.database import get_engine
 from ocr_common.jobs import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRecord
+from ocr_common.tables import pipeline_tables
 
 
 def build_tables(table_prefix: str) -> tuple[MetaData, Table, Table]:
     metadata = MetaData()
-    jobs = Table(
-        f"{table_prefix}_jobs",
-        metadata,
-        Column("request_id", String, primary_key=True),
-        Column("status", String, nullable=False),
-        Column("error_message", String, nullable=True),
-        Column("attempts", Integer, nullable=False),
-        Column("created_at", DateTime(timezone=True), nullable=False),
-        Column("updated_at", DateTime(timezone=True), nullable=False),
-        Column("ds", String, nullable=False),
-    )
-    results = Table(
-        f"{table_prefix}_results",
-        metadata,
-        Column("request_id", String, ForeignKey(jobs.c.request_id), primary_key=True),
-        Column("result", JSON_TYPE, nullable=False),
-        Column("created_at", DateTime(timezone=True), nullable=False),
-        Column("updated_at", DateTime(timezone=True), nullable=False),
-        Column("ds", String, nullable=False),
-    )
+    jobs, results = pipeline_tables(table_prefix, metadata)
     return metadata, jobs, results
 
 

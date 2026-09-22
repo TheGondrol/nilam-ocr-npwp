@@ -53,12 +53,18 @@ Setelah mengubah Secret, restart pod: `kubectl -n nilam-ocr-npwp rollout restart
 
 ## Skema database
 
-Service tidak membuat tabel sendiri. Jalankan sekali ke database `bribrain_ocr_nilam`:
+Service tidak membuat tabel sendiri; tabel dipasang lewat migrasi Alembic ([db/](../../db)).
+Dari laptop:
 
-```powershell
-psql "postgresql://<user>:<password>@34.50.114.49:5432/bribrain_ocr_nilam" `
-  -f services/ekstraksi/db/schema.sql -f services/structuring/db/schema.sql -f services/scoring/db/schema.sql
+```bash
+DB_HOST=<alamat postgres> ./migrate-db.sh          # upgrade head
+DB_HOST=<alamat postgres> ./migrate-db.sh current  # revisi yang terpasang sekarang
 ```
+
+Script mengambil `DATABASE_URL` dari Secret release, mengganti host-nya dengan `DB_HOST`,
+lalu menjalankan Alembic di dalam image `db/Dockerfile`. Database yang tabelnya sudah
+dipasang manual sebelum ada migrasi aman dijalankan: revisi baseline memakai
+`CREATE TABLE IF NOT EXISTS`.
 
 ## Deploy perubahan kode
 
@@ -75,7 +81,7 @@ Script membangun image service yang disebut, mendorongnya ke Artifact Registry d
 
 Keempat container ada dalam satu pod, jadi deploy satu service pun membuat pod baru berisi keempatnya. Pod lama baru berhenti setelah pod baru siap.
 
-Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan `db/schema.sql` dijalankan dulu dengan [apply-schema.sh](apply-schema.sh) sebelum deploy image yang membutuhkannya.
+Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan tabel dijalankan dulu dengan [migrate-db.sh](migrate-db.sh) sebelum deploy image yang membutuhkannya.
 
 ## Install dan upgrade
 

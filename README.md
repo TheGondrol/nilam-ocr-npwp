@@ -40,7 +40,8 @@ nilam-ocr-npwp/
 │   │   ├── app.py                    # create_app(): middleware request_id, exception handler envelope, /health
 │   │   ├── config.py                 # BaseServiceSettings (API_KEY, port, batas upload) + PipelineSettings
 │   │   ├── jobs.py                   # mesin tahap pipeline async: klaim job, runner background, callback, handoff, retry
-│   │   ├── jobs_sql.py               # <schema>.jobs / <schema>.results di PostgreSQL (INSERT ... ON CONFLICT DO NOTHING)
+│   │   ├── jobs_sql.py               # <tahap>_jobs / <tahap>_results di PostgreSQL (INSERT ... ON CONFLICT DO NOTHING)
+│   │   ├── tables.py                 # definisi kolom SEMUA tabel repo ini: dipakai kode, migrasi, dan test
 │   │   ├── security.py               # verify_api_key (X-API-Key), API_KEY_ERROR
 │   │   ├── envelope.py / errors.py / schemas.py   # envelope response, ServiceError, ErrorResponse + helper error()
 │   │   ├── intake.py / fetch_url.py  # terima `file` ATAU `file_url` (presigned MinIO)
@@ -55,7 +56,6 @@ nilam-ocr-npwp/
 ├── services/
 │   ├── ekstraksi/                    # port 8030 (slot ocr-npwp)
 │   │   ├── Dockerfile · requirements.txt · .env.example · openapi.yaml · pyproject.toml
-│   │   ├── db/schema.sql             # tabel ocr_jobs, ocr_results + ocr_npwp_requests (kontrak lama)
 │   │   ├── src/
 │   │   │   ├── main.py               # create_app(...) + lifespan
 │   │   │   ├── api/v1/jobs.py        # pipeline async: POST/GET /v1/ekstraksi/jobs
@@ -74,9 +74,10 @@ nilam-ocr-npwp/
 │   │   ├── weights/best_model.pt     # checkpoint EfficientNet-B0 (di-gitignore; di-COPY ke image saat build)
 │   │   ├── src/models/guardrails.py  # EfficientNetPageClassifier (efficientnet) + MockPageClassifier (mock)
 │   │   └── src/services/pages.py     # gambar -> 1 halaman, PDF -> halaman per halaman (PyMuPDF)
-│   ├── structuring/                  # port 8032: sama, plus api/v1/jobs.py · services/job_service.py · core/pipeline.py · db/schema.sql
+│   ├── structuring/                  # port 8032: sama, plus api/v1/jobs.py · services/job_service.py · core/pipeline.py
 │   └── scoring/                      # port 8033: sama (tanpa handoff; tahap terakhir)
 ├── deploy/k8s/                       # manifest GKE (Kustomize): base + overlays dev / staging / production
+├── db/                               # migrasi Alembic + peta pemilik tabel (db/README.md)
 ├── docker-compose.yml                # 4 image, 4 container, satu network
 ├── docker-compose.db.yml             # overlay PostgreSQL lokal: satu database, semua tabel di schema public
 ├── scripts/smoke_e2e.py              # memerankan Orkestrasi: guardrails -> jobs -> callback, lewat container
@@ -344,19 +345,29 @@ Kontrak lama: `request_id` sama dua kali → 409; tidak dikenal → 400; tidak a
 
 ## Database
 
-Satu database PostgreSQL, **satu schema per service**, masing-masing dengan dua tabel yang sama bentuknya:
+Satu database PostgreSQL; **semua tabel repo ini di schema `public`**. Database yang sama juga dipakai service orkestrasi untuk tabelnya sendiri (`orchestration_*`, `auth_*`), jadi peta lengkap siapa memiliki tabel apa ada di [db/README.md](db/README.md).
 
-| Schema | Pemilik | `jobs` | `results` |
-|---|---|---|---|
-| `ocr` | ekstraksi | status tahap OCR per `request_id` | blok teks mentah |
-| `structuring` | structuring | status tahap structuring | field bernama |
-| `scoring` | scoring | status tahap scoring | laporan skor |
+| Tabel | Pemilik | Isi |
+|---|---|---|
+| `ocr_jobs` / `ocr_results` | ekstraksi | status tahap OCR per `request_id` dan blok teks mentah |
+| `structuring_jobs` / `structuring_results` | structuring | status tahap structuring dan field bernama |
+| `scoring_jobs` / `scoring_results` | scoring | status tahap scoring dan skor trust model |
+| `ocr_npwp_requests` | ekstraksi | khusus kontrak lama sinkron |
 
-`jobs`: `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `created_at`, `updated_at`, `ds`. `results`: `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Guardrails tidak punya tabel (hasilnya dicatat Orkestrasi di `stage_logs`), dan hasil akhir disimpan Orkestrasi di `requests.final_result` dari callback scoring, bukan di sini. Ekstraksi juga masih punya `ocr_npwp_requests` untuk kontrak lama.
+`*_jobs`: `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `created_at`, `updated_at`, `ds`. `*_results`: `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Guardrails tidak punya tabel: ia membaca status tahap lewat API, bukan lewat database.
 
-Skema dipasang manual (pgAdmin / psql) dari [services/ekstraksi/db/schema.sql](services/ekstraksi/db/schema.sql), [services/structuring/db/schema.sql](services/structuring/db/schema.sql), dan [services/scoring/db/schema.sql](services/scoring/db/schema.sql); aman dijalankan berkali-kali, aplikasi tidak memigrasi sendiri. Definisi kolomnya harus tetap sama dengan `build_tables()` di `ocr_common/jobs_sql.py`. Akses lewat SQLAlchemy 2.0 async + asyncpg (pola sama dengan `ocr-orchestration`). PostgreSQL lokal: `make up-db` (volume lama dari sebelum pipeline async tidak punya schema baru; jalankan ketiga file itu manual atau `down -v`).
+Kolom didefinisikan **sekali** di [`ocr_common/tables.py`](libs/ocr_common/ocr_common/tables.py). Migrasi Alembic di [db/](db/) dan `create_all` di test memakai definisi yang sama, dan `make db-check` gagal kalau keduanya menyimpang.
 
-Tanpa `DATABASE_URL` semuanya in-memory: cukup untuk dev dan test, tapi klaim job hanya idempoten di dalam satu proses.
+```bash
+export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/bribrain_ocr_nilam
+make db-upgrade                       # pasang atau perbarui tabel
+make db-check                         # definisi di kode vs database
+make db-revision m="tambah kolom X"   # revisi baru dari selisihnya, lalu periksa hasilnya
+```
+
+Database yang tabelnya sudah dipasang manual cukup `make db-upgrade`: revisi baseline memakai `CREATE TABLE IF NOT EXISTS`, jadi tabel dan datanya dibiarkan dan database itu tercatat berada di revisi baseline. Di cluster, jalankan [deploy/helm/migrate-db.sh](deploy/helm/migrate-db.sh) **sebelum** men-deploy image yang membutuhkan perubahan tabelnya. PostgreSQL lokal: `make up-db` menjalankan migrasi dulu lewat service `migrate`, service lain start setelah itu selesai.
+
+Akses lewat SQLAlchemy 2.0 async + asyncpg (pola sama dengan `ocr-orchestration`). Tanpa `DATABASE_URL` semuanya in-memory: cukup untuk dev dan test, tapi klaim job hanya idempoten di dalam satu proses.
 
 ## Mengganti Mock dengan Model Asli
 
@@ -418,7 +429,7 @@ Kontrak method per app: guardrails lokal `classify(filename, pages: list[PIL.Ima
 
 ## Menambah Service Baru
 
-Salin salah satu folder `services/<nama>` (yang paling kecil: `scoring`), ganti nama dan port, lalu tambahkan ke `docker-compose.yml`, `requirements-dev.txt`, dan `SERVICES` di `Makefile`. Kalau menjadi tahap baru pipeline async: tambah konstanta `STAGE_*` di `ocr_common/jobs.py`, schema `db/schema.sql` sendiri, `core/pipeline.py` + `services/job_service.py` + `api/v1/jobs.py` (salin dari structuring), lalu arahkan `get_next_stage()` tahap sebelumnya ke `/v1/<nama>/jobs`. Kalau ikut kontrak lama `extract-ocr`, tambahkan klien di `services/ekstraksi/src/clients/stages.py` dan pemanggilannya di `services/ocr_service.py`.
+Salin salah satu folder `services/<nama>` (yang paling kecil: `scoring`), ganti nama dan port, lalu tambahkan ke `docker-compose.yml`, `requirements-dev.txt`, dan `SERVICES` di `Makefile`. Kalau menjadi tahap baru pipeline async: tambah konstanta `STAGE_*` di `ocr_common/jobs.py`, prefix tabelnya di `PIPELINE_TABLE_PREFIXES` (`ocr_common/tables.py`) plus revisi Alembic baru (`make db-revision`), `core/pipeline.py` + `services/job_service.py` + `api/v1/jobs.py` (salin dari structuring), lalu arahkan `get_next_stage()` tahap sebelumnya ke `/v1/<nama>/jobs`. Kalau ikut kontrak lama `extract-ocr`, tambahkan klien di `services/ekstraksi/src/clients/stages.py` dan pemanggilannya di `services/ocr_service.py`.
 
 ## Testing, Lint & openapi.yaml
 
@@ -435,7 +446,7 @@ Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipe
 
 `openapi.yaml` tiap service adalah turunan kode, dijaga `tests/test_openapi.py`, dan format dump-nya sama dengan `scripts/check_openapi.py` di monorepo orkestrasi.
 
-CI (`.github/workflows/ci.yml`) berjalan di tiap PR dan push ke `main`: `make lint`, `ruff format --check`, `make typecheck`, `make test` di Python 3.11, lalu build keempat image dan memastikan tiap container sehat dan berhenti dengan exit code 0 saat `docker stop` (SIGTERM sampai ke uvicorn, jadi drain shutdown benar-benar jalan). Image guardrails di CI memakai bobot kosong dan backend `mock`; image itu tidak di-push.
+CI (`.github/workflows/ci.yml`) berjalan di tiap PR dan push ke `main`: `make lint`, `ruff format --check`, `make typecheck`, `make test` di Python 3.11, migrasi database terhadap PostgreSQL sungguhan (`make db-upgrade` + `make db-check`), lalu build keempat image dan memastikan tiap container sehat dan berhenti dengan exit code 0 saat `docker stop` (SIGTERM sampai ke uvicorn, jadi drain shutdown benar-benar jalan). Image guardrails di CI memakai bobot kosong dan backend `mock`; image itu tidak di-push.
 
 ### Spec untuk tim gateway / orkestrasi
 
@@ -466,17 +477,17 @@ Aturan penulisan yang dijaga test: setiap operasi punya `operationId` (dipakai g
 
 Belum dikerjakan, diurutkan dari dampak terbesar; tiap butir perlu tiket.
 
-1. **Schema database punya dua sumber kebenaran dan tidak ada migrasi.** Tabel didefinisikan di SQLAlchemy (`build_tables` di `ocr_common/jobs_sql.py`, `RequestRow` di ekstraksi) dan juga di `services/*/db/schema.sql`. Index dan `DEFAULT now()` hanya ada di SQL, sementara test memakai `create_all`, jadi test tidak berjalan di schema produksi. `CREATE TABLE IF NOT EXISTS` tidak bisa mengubah kolom. Usulan: Alembic per service (`version_table` per service), revisi pertama = schema sekarang, `apply-schema.sh` diganti `alembic upgrade head` (Job / initContainer), dan test menjalankan migrasi alih-alih `create_all`.
-2. **Dua jalur deploy.** Helm (`deploy/helm`: satu pod berisi empat container, yang dipakai di `gc-ddb-dev-gke-cluster-01`) dan Kustomize (`deploy/k8s`: satu Deployment per service, masih berisi `REPLACE_ME`). Usulan: satu Deployment per service untuk produksi, supaya guardrails (torch) bisa di-scale dan kehabisan memori tanpa ikut menjatuhkan tahap lain; bawa pola itu ke chart Helm, lalu hapus salah satu jalur. Chart Helm juga belum punya NetworkPolicy sama sekali.
-3. **Alamat database publik ter-commit.** `deploy/helm/apply-schema.sh` memakai default `DB_HOST=34.50.114.49`, LoadBalancer yang terjangkau dari laptop. Usulan: hapus default itu (`DB_HOST` wajib diisi) dan minta tim infra menutup akses publik PostgreSQL; dari laptop cukup lewat `kubectl port-forward` atau Cloud SQL Auth Proxy. IP-nya sudah ada di riwayat git, jadi anggap sudah diketahui orang lain.
-4. **Build tidak reproducible.** Hanya dependensi langsung yang di-pin; dependensi transitif (pydantic, pydantic-core, starlette, …) mengambang, `ocr_common` memakai `>=`, base image tanpa digest, dan `values-ddb-dev.yaml` men-deploy tag `4d02eba-dirty` (di-build dari working tree yang belum di-commit). Usulan: lock file ber-hash per service (`uv pip compile --generate-hashes`), `FROM python:3.11-slim@sha256:…`, dan image produksi hanya di-build CI dari commit bersih dengan tag = SHA.
-5. **Egress belum dibatasi.** NetworkPolicy hanya mengatur `Ingress`. `file_url` sudah diperiksa di kode (`FILE_URL_ALLOWED_HOSTS`, alamat internal ditolak, redirect tidak diikuti), tapi egress policy (DNS, PostgreSQL, PaddleOCR, Orkestrasi, host MinIO) tetap perlu sebagai lapisan kedua. Menunggu daftar tujuan final dari tim infra.
-6. **API key tunggal tanpa rotasi.** Mengganti key berarti downtime atau semua pemanggil ganti serentak; perlu dua key aktif sekaligus (mis. `API_KEYS=lama,baru`). Alias `MOCK_API_KEY` masih diterima sebagai `API_KEY` di semua environment; hapus setelah dipastikan tidak ada deployment yang memakainya.
-7. **Observability minim.** Log berupa teks biasa dan format-nya tidak menyertakan `request_id`; belum ada metrik (durasi per tahap, rasio `FAILED`, jumlah job `PROCESSING` basi) dan tracing lintas service. Usulan: log JSON untuk Cloud Logging dengan `request_id` dari contextvar, endpoint `/metrics`, dan OpenTelemetry untuk FastAPI + httpx.
-8. **Struktur di dalam service.** Tidak perlu hexagonal penuh (domain tipis, batas microservice sudah jadi isolasi utama), tapi empat hal ini membuatnya lebih mudah dirawat:
+1. **Dua jalur deploy.** Helm (`deploy/helm`: satu pod berisi empat container, yang dipakai di `gc-ddb-dev-gke-cluster-01`) dan Kustomize (`deploy/k8s`: satu Deployment per service, masih berisi `REPLACE_ME`). Usulan: satu Deployment per service untuk produksi, supaya guardrails (torch) bisa di-scale dan kehabisan memori tanpa ikut menjatuhkan tahap lain; bawa pola itu ke chart Helm, lalu hapus salah satu jalur. Chart Helm juga belum punya NetworkPolicy sama sekali.
+2. **PostgreSQL terbuka ke publik.** Database dev bisa dihubungi langsung dari laptop lewat IP LoadBalancer, dengan user `postgres`. Default IP-nya sudah dihapus dari script deploy (`DB_HOST` wajib diisi), tapi aksesnya sendiri masih terbuka dan IP lamanya ada di riwayat git. Usulan: minta tim infra menutup akses publik (Private IP atau Cloud SQL Auth Proxy, plus authorized networks), rotasi password, dan pakai user per service dengan hak minimal.
+3. **Build tidak reproducible.** Hanya dependensi langsung yang di-pin; dependensi transitif (pydantic, pydantic-core, starlette, …) mengambang, `ocr_common` memakai `>=`, base image tanpa digest, dan `values-ddb-dev.yaml` men-deploy tag `4d02eba-dirty` (di-build dari working tree yang belum di-commit). Usulan: lock file ber-hash per service (`uv pip compile --generate-hashes`), `FROM python:3.11-slim@sha256:…`, dan image produksi hanya di-build CI dari commit bersih dengan tag = SHA.
+4. **Egress belum dibatasi.** NetworkPolicy hanya mengatur `Ingress`. `file_url` sudah diperiksa di kode (`FILE_URL_ALLOWED_HOSTS`, alamat internal ditolak, redirect tidak diikuti), tapi egress policy (DNS, PostgreSQL, PaddleOCR, Orkestrasi, host MinIO) tetap perlu sebagai lapisan kedua. Menunggu daftar tujuan final dari tim infra.
+5. **API key tunggal tanpa rotasi.** Mengganti key berarti downtime atau semua pemanggil ganti serentak; perlu dua key aktif sekaligus (mis. `API_KEYS=lama,baru`). Alias `MOCK_API_KEY` masih diterima sebagai `API_KEY` di semua environment; hapus setelah dipastikan tidak ada deployment yang memakainya.
+6. **Observability minim.** Log berupa teks biasa dan format-nya tidak menyertakan `request_id`; belum ada metrik (durasi per tahap, rasio `FAILED`, jumlah job `PROCESSING` basi) dan tracing lintas service. Usulan: log JSON untuk Cloud Logging dengan `request_id` dari contextvar, endpoint `/metrics`, dan OpenTelemetry untuk FastAPI + httpx.
+7. **Struktur di dalam service.** Tidak perlu hexagonal penuh (domain tipis, batas microservice sudah jadi isolasi utama), tapi empat hal ini membuatnya lebih mudah dirawat:
    - port eksplisit (`Protocol`) untuk engine OCR, structurer, classifier, dan `RequestRepository`, seperti yang sudah ada di `ocr_common/jobs.py`;
    - satu composition root per service (`src/dependencies.py`) menggantikan `get_x()` + `lru_cache` yang tersebar, supaya test cukup memakai `app.dependency_overrides` tanpa `monkeypatch` path string;
    - `TypedDict` / dataclass untuk data antar tahap (`OcrBlock`, `Field`, `StructuredResult`) alih-alih `dict[str, Any]`;
    - exception domain yang dipetakan ke status HTTP di satu handler, alih-alih `ServiceError(status_code, …)` dari lapisan service.
-9. **Tanpa docstring.** Kode sengaja tanpa komentar dan docstring (commit `4d02eba`); semantik yang tidak obvious (idempotensi, lease, urutan callback) hanya tertulis di README ini. Perlu keputusan tim apakah minimal API publik `ocr_common` diberi docstring.
-10. **Tiga konfigurasi type checker.** `pyproject.toml` mengonfigurasi pyrefly, pyright, dan ty, tapi `make typecheck` dan CI hanya memakai ty. Pilih satu dan hapus sisanya.
+8. **Tanpa docstring.** Kode sengaja tanpa komentar dan docstring (commit `4d02eba`); semantik yang tidak obvious (idempotensi, lease, urutan callback) hanya tertulis di README ini. Perlu keputusan tim apakah minimal API publik `ocr_common` diberi docstring.
+9. **Tiga konfigurasi type checker.**
+10. **Tabel sisa desain lama.** Schema `ocr`, `structuring`, dan `scoring` (masing-masing `jobs` / `results`) masih ada di database dev dari sebelum tabel pindah ke `public`, dan sudah tidak dipakai kode mana pun. Hapus lewat migrasi setelah dipastikan tidak ada yang membacanya. `pyproject.toml` mengonfigurasi pyrefly, pyright, dan ty, tapi `make typecheck` dan CI hanya memakai ty. Pilih satu dan hapus sisanya.

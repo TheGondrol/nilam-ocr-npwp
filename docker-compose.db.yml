@@ -4,6 +4,8 @@ x-database: &database
   depends_on:
     postgres:
       condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
 
 services:
   ekstraksi:
@@ -24,15 +26,25 @@ services:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./services/ekstraksi/db/schema.sql:/docker-entrypoint-initdb.d/10-ekstraksi.sql:ro
-      - ./services/structuring/db/schema.sql:/docker-entrypoint-initdb.d/20-structuring.sql:ro
-      - ./services/scoring/db/schema.sql:/docker-entrypoint-initdb.d/30-scoring.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bribrain_ocr_nilam}"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: db/Dockerfile
+    image: nilam-ocr-migrate:latest
+    container_name: nilam-ocr-migrate
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-bribrain_ocr_nilam}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   postgres-data:

@@ -34,6 +34,13 @@ api-docs:
 run-%:
 	cd services/$* && $(PY) -m uvicorn src.main:app --reload --port $(PORT_$*)
 
+db-upgrade:
+	$(PY) -m alembic -c db/alembic.ini upgrade head
+db-check:
+	$(PY) -m alembic -c db/alembic.ini check
+db-revision:
+	$(PY) -m alembic -c db/alembic.ini revision --autogenerate -m "$(m)"
+
 weights:
 	$(PY) scripts/fetch_weights.py || [ $$? -eq 2 ]
 
@@ -55,4 +62,4 @@ logs-%:
 smoke:
 	$(PY) scripts/smoke_e2e.py
 
-.PHONY: dev test lint format typecheck openapi openapi-gateway api-docs test-lib typecheck-lib weights build up up-db down ps smoke
+.PHONY: dev test lint format typecheck openapi openapi-gateway api-docs test-lib typecheck-lib db-upgrade db-check db-revision weights build up up-db down ps smoke

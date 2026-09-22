@@ -43,8 +43,8 @@ Rahasia di Secret Manager project yang sama (nama di `base/common/externalsecret
   ESO lama memakai `external-secrets.io/v1beta1`, manifest ini `v1`.
 - **GKE Dataplane V2** (atau network policy enforcement). Tanpa itu NetworkPolicy diabaikan diam-diam.
 - **Workload Identity** aktif di node pool.
-- **Cloud SQL (PostgreSQL)** terjangkau dari pod, dan ketiga `services/*/db/schema.sql` sudah dijalankan
-  (aplikasi tidak memigrasi sendiri). Dengan Auth Proxy sebagai sidecar, host di `DATABASE_URL`
+- **Cloud SQL (PostgreSQL)** terjangkau dari pod, dan migrasi [db/](../../db) sudah dijalankan
+  (aplikasi tidak memigrasi sendiri; lihat `deploy/helm/migrate-db.sh`). Dengan Auth Proxy sebagai sidecar, host di `DATABASE_URL`
   adalah `127.0.0.1`; itu satu-satunya alamat localhost yang diizinkan pengaman konfigurasi.
 - Namespace: `kubectl create namespace nilam-ocr-<env>`.
 
