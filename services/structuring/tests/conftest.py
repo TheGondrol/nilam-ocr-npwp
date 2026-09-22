@@ -4,7 +4,7 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 
 set_test_env(DATABASE_URL="", ORCHESTRATION_URL="", AUTH_DISABLED="false")
 
-from src.main import app  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest.fixture(scope="session")

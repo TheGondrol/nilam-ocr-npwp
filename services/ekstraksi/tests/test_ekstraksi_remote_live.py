@@ -2,10 +2,11 @@ import os
 
 import pytest
 
-from ocr_common.remote import RemoteModelClient
-from src.core.config import Settings
-from src.models.ekstraksi import RemoteOcrEngine
-from src.services.ekstraksi_service import EkstraksiService
+from ocr_common.clients.remote import RemoteModelClient
+
+from app.config import Settings
+from app.ml.remote import RemoteOcrEngine
+from app.services.ekstraksi_service import EkstraksiService
 from tests.test_ekstraksi_live import synthetic_npwp_jpeg
 
 MODEL_URL = os.environ.get("EKSTRAKSI_REMOTE_URL")

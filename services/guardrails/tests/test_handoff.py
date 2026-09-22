@@ -5,9 +5,11 @@ import httpx
 import pytest
 from PIL import Image
 
-from ocr_common.remote import RemoteModelClient
-from src.clients.ekstraksi import EkstraksiJobClient, get_ekstraksi_client
-from src.main import app
+from ocr_common.clients.remote import RemoteModelClient
+
+from app.clients.ekstraksi import EkstraksiJobClient
+from app.dependencies import get_ekstraksi_client
+from app.main import app
 
 RID = "REQ_guardrails_jobs"
 

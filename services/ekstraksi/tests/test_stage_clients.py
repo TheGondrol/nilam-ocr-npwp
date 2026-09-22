@@ -3,10 +3,11 @@ import json
 import httpx
 import pytest
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.remote import RemoteModelClient
-from src.clients.stages import GuardrailsClient, ScoringClient, StructuringClient, build_stage_clients
-from src.core.config import Settings
+
+from app.clients.stages import GuardrailsClient, ScoringClient, StructuringClient, build_stage_clients
+from app.config import Settings
 
 
 def _remote(handler) -> RemoteModelClient:

@@ -5,7 +5,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ocr_common.openapi import spec_text
+from ocr_common.web.openapi import spec_text
 
 TEST_API_KEY = "test-key"
 
@@ -81,7 +81,9 @@ def assert_openapi_up_to_date(app: FastAPI, path: str = "openapi.yaml") -> None:
     with open(path, encoding="utf-8") as handle:
         disk = yaml.safe_load(handle)
     live = yaml.safe_load(spec_text(app))
-    assert live == disk, "openapi.yaml ketinggalan dari kode; jalankan `python -m ocr_common.openapi` di folder service"
+    assert (
+        live == disk
+    ), "openapi.yaml ketinggalan dari kode; jalankan `python -m ocr_common.web.openapi` di folder service"
 
 
 def assert_error_responses_have_examples(app: FastAPI) -> None:

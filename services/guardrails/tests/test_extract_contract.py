@@ -5,8 +5,9 @@ import pytest
 from PIL import Image
 
 from ocr_common.npwp import contract_fields
-from src.core.config import get_settings
-from src.main import app
+
+from app.config import get_settings
+from app.main import app
 
 RID = "REQ_contract"
 

@@ -1,5 +1,6 @@
 from ocr_common.testing import assert_error_responses_have_examples, assert_openapi_up_to_date
-from src.main import app
+
+from app.main import app
 
 
 def test_openapi_yaml_is_up_to_date():

@@ -5,9 +5,10 @@ from PIL import Image
 
 from ocr_common.errors import ServiceError
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.services.guardrails_service import GuardrailsService
-from src.services.pages import render_pages
+
+from app.config import Settings
+from app.services.guardrails_service import GuardrailsService
+from app.services.pages import render_pages
 
 
 class StubClassifier:
@@ -210,7 +211,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return _jpeg(), "npwp.jpg", "image/jpeg"
 
-    monkeypatch.setattr("ocr_common.intake.fetch", fake_fetch)
+    monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
     response = client.post(
         "/v1/extract-ocr",
         data={"request_id": "OCR_4", "file_url": "http://minio.local/bucket/npwp.jpg"},

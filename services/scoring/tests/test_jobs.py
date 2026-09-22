@@ -1,11 +1,11 @@
 import pytest
 
-from ocr_common.jobs import STAGE_SCORING, InMemoryJobRepository, StagePipeline
+from ocr_common.pipeline import STAGE_SCORING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, make_client, wait_for_job
-from src.api.v1.jobs import get_job_service
-from src.api.v1.scoring import get_confidence_service
-from src.main import app
-from src.services.job_service import ScoringJobService
+
+from app.dependencies import get_confidence_service, get_job_service
+from app.main import app
+from app.services.job_service import ScoringJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 STRUCTURING = {

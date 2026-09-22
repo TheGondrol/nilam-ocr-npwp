@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ocr_common.fetch_url import UrlPolicy
+from ocr_common.clients.fetch_url import UrlPolicy
 
 Environment = Literal["local", "dev", "staging", "production"]
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}

@@ -11,7 +11,7 @@ Service OCR untuk dokumen NPWP (kartu identitas pajak) Indonesia, dipecah menjad
 
 Orkestrasi (repo `nilam-ocr-orchestration`) memegang `request_id`, status per tahap (`orkestrasi.requests`, `orkestrasi.stage_logs`), dan polling client; repo ini hanya keempat service di atas.
 
-Kontrak, envelope, auth `X-API-Key`, dan layout kode tiap service sama dengan service `ocr-*` di `nilam-ocr-orchestration`. Kode yang harus identik di keempatnya tidak disalin-tempel seperti di `ocr-*`, melainkan satu package bersama `libs/ocr_common` yang di-`pip install` ke tiap image.
+Kontrak, envelope, dan auth `X-API-Key` sama dengan service `ocr-*` di `nilam-ocr-orchestration`. Kode yang harus identik di keempatnya tidak disalin-tempel seperti di `ocr-*`, melainkan satu package bersama `libs/ocr_common` yang di-`pip install` ke tiap image. Layout kode tiap service dijelaskan di [Struktur Repo](#struktur-repo).
 
 ## Daftar Isi
 
@@ -30,52 +30,78 @@ Kontrak, envelope, auth `X-API-Key`, dan layout kode tiap service sama dengan se
 
 ## Struktur Repo
 
-Monorepo: satu lib bersama + satu folder per deployable. Tiap service di dalamnya memakai pola **Layered by Type** yang sama dengan `ocr-*` (`api/v1` → `services` → `models`/`repositories`, plus `core` dan `schemas`), jadi orang yang sudah kenal `ocr-ktp` langsung paham.
+Monorepo: satu lib bersama + satu folder per deployable. Tiap service memakai layout berlapis yang sama, sengaja lebih sederhana dari hexagonal:
+
+| Folder di `app/` | Isi | Boleh import |
+|---|---|---|
+| `main.py` | `create_app(...)` + lifespan (buka/tutup koneksi) | `api`, `dependencies`, `config` |
+| `config.py` | `Settings` (pydantic-settings) | `ocr_common.config` |
+| `dependencies.py` | **composition root**: semua `get_*()` yang dipakai `Depends(...)`, registry `<X>_BACKENDS`, dan satu-satunya tempat `lru_cache` | semua lapisan di bawahnya |
+| `api/` | endpoint FastAPI (satu file per router) + `schemas.py` request/response | `dependencies`, `services`, `api.schemas` |
+| `services/` | logika bisnis, tanpa FastAPI | `ml`, `clients`, `repositories`, `config` |
+| `ml/` | `base.py` (Protocol engine) + satu file per backend (`paddle.py`, `efficientnet.py`, `remote.py`, `mock.py`) + `utils.py` praproses | `ocr_common.clients` |
+| `clients/` | klien HTTP ke service lain (hanya guardrails dan ekstraksi) | `ocr_common.clients` |
+| `repositories/` | penyimpanan (hanya ekstraksi, kontrak lama) | `ocr_common.pipeline` |
+
+Aturannya satu: panah import hanya ke bawah. `services/` tidak tahu FastAPI, `ml/` tidak tahu settings (yang membaca settings dan memilih backend adalah `dependencies.py`), dan test mengganti implementasi lewat `app.dependency_overrides[get_x]`, bukan `monkeypatch` path modul.
 
 ```
 nilam-ocr-npwp/
 ├── libs/ocr_common/                  # package bersama (pip install), bukan salinan per service
 │   ├── pyproject.toml                # ocr-common; extra [db] untuk SQLAlchemy
 │   ├── ocr_common/
-│   │   ├── app.py                    # create_app(): middleware request_id, exception handler envelope, /health
+│   │   ├── web/                      # toolkit FastAPI; TIDAK berisi endpoint bisnis
+│   │   │   ├── app.py                #   create_app(): middleware request_id, exception handler envelope, /health
+│   │   │   ├── security.py           #   verify_api_key (X-API-Key), API_KEY_ERROR
+│   │   │   ├── envelope.py / schemas.py   # envelope response, ErrorResponse + helper error()/success_examples()
+│   │   │   ├── intake.py             #   terima `file` ATAU `file_url` (presigned MinIO)
+│   │   │   └── openapi.py            #   python -m ocr_common.web.openapi -> openapi.yaml service
+│   │   ├── pipeline/                 # mesin tahap pipeline async
+│   │   │   ├── stage.py              #   StagePipeline: klaim job, kerja di background, simpan, callback, handoff
+│   │   │   ├── repository.py / repository_sql.py   # <tahap>_jobs / <tahap>_results: memory / PostgreSQL
+│   │   │   ├── callbacks.py          #   callback ke orkestrator + handoff ke tahap berikutnya, dengan retry
+│   │   │   ├── outbox.py / outbox_sql.py / outbox_status.py   # transactional outbox + relay + isi GET /outbox
+│   │   │   ├── outcomes.py           #   baris outcome milik orkestrator (ORCHESTRATION_OUTCOME_TABLE)
+│   │   │   ├── factory.py            #   build_stage_pipeline / build_outbox_relay / build_next_stage_client
+│   │   │   ├── schemas.py            #   payload antar tahap dan callback (Pydantic)
+│   │   │   └── tables.py / database.py   # definisi kolom SEMUA tabel repo ini + engine SQLAlchemy async
+│   │   ├── clients/                  # HTTP keluar
+│   │   │   ├── remote.py             #   RemoteModelClient: klien ke model ML dan ke service lain
+│   │   │   └── fetch_url.py          #   unduh dokumen dari URL dengan aman (SSRF)
 │   │   ├── config.py                 # BaseServiceSettings (API_KEY, port, batas upload) + PipelineSettings
-│   │   ├── jobs.py                   # mesin tahap pipeline async: klaim job, runner background, callback, handoff, retry
-│   │   ├── jobs_sql.py               # <tahap>_jobs / <tahap>_results di PostgreSQL (INSERT ... ON CONFLICT DO NOTHING)
-│   │   ├── tables.py                 # definisi kolom SEMUA tabel repo ini: dipakai kode, migrasi, dan test
-│   │   ├── security.py               # verify_api_key (X-API-Key), API_KEY_ERROR
-│   │   ├── envelope.py / errors.py / schemas.py   # envelope response, ServiceError, ErrorResponse + helper error()
-│   │   ├── intake.py / fetch_url.py  # terima `file` ATAU `file_url` (presigned MinIO)
+│   │   ├── errors.py                 # ServiceError
+│   │   ├── registry.py               # build_backend(): pilih implementasi dari <APP>_BACKEND
 │   │   ├── image_validation.py       # tipe / kosong / ukuran
-│   │   ├── remote.py                 # RemoteModelClient: klien HTTP ke model ML dan ke service lain
-│   │   ├── registry.py               # pilih implementasi model dari <APP>_BACKEND
-│   │   ├── database.py               # engine SQLAlchemy async (opsional)
 │   │   ├── npwp.py                   # DOCUMENT_TYPE, NPWP_FIELDS
-│   │   ├── openapi.py                # python -m ocr_common.openapi -> openapi.yaml service
 │   │   └── testing.py                # helper test yang sama untuk semua service
 │   └── tests/
 ├── services/
 │   ├── ekstraksi/                    # port 8030 (slot ocr-npwp)
 │   │   ├── Dockerfile · requirements.txt · .env.example · openapi.yaml · pyproject.toml
-│   │   ├── src/
+│   │   ├── app/
 │   │   │   ├── main.py               # create_app(...) + lifespan
-│   │   │   ├── api/v1/jobs.py        # pipeline async: POST/GET /v1/ekstraksi/jobs
+│   │   │   ├── config.py             # Settings
+│   │   │   ├── dependencies.py       # composition root: OCR_BACKENDS, get_ocr_engine, get_pipeline, get_*_service
+│   │   │   ├── api/jobs.py           # pipeline async: POST/GET /v1/ekstraksi/jobs, GET /v1/ekstraksi/outbox
+│   │   │   ├── api/ekstraksi.py      # /v1/ekstraksi/extract
+│   │   │   ├── api/ocr.py            # kontrak lama orkestrator (sinkron)
+│   │   │   ├── api/schemas.py        # request/response Pydantic
 │   │   │   ├── services/job_service.py        # kerja tahap OCR + payload handoff ke structuring
-│   │   │   ├── core/pipeline.py      # perakitan StagePipeline (schema `ocr`) + klien tahap berikutnya
-│   │   │   ├── api/v1/ocr.py         # kontrak lama orkestrator (sinkron)
-│   │   │   ├── api/v1/ekstraksi.py   # /v1/ekstraksi/extract
 │   │   │   ├── services/ocr_service.py        # kontrak lama: guardrails -> OCR -> structuring -> scoring
 │   │   │   ├── services/ekstraksi_service.py
-│   │   │   ├── clients/stages.py     # klien HTTP ke guardrails/structuring/scoring (seperti clients/ di orchestration)
-│   │   │   ├── models/ekstraksi.py   # PaddleOcrEngine (paddle) + MockOcrEngine (mock)
-│   │   │   ├── repositories/request_repository.py   # status request_id: memory / PostgreSQL
-│   │   │   ├── core/config.py · schemas/ocr.py · schemas/ekstraksi.py
+│   │   │   ├── ml/base.py            # Protocol OcrEngine
+│   │   │   ├── ml/paddle.py · ml/remote.py · ml/mock.py   # satu backend per file
+│   │   │   ├── ml/utils.py           # normalisasi jawaban model -> blok teks
+│   │   │   ├── clients/stages.py     # klien HTTP ke guardrails/structuring/scoring (kontrak lama)
+│   │   │   └── repositories/request_repository.py   # status request_id: memory / PostgreSQL
 │   │   └── tests/
-│   ├── guardrails/                   # port 8031: src/{main, api/v1, services, models, schemas, core}, tests
+│   ├── guardrails/                   # port 8031: app/{main, config, dependencies, api, services, ml, clients}, tests
 │   │   ├── weights/best_model.pt     # checkpoint EfficientNet-B0 (di-gitignore; di-COPY ke image saat build)
-│   │   ├── src/models/guardrails.py  # EfficientNetPageClassifier (efficientnet) + MockPageClassifier (mock)
-│   │   └── src/services/pages.py     # gambar -> 1 halaman, PDF -> halaman per halaman (PyMuPDF)
-│   ├── structuring/                  # port 8032: sama, plus api/v1/jobs.py · services/job_service.py · core/pipeline.py
-│   └── scoring/                      # port 8033: sama (tanpa handoff; tahap terakhir)
+│   │   ├── app/ml/efficientnet.py    # EfficientNetPageClassifier (efficientnet); remote.py, mock.py; utils.py praproses
+│   │   ├── app/clients/              # ekstraksi.py (handoff) dan stages.py (status tahap untuk menunggu 15 dtk)
+│   │   └── app/services/pages.py     # gambar -> 1 halaman, PDF -> halaman per halaman (PyMuPDF)
+│   ├── structuring/                  # port 8032: sama; ml/npwp_rules.py + ml/rule_based.py; app/vendor/ aturan ML engineer
+│   └── scoring/                      # port 8033: sama (tanpa handoff; tahap terakhir); ml/heuristic.py + ml/trust_model.py
 ├── deploy/k8s/                       # manifest GKE (Kustomize): base + overlays dev / staging / production
 ├── db/                               # migrasi Alembic + peta pemilik tabel (db/README.md)
 ├── docker-compose.yml                # 4 image, 4 container, satu network
@@ -84,7 +110,7 @@ nilam-ocr-npwp/
 ├── Makefile · pyproject.toml (ruff) · requirements-dev.txt
 ```
 
-Batas yang dijaga: **service tidak saling import**. Satu-satunya jalur antar service adalah HTTP (`ocr_common.jobs.NextStageClient` untuk pipeline async, `services/ekstraksi/src/clients/stages.py` untuk kontrak lama), sehingga tiap service bisa dipindah ke repo, VM, atau cluster lain tanpa mengubah kode. Yang boleh dibagi hanya `ocr_common`.
+Batas yang dijaga: **service tidak saling import**. Satu-satunya jalur antar service adalah HTTP (`ocr_common.pipeline.NextStageClient` untuk pipeline async, `services/ekstraksi/app/clients/stages.py` untuk kontrak lama), sehingga tiap service bisa dipindah ke repo, VM, atau cluster lain tanpa mengubah kode. Yang boleh dibagi hanya `ocr_common`.
 
 ## Alur Request
 
@@ -155,7 +181,7 @@ Cara membacanya:
 - **Gagal kirim tidak pernah menghapus pesan.** 5xx diulang dengan backoff; 4xx dan pesan yang lewat umur menjadi dead letter yang menetap di tabel dan terlihat di `GET /v1/<tahap>/outbox` serta di log `WARNING` relay. Melepasnya manual: `failed_at = NULL, next_attempt_at = now()`.
 - **Tanpa `PIPELINE_OUTBOX`** blok "SATU TRANSAKSI" hanya berisi `results` + `jobs`, tidak ada relay, dan task job sendiri yang memanggil callback lalu handoff (urutan lama), dengan retry 3× dan gagalnya hanya dicatat di log.
 
-Ketiga tahap memakai mesin yang sama, `ocr_common/jobs.py`; tiap service hanya mengisi kerjanya (`services/job_service.py`). Perilaku yang sama di ketiganya:
+Ketiga tahap memakai mesin yang sama, `ocr_common/pipeline/stage.py`; tiap service hanya mengisi kerjanya (`services/job_service.py`). Perilaku yang sama di ketiganya:
 
 - **202 segera, kerja di background.** Job jalan sebagai `asyncio` task (referensi kuat, di-drain saat shutdown). Job yang belum selesai saat batas drain habis dibatalkan, ditandai `FAILED`, dan dilaporkan lewat callback, jadi orkestrator bisa mengirimnya ulang. Kerja sinkron yang CPU-bound (structuring, scoring) dijalankan di threadpool supaya event loop tetap menerima job lain.
 - **Idempoten per `request_id`.** `INSERT … ON CONFLICT DO NOTHING`: `request_id` yang sama dikirim lagi tetap 202 dengan `duplicate: true` dan kerja **tidak** diulang. Pengecualian: job `FAILED`, atau job `PROCESSING` yang melewati lease (`PIPELINE_JOB_LEASE_SECONDS`, default 300 detik; artinya proses yang menjalankannya mati tanpa mencatat apa pun, mis. OOM/SIGKILL), boleh diklaim ulang (`attempts` bertambah), supaya orkestrator bisa retry. Klaim ulang atomik: dari dua kiriman bersamaan hanya satu yang menang.
@@ -183,7 +209,7 @@ Ketiga tahap memakai mesin yang sama, `ocr_common/jobs.py`; tiap service hanya m
  "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}}
 ```
 
-Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/jobs.py` (satu tempat untuk ketiga service). Bentuk `result` dirakit di satu tempat, `final_result` di `ocr_common/npwp.py`. Respons 200 guardrails dan baris tabel orkestrasi diturunkan dari hasil yang sama ke bentuk kontrak `extract-ocr` orchestrator (`contract_fields` di `ocr_common/npwp.py`): `nomor_npwp` dan `nama` (nama badan untuk kartu perusahaan) dengan `confidence` 0/1 dari trust model dan `FIELD_CONFIDENCE_THRESHOLD`.
+Path dan bentuk ini adalah usulan dari sisi repo ini; kalau tim orkestrasi memilih path lain cukup ubah `ORCHESTRATION_CALLBACK_PATH`, kalau bentuk body lain ubah `OrchestrationCallback.notify` di `ocr_common/pipeline/callbacks.py` (satu tempat untuk ketiga service). Bentuk `result` dirakit di satu tempat, `final_result` di `ocr_common/npwp.py`. Respons 200 guardrails dan baris tabel orkestrasi diturunkan dari hasil yang sama ke bentuk kontrak `extract-ocr` orchestrator (`contract_fields` di `ocr_common/npwp.py`): `nomor_npwp` dan `nama` (nama badan untuk kartu perusahaan) dengan `confidence` 0/1 dari trust model dan `FIELD_CONFIDENCE_THRESHOLD`.
 
 ### Kontrak lama (sinkron)
 
@@ -200,7 +226,7 @@ orkestrator ──► ekstraksi:8030 /v1/extract-ocr (request_id + file/file_url
 
 `/v1/structuring/structure` melakukan kerja yang sama dengan `/jobs`-nya, tanpa job/callback. `/v1/scoring/score` adalah skor dokumen **heuristik lama** (bukan dari ML engineer), dipertahankan hanya karena `extract-ocr` mengembalikan satu angka `guardrails`; pipeline async memakai trust model (`/v1/scoring/confidence`). Error dari tahap lain diteruskan: 4xx dari service lain dipertahankan status dan pesannya (mis. 400 `No text lines to structure`), 5xx/tidak terjangkau menjadi 500/503/504 dengan nama service-nya (`structuring service is unavailable`).
 
-Di dalam tiap service: `api/v1/*.py` (controller, `ServiceError` → `HTTPException`) → `services/*_service.py` (logika, tidak tahu HTTP) → `models/*.py` (pembungkus model, dipilih lewat env) / `repositories/`. Handler envelope, `X-Request-ID`, 401, dan 422 (`errors: "VALIDATION_ERROR"`) datang dari `ocr_common.app.create_app`.
+Di dalam tiap service: `api/*.py` (controller, `ServiceError` → `HTTPException`) → `services/*_service.py` (logika, tidak tahu HTTP) → `ml/*.py` (pembungkus model, dipilih di `dependencies.py` lewat env) / `repositories/`. Handler envelope, `X-Request-ID`, 401, dan 422 (`errors: "VALIDATION_ERROR"`) datang dari `ocr_common.web.app.create_app`.
 
 ## Menjalankan Secara Lokal
 
@@ -413,7 +439,7 @@ Akses lewat SQLAlchemy 2.0 async + asyncpg (pola sama dengan `ocr-orchestration`
 
 ## Mengganti Mock dengan Model Asli
 
-Model ML di-deploy ML engineer sebagai service HTTP; repo ini membungkusnya di `services/<nama>/src/models/`. Semua klien memakai `ocr_common.remote.RemoteModelClient`: koneksi persisten, dan kegagalan dipetakan seragam (tidak bisa connect → 503, tidak menjawab dalam timeout → 504, jawaban ≥ 400 → 500 dengan detail, body bukan JSON → 500).
+Model ML di-deploy ML engineer sebagai service HTTP; repo ini membungkusnya di `services/<nama>/app/ml/`. Semua klien memakai `ocr_common.clients.remote.RemoteModelClient`: koneksi persisten, dan kegagalan dipetakan seragam (tidak bisa connect → 503, tidak menjawab dalam timeout → 504, jawaban ≥ 400 → 500 dengan detail, body bukan JSON → 500).
 
 **Guardrails, backend `efficientnet` (sudah ada)**: checkpoint torchvision EfficientNet-B0 dari ML engineer, dimuat di proses service saat startup (CPU, ~3 detik) dan dijalankan per halaman (~70 ms/halaman di CPU). Checkpoint membawa metadata `class_names ['accepted','reject']`, `image_size 224`, `reject_threshold 0.5`, `val_macro_f1 0.879`. Praproses: halaman → RGB → resize `224×224` → normalisasi ImageNet; PDF dirender per halaman oleh PyMuPDF. Taruh bobot di `services/guardrails/weights/best_model.pt` (file `best_model.pt.zip` dari ML engineer adalah arsip `torch.save`; cukup ganti namanya) dan set `GUARDRAILS_BACKEND=efficientnet`. Saat `docker build`, bobot itu **ikut ke dalam image** (`COPY services/guardrails/weights`; build gagal dengan pesan jelas kalau filenya tidak ada di build context), sehingga container tidak butuh volume. Di CI, unduh bobot dulu dengan `make weights` ([scripts/fetch_weights.py](scripts/fetch_weights.py)); sumbernya dari env supaya pilihan penyimpanan tinggal mengganti nilai:
 
@@ -455,7 +481,7 @@ Satu elemen per halaman, dan ketiga array-nya **paralel** (indeks `i` = satu bar
 
 **Scoring, trust model (sudah ada)**: `services/scoring/weights/trust_model.joblib` dari ML engineer (3 KB, ikut di repo dan di-COPY ke image). Isinya, dibaca dari file-nya: dict `pipeline` (`SimpleImputer(median)` → `StandardScaler` → `LogisticRegression`, scikit-learn **1.9.0**), `feature_cols` (10 fitur), `train_report` (n=1760 = 880 dokumen × 2 field, 1640 benar / 120 salah, AUC 0,96). Modelnya **per field**: satu baris fitur untuk nomor NPWP dan satu untuk nama; keluarannya P(field itu benar). Versi scikit-learn harus sama dengan saat training: beda versi = service menolak start, bukan sekadar peringatan.
 
-Pemetaan payload → fitur ada di docstring `src/models/trust_model.py`; asal tiap kunci payload di pipeline ada di `src/services/confidence_service.py` (`npwp*`/`name*` dari structuring, `n_boxes`/`num_pages`/`avg`/`min_doc_score` dari blok OCR, `guardrail_probability` dari `document.confidence` guardrails). Perilaku model yang perlu diketahui: field yang **dikoreksi** (`npwp_has_homoglyph` / `name_corrected` = true) mendapat confidence ≈ 0, karena di data training field seperti itu hampir selalu salah; `npwp_candidate_count > 1` menurunkan confidence nomor (0,97 → 0,85). Tiga hal yang **belum terdefinisi** dan perlu ditanyakan ke ML engineer:
+Pemetaan payload → fitur ada di docstring `app/ml/trust_model.py`; asal tiap kunci payload di pipeline ada di `app/services/confidence_service.py` (`npwp*`/`name*` dari structuring, `n_boxes`/`num_pages`/`avg`/`min_doc_score` dari blok OCR, `guardrail_probability` dari `document.confidence` guardrails). Perilaku model yang perlu diketahui: field yang **dikoreksi** (`npwp_has_homoglyph` / `name_corrected` = true) mendapat confidence ≈ 0, karena di data training field seperti itu hampir selalu salah; `npwp_candidate_count > 1` menurunkan confidence nomor (0,97 → 0,85). Tiga hal yang **belum terdefinisi** dan perlu ditanyakan ke ML engineer:
 
 1. `shape_confidence` (fitur ke-4, koefisien terbesar kedua): tidak ada di payload, definisinya tidak ada di file mana pun. Dikirim kosong sehingga imputer model mengisinya dengan median training (2). Akibatnya confidence **terlalu tinggi** untuk field yang nilai aslinya 1 (sampel kartu asli: 0,74 → 0,05). Isi rumusnya di `TrustModel._shape_confidence()`.
 2. `flag`: ada di payload, tapi tidak ada tahap yang menghasilkannya. Dikirim kosong di pipeline (pengaruhnya kecil: 0,735 → 0,701).
@@ -463,15 +489,15 @@ Pemetaan payload → fitur ada di docstring `src/models/trust_model.py`; asal ti
 
 **Menambah backend lain** (structuring dan scoring menunggu dokumentasi modelnya):
 
-1. Tambahkan kelas di `services/<nama>/src/models/<app>.py` dengan method yang sama dengan mock-nya; untuk model HTTP terima `RemoteModelClient` lewat constructor.
-2. Daftarkan di registry modul yang sama (`<X>_BACKENDS["nama"] = lambda settings: ...`) dan tambahkan field URL/timeout di `src/core/config.py`.
+1. Tambahkan file `services/<nama>/app/ml/<nama_backend>.py` berisi satu kelas yang memenuhi Protocol di `app/ml/base.py` (method yang sama dengan mock-nya); untuk model HTTP terima `RemoteModelClient` lewat constructor.
+2. Daftarkan di `<X>_BACKENDS` di `app/dependencies.py` (`"nama": lambda settings: ...`) dan tambahkan field URL/timeout di `app/config.py`.
 3. Set `<APP>_BACKEND=nama` di `.env`. Tidak ada controller, service, atau skema yang berubah.
 
 Kontrak method per app: guardrails lokal `classify(filename, pages: list[PIL.Image]) -> [(proba_approve, proba_reject), ...]` (+ atribut `reject_threshold`), atau guardrails remote `async check_document(filename, content, content_type) -> {"document", "pages"}` (service memilih dari ada-tidaknya `check_document`); ekstraksi `async extract(filename, content, content_type) -> {"blocks", "model"}`; structuring `structure(lines) -> {field: {"value", "confidence", "source"}}` untuk semua `NPWP_FIELDS`; scoring `score(fields) -> {"score", "field_scores", "reasons"}` + atribut `supported_document_types`.
 
 ## Menambah Service Baru
 
-Salin salah satu folder `services/<nama>` (yang paling kecil: `scoring`), ganti nama dan port, lalu tambahkan ke `docker-compose.yml`, `requirements-dev.txt`, dan `SERVICES` di `Makefile`. Kalau menjadi tahap baru pipeline async: tambah konstanta `STAGE_*` di `ocr_common/jobs.py`, prefix tabelnya di `PIPELINE_TABLE_PREFIXES` (`ocr_common/tables.py`) plus revisi Alembic baru (`make db-revision`), `core/pipeline.py` + `services/job_service.py` + `api/v1/jobs.py` (salin dari structuring), lalu arahkan `get_next_stage()` tahap sebelumnya ke `/v1/<nama>/jobs`. Kalau ikut kontrak lama `extract-ocr`, tambahkan klien di `services/ekstraksi/src/clients/stages.py` dan pemanggilannya di `services/ocr_service.py`.
+Salin salah satu folder `services/<nama>` (yang paling kecil: `scoring`), ganti nama dan port, lalu tambahkan ke `docker-compose.yml`, `requirements-dev.txt`, dan `SERVICES` di `Makefile`. Kalau menjadi tahap baru pipeline async: tambah konstanta `STAGE_*` di `ocr_common/pipeline/stage.py`, prefix tabelnya di `PIPELINE_TABLE_PREFIXES` (`ocr_common/pipeline/tables.py`) plus revisi Alembic baru (`make db-revision`), `dependencies.py` + `services/job_service.py` + `api/jobs.py` (salin dari structuring), lalu arahkan `get_next_stage()` tahap sebelumnya ke `/v1/<nama>/jobs`. Kalau ikut kontrak lama `extract-ocr`, tambahkan klien di `services/ekstraksi/app/clients/stages.py` dan pemanggilannya di `app/services/ocr_service.py`.
 
 ## Testing, Lint & openapi.yaml
 
@@ -507,13 +533,13 @@ Aturan penulisan yang dijaga test: setiap operasi punya `operationId` (dipakai g
 
 ## Keterbatasan & Langkah Berikutnya
 
-- **Structuring memakai aturan ML engineer (`npwp_rules`), tapi kirimannya belum lengkap.** Dua file (`npwp.py`, `name_extraction.py`) di-vendor apa adanya di `services/structuring/src/vendor/npwp_rules/`: nama dicari dari posisinya terhadap nomor NPWP, karena kartu asli mencetak nama tanpa label. Pada dua hasil OCR kartu asli, backend lama `rule_based` memberi `nama=null` → skor 0,43 `reject`; `npwp_rules` menemukan nama → 0,98 dan 0,99 `approve`. Yang belum dikirim: (1) `name_master.py` + daftar nama rujukannya (sekarang pengganti sementara tanpa-sinyal: tidak ada koreksi spasi nama, tidak ada tie-break "nama dikenal"); (2) modul pemanggilnya, jadi cara memilih nomor, kapan guardrail halaman menolak, dan format output adalah tafsir kami atas docstring kedua file (`NpwpRulesStructurer`). Dua keputusan yang perlu dikonfirmasi ke ML engineer / bisnis: kartu yang mencetak nomor 15 **dan** 16 digit kini melaporkan yang 16 digit (`npwp_priority`), dan nomor 16 digit dikembalikan tanpa titik (15 digit tetap `XX.XXX.XXX.X-XXX.XXX`).
+- **Structuring memakai aturan ML engineer (`npwp_rules`), tapi kirimannya belum lengkap.** Dua file (`npwp.py`, `name_extraction.py`) di-vendor apa adanya di `services/structuring/app/vendor/npwp_rules/`: nama dicari dari posisinya terhadap nomor NPWP, karena kartu asli mencetak nama tanpa label. Pada dua hasil OCR kartu asli, backend lama `rule_based` memberi `nama=null` → skor 0,43 `reject`; `npwp_rules` menemukan nama → 0,98 dan 0,99 `approve`. Yang belum dikirim: (1) `name_master.py` + daftar nama rujukannya (sekarang pengganti sementara tanpa-sinyal: tidak ada koreksi spasi nama, tidak ada tie-break "nama dikenal"); (2) modul pemanggilnya, jadi cara memilih nomor, kapan guardrail halaman menolak, dan format output adalah tafsir kami atas docstring kedua file (`NpwpRulesStructurer`). Dua keputusan yang perlu dikonfirmasi ke ML engineer / bisnis: kartu yang mencetak nomor 15 **dan** 16 digit kini melaporkan yang 16 digit (`npwp_priority`), dan nomor 16 digit dikembalikan tanpa titik (15 digit tetap `XX.XXX.XXX.X-XXX.XXX`).
 - Ekstraksi (`remote` atau `paddle`) dan guardrails (`efficientnet`, checkpoint lokal, atau `remote`, service model ML engineer) sudah memakai model sungguhan. Kedua backend `remote` baru diuji terhadap kontrak tertulisnya dan stand-in yang mengikutinya, belum terhadap service model yang asli (`tests/test_guardrails_live.py`, `tests/test_ekstraksi_remote_live.py`); structuring dan scoring masih rule-based / heuristik sampai modelnya tersedia. Model guardrails belum divalidasi dengan foto NPWP asli (lihat catatan di atas).
 - **Kontrak callback belum disepakati dengan tim orkestrasi.** Path (`/v1/callbacks/stage`), bentuk body, dan bentuk hasil akhir di [Alur Request](#alur-request) adalah usulan dari repo ini; sisi orkestrasi (endpoint callback, `orkestrasi.requests` / `stage_logs`, 422/202, polling) dikerjakan di repo `nilam-ocr-orchestration`. Sampai itu ada, uji callback dengan `SMOKE_CALLBACK_PORT`.
-- **Job hidup di memori proses.** Job jalan sebagai `asyncio` task. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), lalu sisanya dilaporkan `FAILED`. Kalau proses mati mendadak (OOM, SIGKILL, node hilang), baris `jobs` tertinggal `PROCESSING` tanpa callback sampai `request_id`-nya dikirim ulang setelah lease habis (`PIPELINE_JOB_LEASE_SECONDS`), jadi orkestrasi tetap perlu timeout per tahap lalu kirim ulang. Yang **sudah** tahan restart adalah pengiriman callback dan handoff-nya (`PIPELINE_OUTBOX`); yang belum adalah pekerjaan OCR-nya sendiri. Kalau volume naik, ganti `BackgroundRunner` di `ocr_common/jobs.py` dengan antrean yang tahan restart (Cloud Tasks / Pub/Sub, atau worker yang mengambil job basi) tanpa mengubah service.
+- **Job hidup di memori proses.** Job jalan sebagai `asyncio` task. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), lalu sisanya dilaporkan `FAILED`. Kalau proses mati mendadak (OOM, SIGKILL, node hilang), baris `jobs` tertinggal `PROCESSING` tanpa callback sampai `request_id`-nya dikirim ulang setelah lease habis (`PIPELINE_JOB_LEASE_SECONDS`), jadi orkestrasi tetap perlu timeout per tahap lalu kirim ulang. Yang **sudah** tahan restart adalah pengiriman callback dan handoff-nya (`PIPELINE_OUTBOX`); yang belum adalah pekerjaan OCR-nya sendiri. Kalau volume naik, ganti `BackgroundRunner` di `ocr_common/pipeline/runner.py` dengan antrean yang tahan restart (Cloud Tasks / Pub/Sub, atau worker yang mengambil job basi) tanpa mengubah service.
 - **Tanpa `PIPELINE_OUTBOX`, callback yang gagal setelah retry hanya dicatat di log.** Dengan outbox aktif, callback disimpan dan dicoba ulang sampai berumur `PIPELINE_OUTBOX_MAX_AGE_SECONDS`, lalu tetap tersimpan sebagai dead letter; melepas dead letter (mis. setelah kontrak callback diperbaiki) masih manual: `UPDATE pipeline_outbox SET failed_at = NULL, next_attempt_at = now() WHERE failed_at IS NOT NULL AND stage = '<TAHAP>'`. Apa pun modenya, orkestrasi bisa merekonsiliasi lewat `GET /v1/<tahap>/jobs/{request_id}`.
 - **Payload membesar di tiap handoff** (guardrails + OCR + structuring ikut dibawa, sesuai diagram). Untuk PDF banyak halaman, pertimbangkan tahap berikutnya membaca `results` tahap sebelumnya dari DB alih-alih menerimanya di payload.
-- Kontrak lama `extract-ocr` (sinkron) dan tabel `ocr_npwp_requests` dipertahankan sampai orkestrator pindah ke alur async; setelah itu `api/v1/ocr.py`, `services/ocr_service.py`, `clients/stages.py`, dan `repositories/` di ekstraksi bisa dihapus.
+- Kontrak lama `extract-ocr` (sinkron) dan tabel `ocr_npwp_requests` dipertahankan sampai orkestrator pindah ke alur async; setelah itu `api/ocr.py`, `services/ocr_service.py`, `clients/stages.py`, dan `repositories/` di ekstraksi bisa dihapus.
 
 ### Utang teknis yang sudah diketahui
 
@@ -525,9 +551,7 @@ Belum dikerjakan, diurutkan dari dampak terbesar; tiap butir perlu tiket.
 4. **Egress belum dibatasi.** NetworkPolicy hanya mengatur `Ingress`. `file_url` sudah diperiksa di kode (`FILE_URL_ALLOWED_HOSTS`, alamat internal ditolak, redirect tidak diikuti), tapi egress policy (DNS, PostgreSQL, PaddleOCR, Orkestrasi, host MinIO) tetap perlu sebagai lapisan kedua. Menunggu daftar tujuan final dari tim infra.
 5. **API key tunggal tanpa rotasi.** Mengganti key berarti downtime atau semua pemanggil ganti serentak; perlu dua key aktif sekaligus (mis. `API_KEYS=lama,baru`). Alias `MOCK_API_KEY` masih diterima sebagai `API_KEY` di semua environment; hapus setelah dipastikan tidak ada deployment yang memakainya.
 6. **Observability minim.** Log berupa teks biasa dan format-nya tidak menyertakan `request_id`; belum ada metrik (durasi per tahap, rasio `FAILED`, jumlah job `PROCESSING` basi) dan tracing lintas service. Usulan: log JSON untuk Cloud Logging dengan `request_id` dari contextvar, endpoint `/metrics`, dan OpenTelemetry untuk FastAPI + httpx.
-7. **Struktur di dalam service.** Tidak perlu hexagonal penuh (domain tipis, batas microservice sudah jadi isolasi utama), tapi empat hal ini membuatnya lebih mudah dirawat:
-   - port eksplisit (`Protocol`) untuk engine OCR, structurer, classifier, dan `RequestRepository`, seperti yang sudah ada di `ocr_common/jobs.py`;
-   - satu composition root per service (`src/dependencies.py`) menggantikan `get_x()` + `lru_cache` yang tersebar, supaya test cukup memakai `app.dependency_overrides` tanpa `monkeypatch` path string;
+7. **Struktur di dalam service.** Layout `app/` dengan composition root (`dependencies.py`) dan `Protocol` per engine (`ml/base.py`) sudah dikerjakan; tidak perlu hexagonal penuh (domain tipis, batas microservice sudah jadi isolasi utama). Dua hal yang tersisa:
    - `TypedDict` / dataclass untuk data antar tahap (`OcrBlock`, `Field`, `StructuredResult`) alih-alih `dict[str, Any]`;
    - exception domain yang dipetakan ke status HTTP di satu handler, alih-alih `ServiceError(status_code, …)` dari lapisan service.
 8. **Tanpa docstring.** Kode sengaja tanpa komentar dan docstring (commit `4d02eba`); semantik yang tidak obvious (idempotensi, lease, urutan callback) hanya tertulis di README ini. Perlu keputusan tim apakah minimal API publik `ocr_common` diberi docstring.

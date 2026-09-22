@@ -3,12 +3,12 @@ import json
 import pytest
 
 from ocr_common.errors import ServiceError
-from ocr_common.jobs import STAGE_OCR, InMemoryJobRepository, StagePipeline
+from ocr_common.pipeline import STAGE_OCR, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, RecordingNextStage, image_upload, make_client, wait_for_job
-from src.api.v1.ekstraksi import get_ekstraksi_service
-from src.api.v1.jobs import get_job_service
-from src.main import app
-from src.services.job_service import EkstraksiJobService
+
+from app.dependencies import get_ekstraksi_service, get_job_service
+from app.main import app
+from app.services.job_service import EkstraksiJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 
@@ -101,7 +101,7 @@ def test_file_url_is_downloaded_in_background(harness, auth, monkeypatch):
         assert url == "http://minio:9000/bucket/npwp.jpg?sig=x"
         return b"\xff\xd8fake-jpeg-bytes", "npwp.jpg", "image/jpeg"
 
-    monkeypatch.setattr("src.services.job_service.fetch", fake_fetch)
+    monkeypatch.setattr("app.services.job_service.fetch", fake_fetch)
     response = client.post(
         "/v1/ekstraksi/jobs",
         headers=auth,

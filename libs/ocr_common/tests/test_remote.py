@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.remote import RemoteModelClient
 
 
 def _client(handler, timeout: float = 7.0, **kwargs) -> RemoteModelClient:

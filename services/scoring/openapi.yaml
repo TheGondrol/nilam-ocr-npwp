@@ -325,6 +325,78 @@ paths:
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/scoring/outbox:
+    get:
+      tags:
+      - Pipeline
+      summary: Backlog of this stage's undelivered callbacks and hand-offs
+      description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
+        and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
+        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
+        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
+        or a dead letter is waiting.'
+      operationId: getScoringOutboxStatus
+      responses:
+        '200':
+          description: The backlog of this stage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxStatusResponse'
+              examples:
+                idle:
+                  summary: Nothing waiting
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: SCORING
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                backlog:
+                  summary: The orchestrator has been down for a while
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: SCORING
+                      pending: 12
+                      retrying: 12
+                      oldest_pending_seconds: 754.3
+                      dead_letters: 1
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                disabled:
+                  summary: '`PIPELINE_OUTBOX` is off'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: false
+                      stage: SCORING
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+      security:
+      - APIKeyHeader: []
   /v1/scoring/confidence:
     post:
       tags:
@@ -484,78 +556,6 @@ paths:
                 message: 'body.fields: Field required'
                 errors: VALIDATION_ERROR
       deprecated: true
-      security:
-      - APIKeyHeader: []
-  /v1/scoring/outbox:
-    get:
-      tags:
-      - Pipeline
-      summary: Backlog of this stage's undelivered callbacks and hand-offs
-      description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
-        and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
-        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
-        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
-        or a dead letter is waiting.'
-      operationId: getScoringOutboxStatus
-      responses:
-        '200':
-          description: The backlog of this stage
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutboxStatusResponse'
-              examples:
-                idle:
-                  summary: Nothing waiting
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: true
-                      stage: OCR
-                      pending: 0
-                      retrying: 0
-                      dead_letters: 0
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                backlog:
-                  summary: The orchestrator has been down for a while
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: true
-                      stage: OCR
-                      pending: 12
-                      retrying: 12
-                      oldest_pending_seconds: 754.3
-                      dead_letters: 1
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                disabled:
-                  summary: '`PIPELINE_OUTBOX` is off'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: false
-                      stage: OCR
-                      pending: 0
-                      retrying: 0
-                      dead_letters: 0
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
       security:
       - APIKeyHeader: []
 webhooks:

@@ -5,7 +5,10 @@ from typing import Any
 import pytest
 
 from ocr_common.errors import ServiceError
-from src.models.structuring import NpwpRulesStructurer, RuleBasedNpwpStructurer, get_structurer
+
+from app.dependencies import get_structurer
+from app.ml.npwp_rules import NpwpRulesStructurer
+from app.ml.rule_based import RuleBasedNpwpStructurer
 
 _SAMPLE = json.loads((Path(__file__).parent / "fixtures" / "remote_npwp_response.json").read_text(encoding="utf-8"))[0]
 

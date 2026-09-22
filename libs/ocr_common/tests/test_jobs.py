@@ -3,19 +3,19 @@ import asyncio
 import httpx
 import pytest
 
-from ocr_common import database
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS
 from ocr_common.errors import ServiceError
-from ocr_common.jobs import (
+from ocr_common.pipeline import (
     STAGE_OCR,
     STAGE_STRUCTURING,
     InMemoryJobRepository,
     NextStageClient,
     OrchestrationCallback,
     StagePipeline,
+    database,
 )
-from ocr_common.jobs_sql import SqlJobRepository
-from ocr_common.remote import RemoteModelClient
+from ocr_common.pipeline.repository_sql import SqlJobRepository
 from ocr_common.testing import RecordingCallback, RecordingNextStage
 
 

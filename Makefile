@@ -24,15 +24,15 @@ typecheck-lib:
 test-%:
 	cd services/$* && $(PY) -m pytest -q
 typecheck-%:
-	cd services/$* && $(PY) -m ty check src tests
+	cd services/$* && $(PY) -m ty check app tests
 openapi-%:
-	cd services/$* && API_KEY=x ENVIRONMENT=local $(PY) -m ocr_common.openapi
+	cd services/$* && API_KEY=x ENVIRONMENT=local $(PY) -m ocr_common.web.openapi
 openapi-gateway: $(SERVICES:%=openapi-%)
 	$(PY) scripts/build_gateway_openapi.py
 api-docs:
 	$(PY) -m http.server 8088
 run-%:
-	cd services/$* && $(PY) -m uvicorn src.main:app --reload --port $(PORT_$*)
+	cd services/$* && $(PY) -m uvicorn app.main:app --reload --port $(PORT_$*)
 
 db-upgrade:
 	$(PY) -m alembic -c db/alembic.ini upgrade head

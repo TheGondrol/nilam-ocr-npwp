@@ -2,13 +2,14 @@ import pytest
 
 from ocr_common.errors import ServiceError
 from ocr_common.testing import image_upload
+
 from tests.fakes import fake_stage_clients
 
 
 @pytest.fixture(autouse=True)
-def stages(monkeypatch):
+def stages(use_ocr_service):
     clients = fake_stage_clients()
-    monkeypatch.setattr("src.api.v1.ocr.get_stage_clients", lambda: clients)
+    use_ocr_service(stages=clients)
     return clients
 
 

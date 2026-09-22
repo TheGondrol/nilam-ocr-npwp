@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from ocr_common.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, _resolve, fetch
+from ocr_common.clients.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, _resolve, fetch
 
 LOCAL = UrlPolicy(allow_private=True)
 BODY = b"x" * 100

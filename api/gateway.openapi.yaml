@@ -137,11 +137,7 @@ paths:
                         confidence: 1
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
-                    job_status: completed
                     guardrails: 1
-                    params:
-                      nik: '3123456711950001'
-                      refno: PK19039Y8U
         '202':
           description: 'Accepted, but still running when the wait ran out: the result follows in the SCORING
             callback'
@@ -159,9 +155,6 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: processing
-                    params:
-                      nik: '3123456711950001'
-                      refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
             0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), or a bad file / intake (empty,
@@ -179,9 +172,6 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 0
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -210,9 +200,6 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 1
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
         '500':
           description: The guardrails model or the ekstraksi service failed or answered in an unexpected
             shape

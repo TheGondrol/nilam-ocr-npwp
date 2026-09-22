@@ -1,8 +1,10 @@
 import pytest
 
 from ocr_common.errors import ServiceError
-from src.models.structuring import RuleBasedNpwpStructurer, normalize_npwp
-from src.services.structuring_service import StructuringService
+
+from app.ml.rule_based import RuleBasedNpwpStructurer
+from app.ml.utils import normalize_npwp
+from app.services.structuring_service import StructuringService
 
 LINES = [
     {"text": "KEMENTERIAN KEUANGAN REPUBLIK INDONESIA", "confidence": 0.99},

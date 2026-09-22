@@ -2,12 +2,12 @@ import pytest
 from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.testclient import TestClient
 
-from ocr_common.app import create_app
 from ocr_common.config import BaseServiceSettings
-from ocr_common.envelope import envelope
-from ocr_common.intake import FileField, FileUrlField, read_image
-from ocr_common.request_id import get_request_id
-from ocr_common.security import verify_api_key
+from ocr_common.web.app import create_app
+from ocr_common.web.envelope import envelope
+from ocr_common.web.intake import FileField, FileUrlField, read_image
+from ocr_common.web.request_id import get_request_id
+from ocr_common.web.security import verify_api_key
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
