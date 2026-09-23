@@ -27,7 +27,4 @@ services/*/weights/*
 # Data rujukan internal aturan structuring (daftar nama): dipasang saat deploy, bukan lewat git.
 services/structuring/app/vendor/npwp_rules/data/*.xlsx
 
-# Alat lokal (tools/tracker, tools/load-tester) hanya di laptop, tidak ikut repo.
-tools/
-
 docs/
