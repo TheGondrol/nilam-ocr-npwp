@@ -186,7 +186,13 @@ paths:
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
         or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
         gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
-        default), else `0`. `params` is returned as sent.
+        default), else `0`. `data.flag` / `data.flag_reason` is the review flag of the structuring rules
+        (never a rejection). `params` is returned as sent.
+
+
+        **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
+        (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` (2) pages
+        answers `400`, both with an Indonesian `message` the client can show as is.
 
 
         After a hand-off the `OCR`, `STRUCTURING` and `SCORING` callbacks are sent in every case; on 202
@@ -231,6 +237,7 @@ paths:
                       nama:
                         value: BUDI SANTOSO
                         confidence: 1
+                      flag: false
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     guardrails: 1
@@ -259,8 +266,9 @@ paths:
                       refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), or a bad file / intake (empty,
-            too large, unsupported type, unreadable, `file_url` refused)'
+            0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
+            file / intake (empty, unsupported type, unreadable, `file_url` refused)'
           content:
             application/json:
               schema:
@@ -288,6 +296,17 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
+        '413':
+          description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 413
+                status_desc: Payload Too Large
+                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
             `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is
@@ -411,7 +430,8 @@ paths:
                         verdict: reject
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad file (empty, too large, unsupported type, unreadable) or bad intake
+          description: Bad file (empty, unsupported type, unreadable, more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            pages) or bad intake
           content:
             application/json:
               schema:
@@ -432,6 +452,17 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
+        '413':
+          description: The document exceeds `MAX_UPLOAD_BYTES`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 413
+                status_desc: Payload Too Large
+                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '422':
           description: Validation Error
           content:
@@ -859,10 +890,28 @@ components:
           $ref: '#/components/schemas/ContractField'
           description: 'The name on the card: the taxpayer''s name, or the registered name on a company''s
             card'
+        flag:
+          type: boolean
+          title: Flag
+          description: 'Review flag of the ML team''s structuring rules: another document bundled in,
+            CAPTCHA or lookup screenshot, number or name not found, single-word name, letter in the number,
+            invalid Kode Wilayah / birthdate / KPP code, more than 2 pages. Never a rejection: the values
+            are still returned with a lower confidence, and `flag_reason` says why'
+          examples:
+          - false
+        flag_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flag Reason
+          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          examples:
+          - null
       type: object
       required:
       - nomor_npwp
       - nama
+      - flag
       title: NpwpData
     PageResult:
       properties:

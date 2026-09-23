@@ -1,6 +1,6 @@
 import re
 
-from .name_master import correct_name_spacing, is_recognized_name
+from .name_master import correct_name_with_npwp_list, is_recognized_name
 from .npwp import NPWP_PATTERN, find_document_region, poly_center
 
 # A name candidate line: letters/spaces only, no digits - excludes anything
@@ -220,6 +220,7 @@ def _clean_name_candidate(text: str) -> str | None:
 
 def extract_name(
     res,
+    file_id: str | None = None,
     apply_balinese_normalization: bool = False,
     apply_master_correction: bool = True,
     apply_formatting_normalization: bool = True,
@@ -274,8 +275,10 @@ def extract_name(
 
     `apply_balinese_normalization` gates only the Balinese title-spacing
     fix (see normalize_balinese_title_spacing) on the winning candidate.
-    `apply_master_correction` gates only the name-master spacing
-    correction (see name_master.correct_name_spacing). Both default to
+    `apply_master_correction` gates only the NPWP-list-based correction
+    (see name_master.correct_name_with_npwp_list), which needs `file_id`
+    to look up this document's own reference name - with no file_id, or no
+    entry for it, the candidate is returned unchanged. Both default to
     what the primary/"modified" output uses.
 
     `apply_formatting_normalization` gates the slash/PT-prefix spacing
@@ -383,7 +386,7 @@ def extract_name(
             name = normalize_balinese_title_spacing(name)
         name = normalize_pt_prefix_spacing(name)
     if apply_master_correction:
-        name = correct_name_spacing(name)
+        name = correct_name_with_npwp_list(name, file_id)
     return name, score
 
 

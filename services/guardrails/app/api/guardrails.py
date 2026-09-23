@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
+from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
@@ -23,6 +24,7 @@ from app.config import Settings, get_settings
 from app.dependencies import get_guardrails_service, get_job_service
 from app.services.guardrails_service import GuardrailsService
 from app.services.job_service import GuardrailsJobService
+from app.services.pages import TOO_MANY_PAGES_MESSAGE
 
 router = APIRouter(tags=["Guardrails"], dependencies=[Depends(verify_api_key)])
 
@@ -36,6 +38,8 @@ _COMPLETED = extract_body(
     data={
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+        "flag": False,
+        "flag_reason": None,
     },
     guardrails=1,
     errors=None,
@@ -124,7 +128,11 @@ def _parse_params(raw: str | None) -> Any:
         "`data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer's name, or the "
         "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
         "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`. "
+        "`data.flag` / `data.flag_reason` is the review flag of the structuring rules (never a rejection). "
         "`params` is returned as sent.\n\n"
+        "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
+        "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
+        "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
         "After a hand-off the `OCR`, `STRUCTURING` and `SCORING` callbacks are sent in every case; on 202 the "
         "result arrives in the SCORING callback. Give this call an HTTP timeout well above "
         "`PIPELINE_WAIT_SECONDS` (e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -152,12 +160,18 @@ def _parse_params(raw: str | None) -> Any:
             "model": ExtractOcrResponse,
             "description": (
                 f"Rejected by the guardrails model (`{REJECTED_CODE}`, `guardrails: 0`), unsupported "
-                "`document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), or a bad file / intake (empty, too large, "
-                "unsupported type, unreadable, `file_url` refused)"
+                "`document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages "
+                f"(`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
+                "`file_url` refused)"
             ),
             "content": {"application/json": {"example": _REJECTED}},
         },
         401: UNAUTHORIZED,
+        413: error(
+            413,
+            "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started",
+            PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB"),
+        ),
         422: {
             "model": ExtractOcrResponse,
             "description": (
@@ -259,9 +273,13 @@ async def extract_ocr(
             rejected=("Rejected", envelope(200, "OK", _REJECTED_REPORT, RID)),
         ),
         400: error(
-            400, "Bad file (empty, too large, unsupported type, unreadable) or bad intake", "Uploaded file is empty"
+            400,
+            "Bad file (empty, unsupported type, unreadable, more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages) or "
+            "bad intake",
+            "Uploaded file is empty",
         ),
         401: UNAUTHORIZED,
+        413: error(413, "The document exceeds `MAX_UPLOAD_BYTES`", PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB")),
         422: error(422, "Validation Error", "body.file: Field required", errors="VALIDATION_ERROR"),
         500: error(500, "The guardrails model failed", "guardrails model returned an unexpected response"),
     },

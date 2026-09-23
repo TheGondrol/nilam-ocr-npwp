@@ -8,8 +8,8 @@ from functools import lru_cache
 from ocr_common.pipeline import (
     STAGE_SCORING,
     OutboxRelay,
-    SqlStageResults,
     StagePipeline,
+    StageResults,
     StaleJobReaper,
     build_outbox_relay,
     build_stage_pipeline,
@@ -62,7 +62,7 @@ def get_relay() -> OutboxRelay | None:
 
 
 @lru_cache
-def get_results() -> SqlStageResults | None:
+def get_results() -> StageResults | None:
     return build_stage_results(get_settings())
 
 

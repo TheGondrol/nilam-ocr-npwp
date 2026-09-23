@@ -135,6 +135,59 @@ async def test_envelope_with_data_list_is_accepted():
     assert len(blocks) == 10
 
 
+CURRENT_CONTRACT = {
+    "models": {"detection": "PP-OCRv6_medium_det", "recognition": "PP-OCRv6_medium_rec"},
+    "num_pages": 1,
+    "pages": SAMPLE,
+    "n_boxes": 10,
+    "avg_doc_score": 0.9813,
+    "min_doc_score": 0.9438,
+}
+
+
+async def test_current_contract_with_pages_and_models_is_accepted():
+    """The ML team's OCR service of 23 Sep 2026 answers {models, num_pages, pages, n_boxes, avg/min_doc_score}."""
+    result = await _engine(_reply(CURRENT_CONTRACT)).extract("a.jpg", JPEG, "image/jpeg")
+    assert result["model"] == "PP-OCRv6_medium_det+PP-OCRv6_medium_rec"
+    assert len(result["blocks"]) == 10
+    assert result["blocks"][2]["text"] == "95.844.800.1-805.000"
+
+
+async def test_no_pages_in_the_current_contract_is_empty_blocks():
+    body = {**CURRENT_CONTRACT, "num_pages": 0, "pages": [], "n_boxes": 0, "avg_doc_score": None}
+    assert (await _engine(_reply(body)).extract("a.jpg", JPEG, "image/jpeg"))["blocks"] == []
+
+
+async def test_ocr_params_are_sent_as_form_fields():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content
+        return httpx.Response(200, json=CURRENT_CONTRACT)
+
+    engine = RemoteOcrEngine(
+        RemoteModelClient(
+            "http://ocr-model:8082", 5.0, name="ekstraksi OCR model", transport=httpx.MockTransport(handler)
+        ),
+        params={"document_type": "npwp", "scale": 3.5},
+    )
+    await engine.extract("a.jpg", JPEG, "image/jpeg")
+    assert b'name="document_type"\r\n\r\nnpwp' in seen["body"]
+    assert b'name="scale"\r\n\r\n3.5' in seen["body"]
+    assert b'name="file"; filename="a.jpg"' in seen["body"]
+
+
+async def test_without_params_only_the_file_is_sent():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content
+        return httpx.Response(200, json=SAMPLE)
+
+    await _engine(handler).extract("a.jpg", JPEG, "image/jpeg")
+    assert seen["body"].count(b"Content-Disposition") == 1
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -184,13 +237,17 @@ def test_remote_backend_requires_url():
 async def test_remote_backend_is_built_from_settings():
     engine = OCR_BACKENDS["remote"](
         _settings(
-            ekstraksi_backend="remote", ekstraksi_ocr_url="http://localhost:8082/", ekstraksi_ocr_api_key="dummy-key"
+            ekstraksi_backend="remote",
+            ekstraksi_ocr_url="http://localhost:8082/",
+            ekstraksi_ocr_api_key="dummy-key",
+            ekstraksi_ocr_params={"document_type": "npwp"},
         )
     )
     try:
         assert isinstance(engine, RemoteOcrEngine)
         assert engine._client.base_url == "http://localhost:8082"
         assert engine._client._client.headers["X-API-Key"] == "dummy-key"
+        assert engine._params == {"document_type": "npwp"}
     finally:
         await engine.aclose()
 

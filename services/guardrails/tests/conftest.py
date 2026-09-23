@@ -22,6 +22,8 @@ STRUCTURING_RESULT = {
         "nama": {"value": "BUDI SANTOSO", "confidence": 0.97, "source": "NAMA : BUDI SANTOSO"},
         "nama_badan": {"value": None, "confidence": 0.0, "source": None},
     },
+    "flag": False,
+    "flag_reason": None,
 }
 SCORING_RESULT = {"npwp_confidence": 0.7296, "name_confidence": 0.9471, "payload": {"npwp": "123456789012345"}}
 
@@ -86,8 +88,9 @@ def stub_waiter():
 def use_classifier():
     """Serve the routes with this classifier instead of the configured backend."""
 
-    def _use(classifier):
-        app.dependency_overrides[get_guardrails_service] = lambda: GuardrailsService(classifier, get_settings())
+    def _use(classifier, **settings):
+        configured = get_settings().model_copy(update=settings) if settings else get_settings()
+        app.dependency_overrides[get_guardrails_service] = lambda: GuardrailsService(classifier, configured)
 
     yield _use
     app.dependency_overrides.pop(get_guardrails_service, None)

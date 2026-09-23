@@ -18,7 +18,6 @@ section-order = ["future", "standard-library", "third-party", "ocr-common", "fir
 "services/*/app/api/**" = ["B008", "B904"]
 "services/*/app/dependencies.py" = ["B008"]
 "libs/ocr_common/ocr_common/web/intake.py" = ["B008"]
-"tools/tracker/backend/*.py" = ["B008", "B904"]
 
 [tool.ty.environment]
 extra-paths = [

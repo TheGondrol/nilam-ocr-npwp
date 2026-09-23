@@ -90,7 +90,13 @@ paths:
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
         or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
         gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
-        default), else `0`. `params` is returned as sent.
+        default), else `0`. `data.flag` / `data.flag_reason` is the review flag of the structuring rules
+        (never a rejection). `params` is returned as sent.
+
+
+        **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
+        (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` (2) pages
+        answers `400`, both with an Indonesian `message` the client can show as is.
 
 
         After a hand-off the `OCR`, `STRUCTURING` and `SCORING` callbacks are sent in every case; on 202
@@ -135,6 +141,7 @@ paths:
                       nama:
                         value: BUDI SANTOSO
                         confidence: 1
+                      flag: false
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     guardrails: 1
@@ -163,8 +170,9 @@ paths:
                       refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), or a bad file / intake (empty,
-            too large, unsupported type, unreadable, `file_url` refused)'
+            0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
+            file / intake (empty, unsupported type, unreadable, `file_url` refused)'
           content:
             application/json:
               schema:
@@ -192,6 +200,17 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
+        '413':
+          description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 413
+                status_desc: Payload Too Large
+                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
             `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is
@@ -600,16 +619,22 @@ paths:
                             confidence: 0.9992
                             source: 'NPWP : 12.345.678.9-012.345'
                             signals:
-                              has_homoglyph: false
                               candidate_count: 1
+                              has_homoglyph: false
+                              invalid_province_prefix: false
+                              invalid_kecamatan_prefix: false
+                              invalid_birthdate: false
+                              invalid_kpp_prefix: false
                           nama:
                             value: BUDI SANTOSO
                             confidence: 0.9773
                             source: BUDI SANTOSO
                             signals:
+                              name_base: BUDI SANTOSO
                               corrected: false
                           nama_badan:
                             confidence: 0.0
+                        flag: false
                       updated_at: '2026-09-18T04:00:01+00:00'
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
                 failed:
@@ -718,18 +743,15 @@ paths:
                         npwp_confidence: 0.9806
                         name_confidence: 0.9948
                         payload:
-                          npwp: '123456789012345'
-                          npwp_score: 0.9992
-                          npwp_has_homoglyph: false
+                          npwp: 12.345.678.9-012.000
+                          npwp_score: 0.98
                           npwp_candidate_count: 1
-                          name: BUDI SANTOSO
-                          name_score: 0.9773
-                          name_corrected: false
-                          n_boxes: 6
-                          num_pages: 1
-                          avg_doc_score: 0.984883
-                          min_doc_score: 0.9747
-                          guardrail_probability: 0.9821
+                          name_base: PT CONTOH INDONESIA
+                          name_score: 0.95
+                          avg_doc_score: 0.91
+                          min_doc_score: 0.62
+                          flag: false
+                          guardrail_probability: 0.98
                       updated_at: '2026-09-18T04:00:01+00:00'
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
                 failed:
@@ -981,9 +1003,9 @@ components:
           - type: string
           - type: 'null'
           title: Npwp
-          description: Extracted NPWP number, digits only; null when not found
+          description: Extracted NPWP number, digits or printed form; null when not found
           examples:
-          - '123456789012000'
+          - 12.345.678.9-012.000
         npwp_score:
           anyOf:
           - type: number
@@ -994,14 +1016,6 @@ components:
           description: OCR score of the line the number came from
           examples:
           - 0.98
-        npwp_has_homoglyph:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Npwp Has Homoglyph
-          description: An OCR letter/digit mix-up in the number (O->0, S->5, ...) was corrected
-          examples:
-          - false
         npwp_candidate_count:
           anyOf:
           - type: integer
@@ -1012,12 +1026,13 @@ components:
             one)
           examples:
           - 1
-        name:
+        name_base:
           anyOf:
           - type: string
           - type: 'null'
-          title: Name
-          description: Extracted person or company name; null when not found
+          title: Name Base
+          description: The name as OCR read it, BEFORE any normalisation or correction (`signals.name_base`
+            of the structuring result); null when not found. The model measures the name's shape on this
           examples:
           - PT CONTOH INDONESIA
         name_score:
@@ -1029,33 +1044,7 @@ components:
           title: Name Score
           description: OCR score of the line the name came from
           examples:
-          - 0.96
-        name_corrected:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Name Corrected
-          description: The name-master correction changed the name
-          examples:
-          - false
-        n_boxes:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: 'null'
-          title: N Boxes
-          description: OCR text lines in the whole document
-          examples:
-          - 34
-        num_pages:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: 'null'
-          title: Num Pages
-          description: Pages in the document
-          examples:
-          - 1
+          - 0.95
         avg_doc_score:
           anyOf:
           - type: number
@@ -1065,7 +1054,7 @@ components:
           title: Avg Doc Score
           description: Mean OCR score over all lines
           examples:
-          - 0.912
+          - 0.91
         min_doc_score:
           anyOf:
           - type: number
@@ -1081,8 +1070,8 @@ components:
           - type: boolean
           - type: 'null'
           title: Flag
-          description: Document flag defined by the ML team; no pipeline stage produces it yet, so it
-            is sent as null
+          description: Review flag of the structuring rules (`flag` of the structuring result); null counts
+            as false
           examples:
           - false
         guardrail_probability:
@@ -1092,11 +1081,13 @@ components:
             minimum: 0.0
           - type: 'null'
           title: Guardrail Probability
-          description: '`document.confidence` of the guardrails result'
+          description: '`document.confidence` of the guardrails result when the document was accepted'
           examples:
-          - 0.9821
+          - 0.98
       type: object
       title: ConfidenceRequest
+      description: The ML team's scoring payload (nilamnpwp `scoring/schemas.py`, model retrained 21 Sep
+        2026).
     ContractField:
       properties:
         value:
@@ -1339,6 +1330,23 @@ components:
           - $ref: '#/components/schemas/GuardrailsResult'
           - type: 'null'
           description: The guardrails result that was submitted with the job, returned unchanged
+        flag:
+          type: boolean
+          title: Flag
+          description: 'Review flag of the structuring rules (see the structuring result). True never
+            rejects the document: the value is still returned, the trust model''s confidence is lower,
+            and `flag_reason` says why'
+          default: false
+          examples:
+          - false
+        flag_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flag Reason
+          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          examples:
+          - null
       type: object
       required:
       - document_type
@@ -1645,10 +1653,28 @@ components:
           $ref: '#/components/schemas/ContractField'
           description: 'The name on the card: the taxpayer''s name, or the registered name on a company''s
             card'
+        flag:
+          type: boolean
+          title: Flag
+          description: 'Review flag of the ML team''s structuring rules: another document bundled in,
+            CAPTCHA or lookup screenshot, number or name not found, single-word name, letter in the number,
+            invalid Kode Wilayah / birthdate / KPP code, more than 2 pages. Never a rejection: the values
+            are still returned with a lower confidence, and `flag_reason` says why'
+          examples:
+          - false
+        flag_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flag Reason
+          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          examples:
+          - null
       type: object
       required:
       - nomor_npwp
       - nama
+      - flag
       title: NpwpData
     NpwpFields:
       properties:
@@ -2073,6 +2099,7 @@ components:
               confidence: 0.9773
               signals:
                 corrected: false
+                name_base: BUDI SANTOSO
               source: BUDI SANTOSO
               value: BUDI SANTOSO
             nama_badan:
@@ -2084,10 +2111,30 @@ components:
                 has_homoglyph: false
               source: 'NPWP : 12.345.678.9-012.345'
               value: 12.345.678.9-012.345
+        flag:
+          type: boolean
+          title: Flag
+          description: 'Review flag of the ML team''s rules. True when: another document is bundled in
+            (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup, the number or the
+            name was not found, the name is a single word, the number contains a letter, its province
+            / kecamatan / birthdate / KPP code is invalid, or the upload has more than 2 pages. It never
+            rejects the document: the fields are still returned, and the trust model uses the flag as
+            a feature'
+          examples:
+          - false
+        flag_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flag Reason
+          description: The first reason `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          examples:
+          - null
       type: object
       required:
       - document_type
       - fields
+      - flag
       title: StructuredDocument
     StructuredField:
       properties:
@@ -2121,10 +2168,13 @@ components:
             type: object
           - type: 'null'
           title: Signals
-          description: 'Inputs for the scoring model (backend `npwp_rules` only; null otherwise). nomor_npwp:
-            `has_homoglyph` (an OCR letter/digit mix-up such as O->0 was corrected) and `candidate_count`
-            (NPWP-shaped numbers found in the document). nama / nama_badan: `corrected` (the name-master
-            correction changed the name)'
+          description: 'Inputs for the scoring model and review signals (backend `npwp_rules` only; null
+            otherwise). nomor_npwp: `candidate_count` (NPWP-shaped numbers found in the document), `has_homoglyph`
+            (OCR read a letter where a digit belongs; the letter is dropped, not corrected), `invalid_province_prefix`
+            / `invalid_kecamatan_prefix` / `invalid_birthdate` (a 16-digit NIK-based number fails the
+            Kode Wilayah or birthdate check), `invalid_kpp_prefix` (a 15-digit number''s KPP office code
+            is unknown). nama / nama_badan: `name_base` (the read before any normalisation; the trust
+            model measures the name on this), `corrected` (`value` differs from `name_base`)'
           examples:
           - candidate_count: 1
             has_homoglyph: false

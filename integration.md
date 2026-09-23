@@ -68,9 +68,12 @@ orchestrator. Guardrails menunggu pipeline sampai `PIPELINE_WAIT_SECONDS` (defau
 **15 detik**, dihitung sejak request diterima):
 
     POST :8031/v1/extract-ocr
+      file > 2,5 MB              -> 413  message "Ukuran dokumen melebihi batas 2,5 MB, ..." (sebelum model)
+      PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
       ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
                                          tidak ada yang jalan, tidak ada callback
-      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 1
+      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama, flag, flag_reason},
+                                         guardrails = 1
       lolos, gagal tepat waktu   -> 422  job_status = failed,
                                          errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
       lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
@@ -140,7 +143,7 @@ Bentuk jawabannya mengikuti kontrak `extract-ocr` orchestrator: envelope standar
 | `request_id` | ya | dibuat oleh kalian |
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
-| `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal 5 MB. PDF dinilai per halaman |
+| `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 
 `file_url` diunduh sekali di panggilan ini lalu diteruskan ke tahap OCR sebagai file,
 jadi presigned URL cukup hidup selama panggilan ini saja. Host-nya harus terdaftar di
@@ -155,7 +158,9 @@ Selesai dalam waktu tunggu, **200**:
       "message": "OCR extraction completed successfully",
       "data": {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-        "nama": {"value": "BUDI SANTOSO", "confidence": 1}
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+        "flag": false,
+        "flag_reason": null
       },
       "errors": null,
       "request_id": "REQ_001",
@@ -168,6 +173,13 @@ Selesai dalam waktu tunggu, **200**:
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
 - `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
   `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
+- `flag` / `flag_reason` (baru, 23 Sep 2026) = tanda review dari aturan ekstraksi ML engineer, **bukan
+  penolakan**: nilainya tetap dikembalikan, confidence-nya lebih rendah, dan `flag_reason` (bahasa
+  Indonesia) menjelaskan kenapa, mis. `"Nama hanya terdiri dari 1 kata, mohon dicek kembali"`,
+  `"Dokumen lain terdeteksi: 'KARTU TANDA PENDUDUK' pada halaman 1"`, `"Kode provinsi pada NPWP tidak
+  valid, mohon dicek kembali"`, `"dokumen blur / blank"`. Kolom `result_data` di tabel Orkestrasi
+  membawa keduanya juga. Pencocokan nama fuzzy terhadap nama nasabah (`refno`) dilakukan di sisi
+  Orkestrasi, sesuai keputusan ML engineer; service ini tidak memakainya.
 
 Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback SCORING, atau
 baca dengan `GET /v1/scoring/jobs/{request_id}`:
@@ -196,7 +208,8 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | Kode | `errors` | Arti | Pipeline jalan? |
 |---|---|---|---|
 | 400 | `UNSUPPORTED_DOCUMENT_TYPE` | `document_type` bukan `npwp` | tidak |
-| 400 | = `message` | file kosong, terlalu besar, format salah, `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
+| 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
+| 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
@@ -376,7 +389,8 @@ penjelasan yang aman untuk di-log.
 
 | Kode | Arti |
 |---|---|
-| 400 | file bermasalah (kosong, kebesaran, tipe tidak didukung) atau intake salah |
+| 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
+| 413 | file lebih dari 2,5 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |

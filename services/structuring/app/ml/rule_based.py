@@ -4,7 +4,7 @@ Kept as the `rule_based` backend for OCR output that still carries labels."""
 import re
 
 from ocr_common.npwp import NPWP_FIELDS
-from ocr_common.types import OcrBlock, StructuredField
+from ocr_common.types import OcrBlock, StructuredDocument, StructuredField
 
 from app.ml.utils import _BADAN_PREFIX, normalize_npwp
 
@@ -31,7 +31,7 @@ _FALLBACKS = (
 class RuleBasedNpwpStructurer:
     name = "rule_based"
 
-    def structure(self, lines: list[OcrBlock]) -> dict[str, StructuredField]:
+    def structure(self, lines: list[OcrBlock]) -> StructuredDocument:
         fields: dict[str, StructuredField] = {}
         unmatched: list[OcrBlock] = []
 
@@ -58,7 +58,13 @@ class RuleBasedNpwpStructurer:
         if number is not None and number["value"] is not None:
             number["value"] = normalize_npwp(number["value"])
 
-        return {name: fields.get(name, {"value": None, "confidence": 0.0, "source": None}) for name in NPWP_FIELDS}
+        return {
+            "fields": {
+                name: fields.get(name, {"value": None, "confidence": 0.0, "source": None}) for name in NPWP_FIELDS
+            },
+            "flag": False,
+            "flag_reason": None,
+        }
 
     @staticmethod
     def _match_label(text: str) -> tuple[str, str] | None:

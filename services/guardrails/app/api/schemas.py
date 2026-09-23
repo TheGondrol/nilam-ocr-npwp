@@ -91,6 +91,19 @@ class NpwpData(BaseModel):
     nama: ContractField = Field(
         ..., description="The name on the card: the taxpayer's name, or the registered name on a company's card"
     )
+    flag: bool = Field(
+        ...,
+        description=(
+            "Review flag of the ML team's structuring rules: another document bundled in, CAPTCHA or lookup "
+            "screenshot, number or name not found, single-word name, letter in the number, invalid Kode Wilayah / "
+            "birthdate / KPP code, more than 2 pages. Never a rejection: the values are still returned with a "
+            "lower confidence, and `flag_reason` says why"
+        ),
+        examples=[False],
+    )
+    flag_reason: str | None = Field(
+        None, description="Why `flag` is true, in Indonesian, for a reviewer; null when not flagged", examples=[None]
+    )
 
 
 class ExtractOcrResponse(BaseModel):

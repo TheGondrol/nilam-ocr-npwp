@@ -283,16 +283,22 @@ paths:
                             confidence: 0.9992
                             source: 'NPWP : 12.345.678.9-012.345'
                             signals:
-                              has_homoglyph: false
                               candidate_count: 1
+                              has_homoglyph: false
+                              invalid_province_prefix: false
+                              invalid_kecamatan_prefix: false
+                              invalid_birthdate: false
+                              invalid_kpp_prefix: false
                           nama:
                             value: BUDI SANTOSO
                             confidence: 0.9773
                             source: BUDI SANTOSO
                             signals:
+                              name_base: BUDI SANTOSO
                               corrected: false
                           nama_badan:
                             confidence: 0.0
+                        flag: false
                       updated_at: '2026-09-18T04:00:01+00:00'
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
                 failed:
@@ -506,8 +512,11 @@ paths:
       tags:
       - Structuring
       summary: Turn OCR lines into named fields, synchronous (no job, no callback)
-      description: Maps raw text lines (e.g. from the ekstraksi service) to named document fields with
-        per-field confidence.
+      description: 'Maps raw text lines (e.g. from the ekstraksi service) to named document fields with
+        per-field confidence, using the ML team''s rules (`npwp_rules`). Nothing is rejected on content:
+        a bundled second document, a CAPTCHA or lookup screenshot, a missing or single-word name, a letter
+        in the number, an invalid Kode Wilayah / birthdate / KPP code or more than 2 pages set `flag`
+        and `flag_reason` for the reviewer and lower the trust model''s confidence.'
       operationId: structureLines
       requestBody:
         content:
@@ -537,20 +546,57 @@ paths:
                           confidence: 0.9992
                           source: 'NPWP : 12.345.678.9-012.345'
                           signals:
-                            has_homoglyph: false
                             candidate_count: 1
+                            has_homoglyph: false
+                            invalid_province_prefix: false
+                            invalid_kecamatan_prefix: false
+                            invalid_birthdate: false
+                            invalid_kpp_prefix: false
                         nama:
                           value: BUDI SANTOSO
                           confidence: 0.9773
                           source: BUDI SANTOSO
                           signals:
+                            name_base: BUDI SANTOSO
                             corrected: false
                         nama_badan:
                           confidence: 0.0
+                      flag: false
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                flagged:
+                  summary: 'A single-word name: returned, but flagged for review'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      document_type: npwp
+                      fields:
+                        nomor_npwp:
+                          value: 12.345.678.9-012.345
+                          confidence: 0.9992
+                          source: 'NPWP : 12.345.678.9-012.345'
+                          signals:
+                            candidate_count: 1
+                            has_homoglyph: false
+                            invalid_province_prefix: false
+                            invalid_kecamatan_prefix: false
+                            invalid_birthdate: false
+                            invalid_kpp_prefix: false
+                        nama:
+                          value: SUKIRMAN
+                          confidence: 0.9611
+                          source: SUKIRMAN
+                          signals:
+                            name_base: SUKIRMAN
+                            corrected: false
+                        nama_badan:
+                          confidence: 0.0
+                      flag: true
+                      flag_reason: Nama hanya terdiri dari 1 kata, mohon dicek kembali
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: No usable text, or the upload is not a lone NPWP card (other document, CAPTCHA,
-            lookup screenshot, more than 2 pages)
+          description: No usable text in `lines`
           content:
             application/json:
               schema:
@@ -1428,6 +1474,7 @@ components:
               confidence: 0.9773
               signals:
                 corrected: false
+                name_base: BUDI SANTOSO
               source: BUDI SANTOSO
               value: BUDI SANTOSO
             nama_badan:
@@ -1439,10 +1486,30 @@ components:
                 has_homoglyph: false
               source: 'NPWP : 12.345.678.9-012.345'
               value: 12.345.678.9-012.345
+        flag:
+          type: boolean
+          title: Flag
+          description: 'Review flag of the ML team''s rules. True when: another document is bundled in
+            (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup, the number or the
+            name was not found, the name is a single word, the number contains a letter, its province
+            / kecamatan / birthdate / KPP code is invalid, or the upload has more than 2 pages. It never
+            rejects the document: the fields are still returned, and the trust model uses the flag as
+            a feature'
+          examples:
+          - false
+        flag_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flag Reason
+          description: The first reason `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          examples:
+          - null
       type: object
       required:
       - document_type
       - fields
+      - flag
       title: StructuredDocument
     StructuredField:
       properties:
@@ -1476,10 +1543,13 @@ components:
             type: object
           - type: 'null'
           title: Signals
-          description: 'Inputs for the scoring model (backend `npwp_rules` only; null otherwise). nomor_npwp:
-            `has_homoglyph` (an OCR letter/digit mix-up such as O->0 was corrected) and `candidate_count`
-            (NPWP-shaped numbers found in the document). nama / nama_badan: `corrected` (the name-master
-            correction changed the name)'
+          description: 'Inputs for the scoring model and review signals (backend `npwp_rules` only; null
+            otherwise). nomor_npwp: `candidate_count` (NPWP-shaped numbers found in the document), `has_homoglyph`
+            (OCR read a letter where a digit belongs; the letter is dropped, not corrected), `invalid_province_prefix`
+            / `invalid_kecamatan_prefix` / `invalid_birthdate` (a 16-digit NIK-based number fails the
+            Kode Wilayah or birthdate check), `invalid_kpp_prefix` (a 15-digit number''s KPP office code
+            is unknown). nama / nama_badan: `name_base` (the read before any normalisation; the trust
+            model measures the name on this), `corrected` (`value` differs from `name_base`)'
           examples:
           - candidate_count: 1
             has_homoglyph: false

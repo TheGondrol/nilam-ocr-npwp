@@ -177,9 +177,9 @@ paths:
         final result in the `SCORING` callback (see *Webhooks*).
 
 
-        **Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most 5
-        MB. `file_url` is downloaded in the background, so make a presigned URL live longer than the worst
-        queueing time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.
+        **Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most `MAX_UPLOAD_BYTES`
+        (2.5 MB). `file_url` is downloaded in the background, so make a presigned URL live longer than
+        the worst queueing time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.
 
 
         **Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run
@@ -878,7 +878,7 @@ paths:
                         page: 0
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad file (empty, too large, unsupported type) or bad intake
+          description: Bad file (empty, unsupported type) or bad intake
           content:
             application/json:
               schema:
@@ -888,6 +888,17 @@ paths:
                 status_desc: Bad Request
                 message: Uploaded file is empty
                 errors: Uploaded file is empty
+        '413':
+          description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 413
+                status_desc: Payload Too Large
+                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '401':
           description: Missing or invalid X-API-Key
           content:

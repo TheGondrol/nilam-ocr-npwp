@@ -8,7 +8,7 @@ from ocr_common.pipeline.outbox import OutboxRelay
 from ocr_common.pipeline.outcomes import build_stage_outcome
 from ocr_common.pipeline.reaper import Resume, StaleJobReaper
 from ocr_common.pipeline.repository import build_job_repository
-from ocr_common.pipeline.results import SqlStageResults
+from ocr_common.pipeline.results import StageResults
 from ocr_common.pipeline.stage import StagePipeline
 
 
@@ -99,9 +99,13 @@ def build_stale_job_reaper(
     )
 
 
-def build_stage_results(settings: PipelineSettings) -> SqlStageResults | None:
+def build_stage_results(settings: PipelineSettings) -> StageResults | None:
     """Reader of earlier stages' results, for hand-offs that arrive by reference; None without a database."""
-    return SqlStageResults(settings.database_url) if settings.database_url else None
+    if not settings.database_url:
+        return None
+    from ocr_common.pipeline.results_sql import SqlStageResults
+
+    return SqlStageResults(settings.database_url)
 
 
 def build_next_stage_client(

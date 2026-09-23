@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any
 
 from ocr_common.npwp import contract_fields
@@ -15,14 +16,14 @@ def extract_body(
     *,
     request_id: str | None,
     document_type: str | None,
-    data: dict[str, Any] | None = None,
+    data: Mapping[str, Any] | None = None,
     errors: str | None = None,
     job_status: str | None = None,
     guardrails: int | None = None,
     params: Any = None,
 ) -> dict[str, Any]:
     return {
-        **envelope(status_code, message, data, request_id, errors=errors),
+        **envelope(status_code, message, dict(data) if data is not None else None, request_id, errors=errors),
         "document_type": document_type,
         "job_status": job_status,
         "guardrails": guardrails,
