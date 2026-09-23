@@ -1,8 +1,20 @@
 # Helm chart `nilam-ocr-npwp`
 
-Satu Deployment, satu pod, empat container: `guardrails` (8031), `ekstraksi` (8030), `structuring` (8032), `scoring` (8033). Satu Service `nilam-ocr-npwp` membuka keempat port itu. Pintu masuk pipeline adalah `ekstraksi` di port 8030.
+Satu Deployment, Service, ConfigMap, PodDisruptionBudget, dan NetworkPolicy per service:
+`guardrails` (8031), `ekstraksi` (8030), `structuring` (8032), `scoring` (8033). Nama objeknya
+`<release>-<service>`, jadi di cluster dev: `nilam-ocr-npwp-guardrails`, dst. Tiap service bisa
+di-scale dan di-restart sendiri; guardrails (torch, CPU-bound) punya HPA opsional, dan kalau ia
+kehabisan memori, tahap lain tidak ikut jatuh.
 
-Chart ini berdampingan dengan manifest Kustomize di [../k8s](../k8s), yang menjalankan tiap service sebagai Deployment terpisah.
+Service `nilam-ocr-npwp` (tanpa akhiran) adalah pintu masuk yang dipublikasikan ke Orkestrasi
+([integration.md](../../integration.md)): ia membuka port semua service ber-`entrypoint`
+(ekstraksi 8030, guardrails 8031). Selector-nya mencakup semua pod release, tetapi tiap port
+memakai `targetPort` bernama (`ekstraksi`, `guardrails`), dan Kubernetes hanya memasukkan pod
+yang punya nama port itu ke endpoint port tersebut. URL antar service di dalam pipeline memakai
+Service per komponen (`http://nilam-ocr-npwp-structuring:8032`).
+
+Ini satu-satunya jalur deploy; manifest Kustomize yang dulu ada di `deploy/k8s` sudah dihapus
+dan polanya (Deployment per service, NetworkPolicy, PDB, HPA, ExternalSecret) dibawa ke sini.
 
 ## Yang sudah diverifikasi di `gc-ddb-dev-gke-cluster-01`
 
@@ -16,29 +28,61 @@ Dari pod di namespace `nilam-ocr-npwp`:
 | Orkestrasi | `ocr-orchestration.ocr-dev.svc.cluster.local:80` | terjangkau |
 | PaddleOCR | `10.213.128.67:8070` | terjangkau |
 
+Cluster dev memakai `LEGACY_DATAPATH` tanpa network policy enforcement: NetworkPolicy chart ini
+terpasang di sana tetapi belum ditegakkan. Di cluster dengan Dataplane V2 (atau Calico) ia
+langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Orkestrasi memanggil.
+
+## Objek yang dirender
+
+| Objek | Per service | Value |
+|---|---|---|
+| Deployment `<release>-<svc>` | ya | `services.<svc>.replicaCount`, `resources`, `terminationGracePeriodSeconds` |
+| Service `<release>-<svc>` | ya | `service.type`, `service.annotations` |
+| Service `<release>` (pintu masuk) | tidak; port dari service ber-`entrypoint` | `service.entrypoint.enabled` |
+| ConfigMap `<release>-<svc>` | ya | `environment`, `orchestration`, `commonEnv`, `services.<svc>.env`, `upstreams` |
+| PodDisruptionBudget | ya | `podDisruptionBudget.{enabled,maxUnavailable}` |
+| HorizontalPodAutoscaler | hanya yang `autoscaling.enabled` | `services.<svc>.autoscaling.{minReplicas,maxReplicas,targetCPUUtilizationPercentage}` |
+| NetworkPolicy | default-deny + satu per service | `networkPolicy.{enabled,clientNamespaces}` |
+| ServiceAccount | satu untuk semua | `serviceAccount.{create,name,annotations}` |
+| ExternalSecret | opsional, mati | `externalSecret.*` |
+
+Aturan NetworkPolicy dihitung dari `services.<svc>.upstreams`: `structuring` hanya menerima dari
+pod yang menyebutnya sebagai upstream (ekstraksi, guardrails), `scoring` dari ekstraksi,
+guardrails, dan structuring. Service ber-`entrypoint` (ekstraksi, guardrails) menerima dari
+semua pod release (handoff antar tahap dan callback mode uji coba) dan dari namespace di
+`networkPolicy.clientNamespaces`. Egress belum dibatasi (utang teknis di README utama).
+
 ## Konfigurasi dinamis
 
-Semua environment variable non-rahasia berasal dari `values`. Chart merender satu ConfigMap per service, dan hash ConfigMap itu dipasang sebagai annotation pod, jadi `helm upgrade` dengan nilai baru otomatis me-restart pod.
+Semua environment variable non-rahasia berasal dari `values`. Chart merender satu ConfigMap per
+service, dan hash isinya dipasang sebagai annotation pod, jadi `helm upgrade` dengan nilai baru
+hanya me-restart pod service yang konfigurasinya berubah.
 
 | Value | Isi |
 |---|---|
 | `environment` | `ENVIRONMENT` untuk semua service (`dev`, `staging`, `production`) |
 | `image.registry`, `image.tag` | registry dan tag bersama; `services.<nama>.image.tag` menimpa per service |
-| `orchestration.url` | wajib; `ekstraksi`, `structuring`, `scoring` menolak start tanpa ini |
+| `orchestration.url` | callback ke Orkestrasi; kosong = hasil lewat `ORCHESTRATION_OUTCOME_TABLE` (salah satu wajib) |
 | `commonEnv` | env var untuk keempat service |
 | `services.<nama>.env` | env var per service; menimpa `commonEnv` dan nilai bawaan chart |
-| `services.<nama>.upstreams` | service lain yang dipanggil; chart mengisi `<NAMA>_SERVICE_URL` otomatis |
+| `services.<nama>.upstreams` | service lain yang dipanggil; chart mengisi `<NAMA>_SERVICE_URL` dan NetworkPolicy |
+| `services.<nama>.entrypoint` | dipanggil dari luar release: ikut Service pintu masuk dan menerima `clientNamespaces` |
+| `services.<nama>.pipeline` | tahap async: menerima `DATABASE_URL` dan konfigurasi Orkestrasi |
+| `services.<nama>.replicaCount` | jumlah pod; diabaikan kalau `autoscaling.enabled` |
 | `services.<nama>.resources` | request dan limit per container |
-| `services.<nama>.enabled` | matikan satu container |
+| `services.<nama>.enabled` | matikan satu service beserta semua objeknya |
 | `existingSecret`, `secretKeys` | nama Secret dan nama key di dalamnya |
 
 Tulis angka sebagai string (`"0.8"`, `"5242880"`), karena Helm mengubah angka besar menjadi notasi ilmiah.
 
-URL antar-service memakai nama Service (`http://nilam-ocr-npwp:8032`), bukan `localhost`. Di luar `ENVIRONMENT=local`, service menolak `STRUCTURING_SERVICE_URL` dan `SCORING_SERVICE_URL` yang menunjuk ke localhost.
+URL antar-service memakai nama Service per komponen, bukan `localhost`. Di luar
+`ENVIRONMENT=local`, service menolak `STRUCTURING_SERVICE_URL` dan `SCORING_SERVICE_URL` yang
+menunjuk ke localhost.
 
 ## Secret
 
-Chart tidak membuat Secret. Buat sendiri sebelum atau sesudah install; pod menunggu sampai Secret ada.
+Dengan `externalSecret.enabled=false` (default) chart tidak membuat Secret. Buat sendiri sebelum
+atau sesudah install; pod menunggu sampai Secret ada.
 
 ```powershell
 kubectl -n nilam-ocr-npwp create secret generic nilam-ocr-npwp-secrets `
@@ -47,9 +91,18 @@ kubectl -n nilam-ocr-npwp create secret generic nilam-ocr-npwp-secrets `
   --from-literal=ORCHESTRATION_API_KEY='<opsional>'
 ```
 
-`DATABASE_URL` harus berformat SQLAlchemy (`postgresql+asyncpg://`), bukan JDBC. Karakter khusus di password perlu di-URL-encode (`@` menjadi `%40`). `ORCHESTRATION_API_KEY` boleh dihilangkan.
+`DATABASE_URL` harus berformat SQLAlchemy (`postgresql+asyncpg://`), bukan JDBC. Karakter khusus
+di password perlu di-URL-encode (`@` menjadi `%40`). `ORCHESTRATION_API_KEY` boleh dihilangkan.
+`guardrails` hanya menerima `API_KEY`; `DATABASE_URL` tidak pernah masuk ke pod-nya. Key opsional `API_KEYS`
+(dipisah koma) diterima juga oleh semua service selama rotasi: tambahkan key baru di sana, pindahkan
+pemanggil, lalu jadikan `API_KEY` dan hapus dari `API_KEYS`; tiap langkah cukup `rollout restart`.
 
-Setelah mengubah Secret, restart pod: `kubectl -n nilam-ocr-npwp rollout restart deploy/nilam-ocr-npwp`.
+Setelah mengubah Secret, restart pod yang memakainya:
+`kubectl -n nilam-ocr-npwp rollout restart deploy -l app.kubernetes.io/instance=nilam-ocr-npwp`.
+
+Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
+`externalSecret.enabled=true`; Secret dengan nama `existingSecret` lalu diisi dari Secret Manager
+(nama key di `externalSecret.remoteKeys`). Cluster dev tidak punya CRD ESO.
 
 ## Skema database
 
@@ -68,7 +121,8 @@ dipasang manual sebelum ada migrasi aman dijalankan: revisi baseline memakai
 
 ## Deploy perubahan kode
 
-Install pertama tetap memakai perintah di bagian berikutnya. Setelah release ada, perubahan kode dideploy dengan [deploy.sh](deploy.sh) dari Git Bash, WSL, Linux atau macOS:
+Install pertama tetap memakai perintah di bagian berikutnya. Setelah release ada, perubahan kode
+dideploy dengan [deploy.sh](deploy.sh) dari Git Bash, WSL, Linux atau macOS:
 
 ```bash
 deploy/helm/deploy.sh --dry-run --skip-build --tag <tag> scoring
@@ -77,11 +131,15 @@ deploy/helm/deploy.sh ekstraksi structuring scoring
 deploy/helm/deploy.sh all
 ```
 
-Script membangun image service yang disebut, mendorongnya ke Artifact Registry dengan tag `git rev-parse --short HEAD` (ditambah `-dirty-<waktu>` kalau `libs/` atau `services/` punya perubahan yang belum di-commit), lalu menjalankan `helm upgrade --reset-then-reuse-values -f values-ddb-dev.yaml --set services.<nama>.image.tag=<tag>`. Service lain tetap di tag lamanya. Upgrade menunggu pod siap dan otomatis rollback kalau gagal.
+Script membangun image service yang disebut, mendorongnya ke Artifact Registry dengan tag
+`git rev-parse --short HEAD` (ditambah `-dirty-<waktu>` kalau `libs/` atau `services/` punya
+perubahan yang belum di-commit), lalu menjalankan `helm upgrade --reset-then-reuse-values
+-f values-ddb-dev.yaml --set services.<nama>.image.tag=<tag>`. Service lain tetap di tag lamanya
+dan pod-nya tidak disentuh: hanya Deployment service yang disebut yang rolling update. Upgrade
+menunggu pod siap dan otomatis rollback kalau gagal.
 
-Keempat container ada dalam satu pod, jadi deploy satu service pun membuat pod baru berisi keempatnya. Pod lama baru berhenti setelah pod baru siap.
-
-Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan tabel dijalankan dulu dengan [migrate-db.sh](migrate-db.sh) sebelum deploy image yang membutuhkannya.
+Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan tabel dijalankan dulu
+dengan [migrate-db.sh](migrate-db.sh) sebelum deploy image yang membutuhkannya.
 
 ## Install dan upgrade
 
@@ -99,14 +157,25 @@ helm upgrade nilam-ocr-npwp deploy/helm/nilam-ocr-npwp -n nilam-ocr-npwp --reuse
 
 Rollback: `helm -n nilam-ocr-npwp rollback nilam-ocr-npwp`.
 
+**Upgrade dari chart 0.1.x (satu pod, empat container).** Helm menghapus Deployment
+`nilam-ocr-npwp` yang lama dan membuat empat Deployment baru dalam satu `helm upgrade`. Pod lama
+hilang saat pod baru masih starting (guardrails butuh sekitar satu menit memuat model), jadi ada
+jeda singkat tanpa layanan; lakukan di luar jam uji coba. Values lama tetap dipakai
+(`--reset-then-reuse-values`), termasuk tag image per service.
+
 ## Akses cluster
 
-`gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2` butuh `gke-gcloud-auth-plugin`, yang dipasang dengan `gcloud components install gke-gcloud-auth-plugin` dari terminal Administrator.
+`gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2`
+butuh `gke-gcloud-auth-plugin`, yang dipasang dengan `gcloud components install gke-gcloud-auth-plugin`
+dari terminal Administrator.
 
 ## Cek cepat
 
 ```powershell
-kubectl -n nilam-ocr-npwp get pods
-kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp 8030:8030
+kubectl -n nilam-ocr-npwp get deploy,pods,svc,pdb,networkpolicy
+kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030
 curl http://localhost:8030/ready
 ```
+
+`port-forward` harus ke Service per komponen (atau `deploy/nilam-ocr-npwp-<service>`): pada Service
+pintu masuk `nilam-ocr-npwp`, kubectl memilih satu pod sembarang dari selector-nya.

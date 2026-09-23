@@ -1,9 +1,10 @@
 import pytest
 
 from ocr_common.errors import ServiceError
-from src.core.config import Settings
-from src.models.scoring import HeuristicNpwpScorer
-from src.services.scoring_service import ScoringService
+
+from app.config import Settings
+from app.ml.heuristic import HeuristicNpwpScorer
+from app.services.scoring_service import ScoringService
 
 SETTINGS = Settings(api_key="x", _env_file=None)
 

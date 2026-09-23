@@ -1,10 +1,13 @@
 import pytest
 
 from ocr_common.errors import ServiceError
-from src.models.structuring import RuleBasedNpwpStructurer, normalize_npwp
-from src.services.structuring_service import StructuringService
+from ocr_common.types import OcrBlock
 
-LINES = [
+from app.ml.rule_based import RuleBasedNpwpStructurer
+from app.ml.utils import normalize_npwp
+from app.services.structuring_service import StructuringService
+
+LINES: list[OcrBlock] = [
     {"text": "KEMENTERIAN KEUANGAN REPUBLIK INDONESIA", "confidence": 0.99},
     {"text": "NPWP : 12.345.678.9-012.345", "confidence": 0.96},
     {"text": "NAMA : BUDI SANTOSO", "confidence": 0.95},

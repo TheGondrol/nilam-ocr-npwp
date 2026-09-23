@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import Settings
+from app.config import Settings
 
 EKSTRAKSI = "http://nilam-ocr-npwp:8030"
 STRUCTURING = "http://nilam-ocr-npwp:8032"

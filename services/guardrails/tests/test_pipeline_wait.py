@@ -4,15 +4,16 @@ import time
 import httpx
 from PIL import Image
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.remote import RemoteModelClient
-from src.api.v1.guardrails import get_guardrails_service
-from src.clients.ekstraksi import EkstraksiJobClient
-from src.clients.stages import StageStatusClient
-from src.core.config import get_settings
-from src.main import app
-from src.services.job_service import GuardrailsJobService
-from src.services.pipeline_waiter import PipelineWaiter, WaitOutcome
+
+from app.clients.ekstraksi import EkstraksiJobClient
+from app.clients.stages import StageStatusClient
+from app.config import get_settings
+from app.dependencies import get_guardrails_service
+from app.main import app
+from app.services.job_service import GuardrailsJobService
+from app.services.pipeline_waiter import PipelineWaiter, WaitOutcome
 
 RID = "REQ_wait"
 

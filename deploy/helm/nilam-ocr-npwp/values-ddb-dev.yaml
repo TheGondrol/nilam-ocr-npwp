@@ -1,6 +1,9 @@
 environment: production
 
 image:
+  # Tag global terakhir yang di-deploy manual sebelum ada lock file dan larangan build dari
+  # working tree kotor. deploy.sh menimpanya per service dengan SHA commit bersih
+  # (services.<nama>.image.tag); ganti nilai ini ke SHA yang sama setelah deploy `all` berikutnya.
   tag: 4d02eba-dirty
 
 existingSecret: nilam-ocr-npwp-secrets
@@ -14,6 +17,11 @@ orchestration:
   # Integrasi sungguhan: komentari baris di atas, aktifkan baris ini. Alamatnya
   # hasil penelusuran namespace ocr-dev, belum dikonfirmasi tim Orkestrasi.
   # url: http://ocr-orchestration.ocr-dev.svc.cluster.local
+
+networkPolicy:
+  # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
+  # network policy enforcement, jadi policy hanya terpasang, belum ditegakkan.
+  clientNamespaces: [ocr-dev]
 
 services:
   ekstraksi:

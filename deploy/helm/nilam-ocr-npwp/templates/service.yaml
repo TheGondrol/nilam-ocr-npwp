@@ -1,9 +1,39 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $component := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nilam-ocr-npwp.componentName" $component }}
+  labels:
+    {{- include "nilam-ocr-npwp.componentLabels" $component | nindent 4 }}
+  {{- with $.Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $.Values.service.type }}
+  selector:
+    {{- include "nilam-ocr-npwp.componentSelectorLabels" $component | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $name }}
+{{- end }}
+{{- end }}
+{{- if .Values.service.entrypoint.enabled }}
+---
+# Alamat yang dipublikasikan ke Orkestrasi: satu nama untuk semua service ber-entrypoint.
+# Selector-nya mencakup semua pod release; tiap port hanya sampai ke pod yang punya
+# port bernama itu, karena Kubernetes melewatkan pod tanpa nama port tersebut.
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "nilam-ocr-npwp.fullname" . }}
   labels:
     {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: entrypoint
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -14,9 +44,10 @@ spec:
     {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 4 }}
   ports:
     {{- range $name, $svc := .Values.services }}
-    {{- if $svc.enabled }}
+    {{- if and $svc.enabled $svc.entrypoint }}
     - name: {{ $name }}
       port: {{ $svc.port }}
       targetPort: {{ $name }}
     {{- end }}
     {{- end }}
+{{- end }}

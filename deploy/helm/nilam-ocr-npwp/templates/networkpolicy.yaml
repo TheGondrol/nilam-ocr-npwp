@@ -1,0 +1,64 @@
+{{- if .Values.networkPolicy.enabled }}
+---
+# Tutup semua ingress ke pod release; policy per service di bawah membuka yang perlu.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "nilam-ocr-npwp.fullname" . }}-default-deny-ingress
+  labels:
+    {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress"]
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $component := dict "root" $ "name" $name "svc" $svc }}
+{{- $callers := list }}
+{{- range $callerName, $caller := $.Values.services }}
+{{- if and $caller.enabled (has $name $caller.upstreams) }}
+{{- $callers = append $callers $callerName }}
+{{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "nilam-ocr-npwp.componentName" $component }}
+  labels:
+    {{- include "nilam-ocr-npwp.componentLabels" $component | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "nilam-ocr-npwp.componentSelectorLabels" $component | nindent 6 }}
+  policyTypes: ["Ingress"]
+  {{- if or $svc.entrypoint $callers }}
+  ingress:
+    - from:
+        {{- if $svc.entrypoint }}
+        # Semua pod release: handoff antar tahap dan callback mode uji coba (orchestration.url ke ekstraksi).
+        - podSelector:
+            matchLabels:
+              {{- include "nilam-ocr-npwp.selectorLabels" $ | nindent 14 }}
+        {{- range $.Values.networkPolicy.clientNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+        {{- else }}
+        {{- range $callers }}
+        - podSelector:
+            matchLabels:
+              {{- include "nilam-ocr-npwp.componentSelectorLabels" (dict "root" $ "name" .) | nindent 14 }}
+        {{- end }}
+        {{- end }}
+      ports:
+        - port: {{ $svc.port }}
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

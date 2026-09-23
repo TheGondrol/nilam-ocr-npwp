@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from ocr_common.app import API_CONVENTIONS
+from ocr_common.web.app import API_CONVENTIONS
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "api" / "gateway.openapi.yaml"

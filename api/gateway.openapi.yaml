@@ -27,9 +27,9 @@ info:
     \ namespace: `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:<port>` with\nguardrails `8031`,\
     \ ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed outside\nthe cluster.\n\
     \n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.** Every endpoint except\
-    \ `/health` and `/ready` requires the header `X-API-Key`.\nA missing or wrong key answers `401`. The\
-    \ services are reachable only from inside the cluster.\n\n**Envelope.** Every JSON response, success\
-    \ or error, has the same shape:\n`{status_code, status_desc, message, data, errors, request_id}`.\
+    \ `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing or wrong key answers\
+    \ `401`. The services are reachable only from inside the cluster.\n\n**Envelope.** Every JSON response,\
+    \ success or error, has the same shape:\n`{status_code, status_desc, message, data, errors, request_id}`.\
     \ `status_code` always equals the HTTP\nstatus. On success `errors` is null; on error `data` is null.\n\
     \n**Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text\
     \ as\n`message`. `400` = the request or the document is unusable (do not retry unchanged). `401` =\
@@ -137,7 +137,6 @@ paths:
                         confidence: 1
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
-                    job_status: completed
                     guardrails: 1
                     params:
                       nik: '3123456711950001'
@@ -1169,6 +1168,7 @@ components:
       - message
       - errors
       title: ErrorResponse
+      description: Every error response.
     ExtractOcrResponse:
       properties:
         status_code:
@@ -1304,6 +1304,7 @@ components:
       required:
       - confidence
       title: FinalField
+      description: A field of the final result.
     FinalResult:
       properties:
         document_type:
@@ -1553,6 +1554,7 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsDocument
+      description: The guardrails verdict for the whole document.
     GuardrailsPage:
       properties:
         page_index:
@@ -1598,6 +1600,7 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsPage
+      description: One page of the guardrails report.
     GuardrailsResult:
       properties:
         passed:

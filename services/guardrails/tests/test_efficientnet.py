@@ -11,7 +11,7 @@ pytestmark = pytest.mark.skipif(not WEIGHTS.is_file(), reason="weights/best_mode
 @pytest.fixture(scope="module")
 def classifier():
     pytest.importorskip("torch")
-    from src.models.guardrails import EfficientNetPageClassifier
+    from app.ml.efficientnet import EfficientNetPageClassifier
 
     return EfficientNetPageClassifier(str(WEIGHTS))
 
@@ -42,10 +42,10 @@ def test_empty_page_list_returns_no_predictions(classifier):
     assert classifier.classify("x.jpg", []) == []
 
 
-def test_http_with_real_model(client, auth, classifier, monkeypatch):
+def test_http_with_real_model(client, auth, classifier, use_classifier):
     from ocr_common.testing import image_upload
 
-    monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: classifier)
+    use_classifier(classifier)
     buffer = io.BytesIO()
     _page("NPWP : 12.345.678.9-012.345").save(buffer, format="JPEG")
     response = client.post(

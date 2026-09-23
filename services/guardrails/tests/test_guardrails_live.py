@@ -4,10 +4,11 @@ import os
 import pytest
 from PIL import Image, ImageDraw
 
-from ocr_common.remote import RemoteModelClient
-from src.core.config import Settings
-from src.models.guardrails import RemoteGuardrailsModel
-from src.services.guardrails_service import GuardrailsService
+from ocr_common.clients.remote import RemoteModelClient
+
+from app.config import Settings
+from app.ml.remote import RemoteGuardrailsModel
+from app.services.guardrails_service import GuardrailsService
 
 MODEL_URL = os.environ.get("GUARDRAILS_MODEL_URL")
 MODEL_API_KEY = os.environ.get("GUARDRAILS_MODEL_API_KEY")

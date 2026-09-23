@@ -5,16 +5,17 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 
-from ocr_common import database
-from ocr_common.app import create_app
 from ocr_common.config import PipelineSettings
 from ocr_common.errors import ServiceError
-from ocr_common.jobs import STAGE_OCR, STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
-from ocr_common.jobs_sql import SqlJobRepository
-from ocr_common.outbox import KIND_CALLBACK, KIND_HANDOFF, OutboxRelay, callback_message
-from ocr_common.outbox_api import outbox_status_router
-from ocr_common.outbox_sql import SqlOutbox
+from ocr_common.pipeline import STAGE_OCR, STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline, database
+from ocr_common.pipeline.outbox import KIND_CALLBACK, KIND_HANDOFF, OutboxRelay, callback_message
+from ocr_common.pipeline.outbox_sql import SqlOutbox
+from ocr_common.pipeline.outbox_status import OutboxStatusResponse, outbox_status, outbox_status_responses
+from ocr_common.pipeline.repository_sql import SqlJobRepository
 from ocr_common.testing import RecordingCallback, make_client
+from ocr_common.web.app import create_app
+from ocr_common.web.envelope import envelope
+from ocr_common.web.security import verify_api_key
 
 RID = "REQ_outbox"
 PAYLOAD = {"request_id": RID, "ocr": {"full_text": "NPWP"}}
@@ -272,7 +273,7 @@ async def test_the_relay_warns_about_a_stale_backlog_and_dead_letters(pipeline, 
     await _run(stage)
     relay = _relay(stage, stale_after_seconds=60, watch_interval_seconds=0)
 
-    with caplog.at_level("WARNING", logger="ocr_common.outbox"):
+    with caplog.at_level("WARNING", logger="ocr_common.pipeline.outbox"):
         stats = await relay.watch()
         assert stats is not None and stats.pending == 2
         assert "backlog" not in caplog.text
@@ -314,10 +315,17 @@ async def test_the_running_relay_delivers_a_new_message_without_waiting_for_the_
 
 
 def _status_app(pipeline_factory):
+    """The route as each service declares it in app/api/jobs.py, on top of the shared schema and handler."""
+    from fastapi import APIRouter, Depends
+
+    router = APIRouter(dependencies=[Depends(verify_api_key)])
+
+    @router.get("/v1/ocr/outbox", response_model=OutboxStatusResponse, responses=outbox_status_responses("OCR"))
+    async def status():
+        return envelope(200, "Success", await outbox_status(pipeline_factory()), RID)
+
     settings = PipelineSettings(api_key="k", environment="local", _env_file=None)
-    app = create_app(
-        settings=settings, title="Demo", description="demo", routers=[outbox_status_router("/v1/ocr", pipeline_factory)]
-    )
+    app = create_app(settings=settings, title="Demo", description="demo", routers=[router])
     return make_client(app)
 
 
@@ -384,3 +392,33 @@ async def test_without_callbacks_a_dead_handoff_is_reported_through_the_hook_not
     [row] = await _rows(stage.outbox)
     assert (row["kind"], row["failed_at"] is not None) == (KIND_HANDOFF, True)
     assert failures == [(RID, STAGE_STRUCTURING, "Handoff to STRUCTURING failed: Unknown document_type")]
+
+
+async def test_released_dead_letters_are_claimed_and_delivered_again(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    await _relay(stage, callback=Sink(ServiceError(422, "stage: unexpected value"))).deliver_due()
+    assert (await _rows(stage.outbox))[0]["failed_at"] is not None
+
+    assert await stage.outbox.release(STAGE_OCR, "REQ_lain") == 0
+    assert await stage.outbox.release(STAGE_OCR, RID) == 1
+    assert stage.outbox.pending.is_set()
+    [row] = await _rows(stage.outbox)
+    assert row["failed_at"] is None
+
+    orchestration = Sink()
+    assert await _relay(stage, callback=orchestration).deliver_due() == 1
+    assert [body["status"] for body in orchestration.bodies] == ["FAILED"]
+    assert await _rows(stage.outbox) == []
+
+
+async def test_the_release_handler_answers_409_without_an_outbox(pipeline):
+    from ocr_common.pipeline.outbox_status import outbox_release
+
+    stage, _ = pipeline
+    assert await outbox_release(stage, None) == {"stage": STAGE_OCR, "request_id": None, "released": 0}
+
+    off = StagePipeline(stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=RecordingCallback())
+    with pytest.raises(ServiceError) as raised:
+        await outbox_release(off, None)
+    assert raised.value.status_code == 409

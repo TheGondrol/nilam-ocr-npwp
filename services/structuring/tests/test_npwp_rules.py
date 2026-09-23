@@ -1,25 +1,28 @@
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from ocr_common.errors import ServiceError
-from src.models.structuring import NpwpRulesStructurer, RuleBasedNpwpStructurer, get_structurer
+from ocr_common.types import BoundingBox, OcrBlock
+
+from app.dependencies import get_structurer
+from app.ml.npwp_rules import NpwpRulesStructurer
+from app.ml.rule_based import RuleBasedNpwpStructurer
 
 _SAMPLE = json.loads((Path(__file__).parent / "fixtures" / "remote_npwp_response.json").read_text(encoding="utf-8"))[0]
 
 
-def _bbox(poly) -> dict[str, float]:
+def _bbox(poly) -> BoundingBox:
     xs, ys = [p[0] for p in poly], [p[1] for p in poly]
     return {"x1": min(xs), "y1": min(ys), "x2": max(xs), "y2": max(ys)}
 
 
-NEW_CARD: list[dict[str, Any]] = [
+NEW_CARD: list[OcrBlock] = [
     {"text": text, "confidence": round(score, 4), "bbox": _bbox(poly), "page": 0}
     for text, score, poly in zip(_SAMPLE["rec_texts"], _SAMPLE["rec_scores"], _SAMPLE["rec_polys"], strict=True)
 ]
-OLD_CARD: list[dict[str, Any]] = [
+OLD_CARD: list[OcrBlock] = [
     {"text": text, "confidence": conf, "bbox": {"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3]}, "page": 0}
     for text, conf, b in [
         ("DIREKTORAT JENDERAL PAJAK", 0.9985, (175, 247, 887, 308)),
@@ -33,7 +36,7 @@ OLD_CARD: list[dict[str, Any]] = [
 ]
 
 
-def _line(text: str, top: int, confidence: float = 0.98, page: int = 0) -> dict[str, Any]:
+def _line(text: str, top: int, confidence: float = 0.98, page: int = 0) -> OcrBlock:
     return {
         "text": text,
         "confidence": confidence,

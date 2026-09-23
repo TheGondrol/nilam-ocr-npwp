@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS orchestration_extract_ocr (
     ds                 TEXT NOT NULL
 );
 
--- Kolom baru yang diminta pipeline (di tabel yang sudah ada).
+-- Kolom baru yang diminta pipeline (di tabel yang sudah ada). Kontrak dengan orkestrasi: pipeline
+-- meng-upsert downstream_status = 'processing' (saat job diklaim, downstream_stage = tahapnya),
+-- 'completed' (scoring, dengan result_data) atau 'failed' (error_code = <TAHAP>_FAILED, error_message);
+-- orkestrasi HANYA membaca downstream_status untuk menjawab polling client.
 ALTER TABLE orchestration_extract_ocr ADD COLUMN IF NOT EXISTS downstream_status TEXT;
 ALTER TABLE orchestration_extract_ocr ADD COLUMN IF NOT EXISTS downstream_stage TEXT;
 ALTER TABLE orchestration_extract_ocr ADD COLUMN IF NOT EXISTS error_message TEXT;

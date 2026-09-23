@@ -1,10 +1,12 @@
 import httpx
 
-from ocr_common.remote import RemoteModelClient
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.models.ekstraksi import MockOcrEngine, PaddleOcrEngine
-from src.services.ekstraksi_service import EkstraksiService
+
+from app.config import Settings
+from app.ml.mock import MockOcrEngine
+from app.ml.paddle import PaddleOcrEngine
+from app.services.ekstraksi_service import EkstraksiService
 
 SETTINGS = Settings(api_key="x", _env_file=None)
 
@@ -165,7 +167,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return b"\xff\xd8bytes-from-url", "npwp.jpg", "image/jpeg"
 
-    monkeypatch.setattr("ocr_common.intake.fetch", fake_fetch)
+    monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
     response = client.post(
         "/v1/ekstraksi/extract", data={"file_url": "http://minio.local/bucket/npwp.jpg"}, headers=auth
     )
@@ -173,11 +175,11 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
     assert response.json()["data"]["engine"] == "mock"
 
 
-def test_http_extract_surfaces_model_unavailable_as_503(client, auth, monkeypatch):
+def test_http_extract_surfaces_model_unavailable_as_503(client, auth, use_engine):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=request)
 
-    monkeypatch.setattr("src.api.v1.ekstraksi.get_ocr_engine", lambda: _paddle_engine(handler))
+    use_engine(_paddle_engine(handler))
     response = client.post("/v1/ekstraksi/extract", files=image_upload(), headers=auth)
     assert response.status_code == 503
     body = response.json()

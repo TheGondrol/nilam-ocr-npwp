@@ -2,12 +2,12 @@ import pytest
 from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.testclient import TestClient
 
-from ocr_common.app import create_app
 from ocr_common.config import BaseServiceSettings
-from ocr_common.envelope import envelope
-from ocr_common.intake import FileField, FileUrlField, read_image
-from ocr_common.request_id import get_request_id
-from ocr_common.security import verify_api_key
+from ocr_common.web.app import create_app
+from ocr_common.web.envelope import envelope
+from ocr_common.web.intake import FileField, FileUrlField, read_image
+from ocr_common.web.request_id import get_request_id
+from ocr_common.web.security import verify_api_key
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -138,3 +138,17 @@ def test_validation_error_uses_envelope_with_code():
     body = response.json()
     assert body["errors"] == "VALIDATION_ERROR"
     assert body["message"].startswith("body:")
+
+
+def test_every_accepted_key_opens_the_door_during_a_rotation():
+    rotating = create_app(
+        settings=BaseServiceSettings(api_key="baru", api_keys="lama, baru ,", _env_file=None),
+        title="Demo",
+        description="demo",
+        routers=[router],
+    )
+    rotating_client = TestClient(rotating, raise_server_exceptions=False)
+    assert rotating.state.settings.accepted_api_keys == ("baru", "lama")
+    for key in ("lama", "baru"):
+        assert rotating_client.post("/v1/json", json={}, headers={"X-API-Key": key}).status_code == 200
+    assert rotating_client.post("/v1/json", json={}, headers={"X-API-Key": "k"}).status_code == 401

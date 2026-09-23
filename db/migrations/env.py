@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from ocr_common.tables import repo_metadata
+from ocr_common.pipeline.tables import repo_metadata
 
 VERSION_TABLE = "ocr_npwp_alembic_version"
 

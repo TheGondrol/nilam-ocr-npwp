@@ -30,16 +30,17 @@ terpisah; tahap OCR sampai scoring tidak berubah.
 | Cluster | `gc-ddb-dev-gke-cluster-01` |
 | Project | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
 | Namespace | `nilam-ocr-npwp` |
-| Service (ClusterIP) | `nilam-ocr-npwp` |
+| Service (ClusterIP) | `nilam-ocr-npwp` (pintu masuk: ekstraksi + guardrails); `nilam-ocr-npwp-<tahap>` per tahap |
 
-Satu pod berisi empat container; satu Service membuka keempat portnya.
+Tiap tahap adalah Deployment + Service sendiri (`nilam-ocr-npwp-<tahap>`). Service `nilam-ocr-npwp`
+menggabungkan dua pintu masuk yang kalian panggil: ekstraksi (8030) dan guardrails (8031).
 
 | Tahap | Port | Base URL dari namespace lain |
 |---|---|---|
 | ekstraksi | 8030 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8030` |
 | guardrails | 8031 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8031` |
-| structuring | 8032 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8032` |
-| scoring | 8033 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8033` |
+| structuring | 8032 | `http://nilam-ocr-npwp-structuring.nilam-ocr-npwp.svc.cluster.local:8032` (internal pipeline) |
+| scoring | 8033 | `http://nilam-ocr-npwp-scoring.nilam-ocr-npwp.svc.cluster.local:8033` (internal pipeline) |
 
 **Autentikasi.** Semua endpoint kecuali `/health` dan `/ready` memerlukan header:
 
@@ -47,12 +48,18 @@ Satu pod berisi empat container; satu Service membuka keempat portnya.
 
 Nilai itu sementara dan akan diganti sebelum dipakai serius; kami kabari kalau berubah.
 
-**Jaringan.** Tidak ada NetworkPolicy di namespace kami, jadi dari sisi kami tidak ada
-yang perlu di-whitelist. Kami belum bisa menguji panggilan dari namespace kalian.
+**Jaringan.** NetworkPolicy di namespace kami mengizinkan ingress ke ekstraksi dan guardrails
+dari namespace `ocr-dev`; structuring dan scoring hanya menerima dari dalam pipeline. Cluster dev
+belum menegakkan NetworkPolicy, jadi saat ini tidak ada yang terblokir; kalau namespace kalian
+bukan `ocr-dev`, beri tahu kami supaya ditambahkan. Kami belum bisa menguji panggilan dari
+namespace kalian.
 
-**Dari laptop** (untuk coba-coba), semua port bisa di-forward sekaligus:
+**Dari laptop** (untuk coba-coba), forward per tahap (tiap tahap pod sendiri):
 
-    kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp 8030:8030 8031:8031 8032:8032 8033:8033
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030 &
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-guardrails 8031:8031 &
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-structuring 8032:8032 &
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-scoring 8033:8033 &
 
 ## 3. Alur
 
@@ -266,7 +273,9 @@ Tahap ini yang terakhir, dan hanya callback-nya yang membawa hasil akhir.
 ## 7. Kontrak callback
 
 Tiap tahap mem-POST ke `<ORCHESTRATION_URL><CALLBACK_PATH>`, dengan default path
-`/v1/callbacks/stage`. Header `X-API-Key` ikut dikirim kalau kami diberi nilainya.
+`/v1/callbacks/stage`. Header `X-API-Key` ikut dikirim kalau kami diberi nilainya, dan header
+`X-Request-ID` selalu berisi `request_id` request itu, sama dengan yang kami kirim ke service
+kami sendiri, supaya log kalian dan log kami bisa dicocokkan.
 
 Body untuk OCR dan STRUCTURING:
 
@@ -416,7 +425,7 @@ detail; dokumen ini ringkasannya.
 
 Swagger UI tiap service juga hidup di `/docs`:
 
-    kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp 8030:8030
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030
     # buka http://127.0.0.1:8030/docs
 
 Spec per service ada di `services/<nama>/openapi.yaml`.

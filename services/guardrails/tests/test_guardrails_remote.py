@@ -3,12 +3,14 @@ from typing import Any
 import httpx
 import pytest
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.remote import RemoteModelClient
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.models.guardrails import CLASSIFIER_BACKENDS, RemoteGuardrailsModel
-from src.services.guardrails_service import GuardrailsService
+
+from app.config import Settings
+from app.dependencies import CLASSIFIER_BACKENDS
+from app.ml.remote import RemoteGuardrailsModel
+from app.services.guardrails_service import GuardrailsService
 
 JPEG = b"\xff\xd8fake-jpeg-bytes"
 
@@ -189,8 +191,8 @@ async def test_remote_backend_is_built_from_settings():
         await model.aclose()
 
 
-def test_http_check_with_remote_backend(client, auth, monkeypatch):
-    monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: _model(_reply(REJECTED)))
+def test_http_check_with_remote_backend(client, auth, use_classifier):
+    use_classifier(_model(_reply(REJECTED)))
     response = client.post(
         "/v1/guardrails/check", data={"request_id": "OCR_R1"}, files=image_upload("npwp.jpg", JPEG), headers=auth
     )
@@ -201,11 +203,11 @@ def test_http_check_with_remote_backend(client, auth, monkeypatch):
     assert body["data"]["document"] == REJECTED["data"]["document"]
 
 
-def test_http_model_unreachable_returns_503_envelope(client, auth, monkeypatch):
+def test_http_model_unreachable_returns_503_envelope(client, auth, use_classifier):
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
-    monkeypatch.setattr("src.api.v1.guardrails.get_page_classifier", lambda: _model(refuse))
+    use_classifier(_model(refuse))
     response = client.post(
         "/v1/extract-ocr", data={"request_id": "OCR_R2"}, files=image_upload("npwp.jpg", JPEG), headers=auth
     )

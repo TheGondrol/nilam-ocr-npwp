@@ -11,7 +11,7 @@ info:
     ## Conventions (the same for every nilam-ocr service)
 
 
-    **Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+    **Authentication.** Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.
 
     A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
 
@@ -140,6 +140,24 @@ paths:
                 status: not_ready
                 checks:
                   database: failed
+  /metrics:
+    get:
+      tags:
+      - Health
+      summary: Prometheus metrics
+      description: 'Prometheus text exposition of this process: `http_requests_total` and `http_request_duration_seconds`
+        per route template, and for the pipeline stages `pipeline_jobs_total` (by outcome), `pipeline_job_duration_seconds`,
+        `pipeline_stale_jobs_reclaimed_total`, `pipeline_outbox_deliveries_total` and the outbox backlog
+        gauges (`pipeline_outbox_pending`, `_retrying`, `_dead_letters`, `_oldest_pending_seconds`). Scraped
+        inside the cluster; does not require an API key.'
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics in the Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
   /v1/structuring/jobs:
     post:
       tags:
@@ -216,7 +234,7 @@ paths:
               example:
                 status_code: 422
                 status_desc: Unprocessable Entity
-                message: 'body.ocr: Field required'
+                message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
       security:
       - APIKeyHeader: []
@@ -327,6 +345,162 @@ paths:
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/structuring/outbox:
+    get:
+      tags:
+      - Pipeline
+      summary: Backlog of this stage's undelivered callbacks and hand-offs
+      description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
+        and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
+        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
+        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
+        or a dead letter is waiting.'
+      operationId: getStructuringOutboxStatus
+      responses:
+        '200':
+          description: The backlog of this stage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxStatusResponse'
+              examples:
+                idle:
+                  summary: Nothing waiting
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: STRUCTURING
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                backlog:
+                  summary: The orchestrator has been down for a while
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: true
+                      stage: STRUCTURING
+                      pending: 12
+                      retrying: 12
+                      oldest_pending_seconds: 754.3
+                      dead_letters: 1
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                disabled:
+                  summary: '`PIPELINE_OUTBOX` is off'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      enabled: false
+                      stage: STRUCTURING
+                      pending: 0
+                      retrying: 0
+                      dead_letters: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+      security:
+      - APIKeyHeader: []
+  /v1/structuring/outbox/release:
+    post:
+      tags:
+      - Pipeline
+      summary: Send this stage's dead letters again
+      description: 'Puts the dead letters of this stage back in the outbox queue, due immediately, so
+        the relay delivers them again: use it after the receiver was fixed (for example the orchestrator''s
+        callback contract, or a next stage that was answering 4xx). Optional query `request_id` limits
+        it to one request. A message that fails again goes through the same retry and dead-letter rules.
+        `409` when `PIPELINE_OUTBOX` is off on this service.'
+      operationId: releaseStructuringOutbox
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+      responses:
+        '200':
+          description: Dead letters released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxReleaseResponse'
+              examples:
+                released:
+                  summary: One request
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      stage: STRUCTURING
+                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                      released: 1
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                nothing:
+                  summary: Nothing to release
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      stage: STRUCTURING
+                      released: 0
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The outbox is off on this service
+          content:
+            application/json:
+              example:
+                status_code: 409
+                status_desc: Conflict
+                message: 'PIPELINE_OUTBOX is off: there is no outbox to release'
+                errors: 'PIPELINE_OUTBOX is off: there is no outbox to release'
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'query.request_id: Input should be a valid string'
+                errors: VALIDATION_ERROR
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/structuring/structure:
     post:
       tags:
@@ -408,78 +582,6 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.lines: Field required'
                 errors: VALIDATION_ERROR
-      security:
-      - APIKeyHeader: []
-  /v1/structuring/outbox:
-    get:
-      tags:
-      - Pipeline
-      summary: Backlog of this stage's undelivered callbacks and hand-offs
-      description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
-        and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
-        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
-        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
-        or a dead letter is waiting.'
-      operationId: getStructuringOutboxStatus
-      responses:
-        '200':
-          description: The backlog of this stage
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutboxStatusResponse'
-              examples:
-                idle:
-                  summary: Nothing waiting
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: true
-                      stage: OCR
-                      pending: 0
-                      retrying: 0
-                      dead_letters: 0
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                backlog:
-                  summary: The orchestrator has been down for a while
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: true
-                      stage: OCR
-                      pending: 12
-                      retrying: 12
-                      oldest_pending_seconds: 754.3
-                      dead_letters: 1
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                disabled:
-                  summary: '`PIPELINE_OUTBOX` is off'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      enabled: false
-                      stage: OCR
-                      pending: 0
-                      retrying: 0
-                      dead_letters: 0
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
       security:
       - APIKeyHeader: []
 webhooks:
@@ -610,6 +712,7 @@ components:
       - x2
       - y2
       title: BoundingBoxPayload
+      description: Upright box around a text line.
     ErrorResponse:
       properties:
         status_code:
@@ -656,6 +759,7 @@ components:
       - message
       - errors
       title: ErrorResponse
+      description: Every error response.
     GuardrailsDocument:
       properties:
         verdict:
@@ -710,6 +814,7 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsDocument
+      description: The guardrails verdict for the whole document.
     GuardrailsPage:
       properties:
         page_index:
@@ -755,6 +860,7 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsPage
+      description: One page of the guardrails report.
     GuardrailsResult:
       properties:
         passed:
@@ -826,6 +932,7 @@ components:
       - device
       - backends
       title: HealthResponse
+      description: '`GET /health`.'
     JobAccepted:
       properties:
         request_id:
@@ -870,6 +977,7 @@ components:
       - stage
       - status
       title: JobAccepted
+      description: '`data` of `POST /v1/<stage>/jobs`.'
     JobAcceptedResponse:
       properties:
         status_code:
@@ -912,6 +1020,7 @@ components:
       required:
       - data
       title: JobAcceptedResponse
+      description: Envelope of `POST /v1/<stage>/jobs`.
     OcrBlockPayload:
       properties:
         text:
@@ -949,6 +1058,7 @@ components:
       required:
       - text
       title: OcrBlockPayload
+      description: One OCR text line.
     OcrPayload:
       properties:
         engine:
@@ -993,6 +1103,80 @@ components:
       - blocks
       title: OcrPayload
       description: Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring.
+    OutboxRelease:
+      properties:
+        stage:
+          type: string
+          enum:
+          - OCR
+          - STRUCTURING
+          - SCORING
+          title: Stage
+          description: The stage whose dead letters were released
+          examples:
+          - OCR
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Only this request's dead letters were released; null = every dead letter of the
+            stage
+        released:
+          type: integer
+          title: Released
+          description: Dead letters put back in the queue, due immediately
+          examples:
+          - 1
+      type: object
+      required:
+      - stage
+      - released
+      title: OutboxRelease
+      description: The `data` of `POST /v1/<stage>/outbox/release`.
+    OutboxReleaseResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/OutboxRelease'
+      type: object
+      required:
+      - data
+      title: OutboxReleaseResponse
+      description: Envelope of `POST /v1/<stage>/outbox/release`.
     OutboxStatus:
       properties:
         enabled:
@@ -1047,6 +1231,7 @@ components:
       - retrying
       - dead_letters
       title: OutboxStatus
+      description: The `data` of `GET /v1/<stage>/outbox`.
     OutboxStatusResponse:
       properties:
         status_code:
@@ -1089,6 +1274,7 @@ components:
       required:
       - data
       title: OutboxStatusResponse
+      description: Envelope of `GET /v1/<stage>/outbox`.
     ReadyResponse:
       properties:
         status:
@@ -1116,6 +1302,7 @@ components:
       - status
       - checks
       title: ReadyResponse
+      description: '`GET /ready`.'
     StageCallback:
       properties:
         request_id:
@@ -1322,12 +1509,14 @@ components:
           - type: 'null'
           description: Guardrails result submitted with the OCR job; only forwarded to the next stage
         ocr:
-          $ref: '#/components/schemas/OcrPayload'
-          description: Result of the OCR stage
+          anyOf:
+          - $ref: '#/components/schemas/OcrPayload'
+          - type: 'null'
+          description: 'Result of the OCR stage. Left out when the OCR service hands off by reference
+            (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `ocr_results` of the shared database'
       type: object
       required:
       - request_id
-      - ocr
       title: StructuringJobRequest
     StructuringJobStatus:
       properties:

@@ -8,12 +8,5 @@ asyncio_default_fixture_loop_scope = "function"
 root = ["."]
 extra-paths = [".", "../../libs/ocr_common"]
 
-[tool.pyright]
-extraPaths = [".", "../../libs/ocr_common"]
-
-[tool.pyrefly]
-search-path = [".", "../../libs/ocr_common"]
-
 [tool.ty.src]
-exclude = ["src/vendor"]
-
+exclude = ["app/vendor"]

@@ -3,9 +3,9 @@ from typing import Any
 
 import pytest
 
-from src.api.v1.scoring import get_trust_model
-from src.models.trust_model import FEATURES, UNDEFINED_FEATURES, TrustModel
-from src.services.confidence_service import ConfidenceService
+from app.dependencies import get_trust_model
+from app.ml.trust_model import FEATURES, UNDEFINED_FEATURES, TrustModel
+from app.services.confidence_service import ConfidenceService
 
 EXAMPLE: dict[str, Any] = {
     "npwp": "123456789012000",

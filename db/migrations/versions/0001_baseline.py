@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-from ocr_common.tables import PIPELINE_TABLE_PREFIXES
+from ocr_common.pipeline.tables import PIPELINE_TABLE_PREFIXES
 
 revision: str = "0001_baseline"
 down_revision: str | None = None

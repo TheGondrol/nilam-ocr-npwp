@@ -1,12 +1,13 @@
 import pytest
 
-from ocr_common import database
+from ocr_common.pipeline import database
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.repositories.request_repository import (
+
+from app.config import Settings
+from app.repositories.request_repository import (
     InMemoryRequestRepository,
     SqlRequestRepository,
-    get_request_repository,
+    build_request_repository,
 )
 from tests.fakes import fake_stage_clients
 
@@ -71,29 +72,18 @@ async def test_get_returns_copy_not_internal_state(repository):
     assert (await repository.get("OCR_4"))["status"] == "pending"
 
 
-def test_repository_is_memory_without_database_url(monkeypatch):
-    dummy = Settings(api_key="x", _env_file=None)
-    monkeypatch.setattr("src.repositories.request_repository.get_settings", lambda: dummy)
-    get_request_repository.cache_clear()
-    try:
-        assert isinstance(get_request_repository(), InMemoryRequestRepository)
-    finally:
-        get_request_repository.cache_clear()
+def test_repository_is_memory_without_database_url():
+    settings = Settings(api_key="x", _env_file=None)
+    assert isinstance(build_request_repository(settings.database_url), InMemoryRequestRepository)
 
 
-def test_repository_is_sql_with_database_url(monkeypatch):
-    dummy = Settings(api_key="x", database_url="postgresql+asyncpg://u:p@h/db", _env_file=None)
-    monkeypatch.setattr("src.repositories.request_repository.get_settings", lambda: dummy)
-    get_request_repository.cache_clear()
-    try:
-        assert isinstance(get_request_repository(), SqlRequestRepository)
-    finally:
-        get_request_repository.cache_clear()
+def test_repository_is_sql_with_database_url():
+    settings = Settings(api_key="x", database_url="postgresql+asyncpg://u:p@h/db", _env_file=None)
+    assert isinstance(build_request_repository(settings.database_url), SqlRequestRepository)
 
 
-async def test_ocr_contract_end_to_end_on_sql_repository(client, auth, sqlite_url, monkeypatch):
-    monkeypatch.setattr("src.api.v1.ocr.get_request_repository", lambda: SqlRequestRepository(sqlite_url))
-    monkeypatch.setattr("src.api.v1.ocr.get_stage_clients", fake_stage_clients)
+async def test_ocr_contract_end_to_end_on_sql_repository(client, auth, sqlite_url, use_ocr_service):
+    use_ocr_service(repository=SqlRequestRepository(sqlite_url), stages=fake_stage_clients())
 
     request_id = client.post("/v1/generate-request-id", headers=auth).json()["request_id"]
     extract = client.post(

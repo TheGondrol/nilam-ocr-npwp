@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import Settings
+from app.config import Settings
 
 PROD: dict[str, Any] = {
     "environment": "production",

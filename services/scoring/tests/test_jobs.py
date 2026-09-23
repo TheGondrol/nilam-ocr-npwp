@@ -1,11 +1,11 @@
 import pytest
 
-from ocr_common.jobs import STAGE_SCORING, InMemoryJobRepository, StagePipeline
+from ocr_common.pipeline import STAGE_SCORING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, make_client, wait_for_job
-from src.api.v1.jobs import get_job_service
-from src.api.v1.scoring import get_confidence_service
-from src.main import app
-from src.services.job_service import ScoringJobService
+
+from app.dependencies import get_confidence_service, get_job_service
+from app.main import app
+from app.services.job_service import ScoringJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 STRUCTURING = {
@@ -102,11 +102,11 @@ def test_unsupported_document_type_fails_the_job(harness, auth):
     assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("SCORING", "FAILED", None)]
 
 
-def test_missing_structuring_is_422(harness, auth):
+def test_missing_structuring_without_a_database_is_422(harness, auth):
     client, _ = harness
     response = client.post("/v1/scoring/jobs", headers=auth, json={"request_id": "REQ_4"})
     assert response.status_code == 422
-    assert response.json()["errors"] == "VALIDATION_ERROR"
+    assert "structuring is missing" in response.json()["message"]
 
 
 def test_get_unknown_job_is_404(harness, auth):
@@ -117,3 +117,54 @@ def test_get_unknown_job_is_404(harness, auth):
 def test_requires_api_key(harness):
     client, _ = harness
     assert client.post("/v1/scoring/jobs", json=_payload("REQ_5")).status_code == 401
+
+
+class FakeResults:
+    """Stands in for the shared database: {stage_prefix: {request_id: result}}."""
+
+    def __init__(self, **stored):
+        self.stored = stored
+
+    async def get(self, stage_prefix, request_id):
+        return self.stored.get(stage_prefix, {}).get(request_id)
+
+
+def test_by_reference_reads_structuring_and_ocr_from_the_database(auth):
+    callback = RecordingCallback()
+    pipeline = StagePipeline(stage=STAGE_SCORING, repository=InMemoryJobRepository(), callback=callback)
+    ocr = {"blocks": [{"text": "NPWP : 12.345.678.9-012.345", "confidence": 0.96, "page": 0}]}
+    results = FakeResults(structuring={"REQ_ref": STRUCTURING}, ocr={"REQ_ref": ocr})
+    service = ScoringJobService(pipeline, get_confidence_service(), results=results)
+    app.dependency_overrides[get_job_service] = lambda: service
+    try:
+        with make_client(app) as client:
+            body = {"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}
+            assert client.post("/v1/scoring/jobs", headers=auth, json=body).status_code == 202
+            job = wait_for_job(client, "/v1/scoring/jobs/REQ_ref")
+    finally:
+        app.dependency_overrides.pop(get_job_service, None)
+
+    assert job["status"] == "DONE"
+    assert job["result"]["payload"]["npwp"] == "123456789012345"
+    assert job["result"]["payload"]["n_boxes"] == 1, "the OCR blocks were read from the database too"
+    [call] = callback.calls
+    assert call["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert call["result"]["guardrails"] == GUARDRAILS
+
+
+async def test_a_stale_job_is_run_again_from_what_the_database_holds():
+    callback = RecordingCallback()
+    pipeline = StagePipeline(stage=STAGE_SCORING, repository=InMemoryJobRepository(), callback=callback)
+    service = ScoringJobService(
+        pipeline, get_confidence_service(), results=FakeResults(structuring={"REQ_stale": STRUCTURING})
+    )
+    await pipeline.repository.claim("REQ_stale", input={"document_type": "npwp", "guardrails": GUARDRAILS})
+
+    await service.resume("REQ_stale", {"document_type": "npwp", "guardrails": GUARDRAILS})
+    await pipeline.runner.drain(5)
+
+    assert (await pipeline.get("REQ_stale"))["status"] == "DONE"
+    [call] = callback.calls
+    assert (call["stage"], call["status"]) == ("SCORING", "DONE")
+    assert call["result"]["guardrails"] == GUARDRAILS
+    assert call["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"

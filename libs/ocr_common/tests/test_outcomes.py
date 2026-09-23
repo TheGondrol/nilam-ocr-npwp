@@ -2,12 +2,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
-from ocr_common import database
 from ocr_common.config import PipelineSettings
-from ocr_common.jobs import STAGE_SCORING, StagePipeline
-from ocr_common.jobs_sql import SqlJobRepository
-from ocr_common.outcomes import OrchestrationOutcome, build_stage_outcome
-from ocr_common.tables import orchestration_outcome_table
+from ocr_common.pipeline import STAGE_SCORING, StagePipeline, database
+from ocr_common.pipeline.outcomes import OrchestrationOutcome, build_stage_outcome
+from ocr_common.pipeline.repository_sql import SqlJobRepository
+from ocr_common.pipeline.tables import orchestration_outcome_table
 from ocr_common.testing import RecordingCallback
 
 TABLE = "orchestration_extract_ocr"

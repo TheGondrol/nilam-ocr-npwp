@@ -1,11 +1,11 @@
 import pytest
 
-from ocr_common.jobs import STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
+from ocr_common.pipeline import STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, RecordingNextStage, make_client, wait_for_job
-from src.api.v1.jobs import get_job_service
-from src.api.v1.structuring import get_structuring_service
-from src.main import app
-from src.services.job_service import StructuringJobService
+
+from app.dependencies import get_job_service, get_structuring_service
+from app.main import app
+from app.services.job_service import StructuringJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 OCR = {
@@ -84,11 +84,11 @@ def test_no_text_fails_the_job_and_skips_handoff(harness, auth):
     assert next_stage.payloads == []
 
 
-def test_missing_ocr_is_422(harness, auth):
+def test_missing_ocr_without_a_database_is_422(harness, auth):
     client, _, _ = harness
     response = client.post("/v1/structuring/jobs", headers=auth, json={"request_id": "REQ_4"})
     assert response.status_code == 422
-    assert response.json()["errors"] == "VALIDATION_ERROR"
+    assert "ocr is missing" in response.json()["message"]
 
 
 def test_get_unknown_job_is_404(harness, auth):
@@ -99,3 +99,67 @@ def test_get_unknown_job_is_404(harness, auth):
 def test_requires_api_key(harness):
     client, _, _ = harness
     assert client.post("/v1/structuring/jobs", json=_payload("REQ_5")).status_code == 401
+
+
+class FakeResults:
+    """Stands in for the shared database: {stage_prefix: {request_id: result}}."""
+
+    def __init__(self, **stored):
+        self.stored = stored
+
+    async def get(self, stage_prefix, request_id):
+        return self.stored.get(stage_prefix, {}).get(request_id)
+
+
+@pytest.fixture
+def reference_harness():
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    results = FakeResults(ocr={"REQ_ref": OCR})
+    service = StructuringJobService(pipeline, get_structuring_service(), results=results, handoff_by_reference=True)
+    app.dependency_overrides[get_job_service] = lambda: service
+    with make_client(app) as client:
+        yield client, next_stage
+    app.dependency_overrides.pop(get_job_service, None)
+
+
+def test_by_reference_reads_the_ocr_result_from_the_database_and_hands_off_a_reference(reference_harness, auth):
+    client, next_stage = reference_harness
+    body = {"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}
+
+    assert client.post("/v1/structuring/jobs", headers=auth, json=body).status_code == 202
+    job = wait_for_job(client, "/v1/structuring/jobs/REQ_ref")
+
+    assert job["status"] == "DONE"
+    assert job["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert next_stage.payloads == [body], "no ocr and no structuring in the hand-off: scoring reads them itself"
+
+
+def test_by_reference_fails_the_job_when_the_ocr_result_is_not_stored(reference_harness, auth):
+    client, next_stage = reference_harness
+    client.post("/v1/structuring/jobs", headers=auth, json={"request_id": "REQ_unknown", "document_type": "npwp"})
+    job = wait_for_job(client, "/v1/structuring/jobs/REQ_unknown")
+
+    assert job["status"] == "FAILED"
+    assert "no ocr result stored for REQ_unknown" in job["error_message"]
+    assert next_stage.payloads == []
+
+
+async def test_a_stale_job_is_run_again_from_what_the_database_holds():
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = StructuringJobService(pipeline, get_structuring_service(), results=FakeResults(ocr={"REQ_stale": OCR}))
+    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS}
+    await pipeline.repository.claim("REQ_stale", input=stored_input)  # the process that claimed it died here
+
+    await service.resume("REQ_stale", stored_input)
+    await pipeline.runner.drain(5)
+
+    assert (await pipeline.get("REQ_stale"))["status"] == "DONE"
+    [payload] = next_stage.payloads
+    assert (payload["guardrails"], payload["ocr"]) == (GUARDRAILS, OCR)
+    assert [(c["stage"], c["status"]) for c in callback.calls] == [("STRUCTURING", "DONE")]

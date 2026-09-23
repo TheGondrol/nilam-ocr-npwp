@@ -18,12 +18,15 @@ usage() {
 Pemakaian: deploy/helm/deploy.sh [opsi] <service...|all>
 
 Build image service yang disebut, push ke Artifact Registry, lalu helm upgrade
-release $RELEASE dengan tag baru hanya untuk service tersebut.
+release $RELEASE dengan tag baru hanya untuk service tersebut. Tiap service adalah
+Deployment sendiri ($RELEASE-<service>), jadi hanya pod service itu yang diganti.
 
 Service: ${ALL_SERVICES[*]} (atau all)
 
 Opsi:
-  --tag TAG       pakai tag ini, bukan tag otomatis dari git
+  --tag TAG       pakai tag ini, bukan tag otomatis dari git (SHA pendek dari commit bersih)
+  --allow-dirty   izinkan build dari working tree yang belum di-commit; tag menjadi
+                  <sha>-dirty-<waktu>. Hanya untuk uji coba di dev, bukan untuk produksi
   --skip-build    tanpa build/push; tag harus sudah ada di registry
   --build-only    build + push saja, tanpa helm upgrade
   --dry-run       tampilkan diff manifest terhadap release yang berjalan, tanpa apply
@@ -44,6 +47,7 @@ log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 TAG=""
+ALLOW_DIRTY=0
 SKIP_BUILD=0
 BUILD_ONLY=0
 DRY_RUN=0
@@ -53,6 +57,7 @@ SERVICES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tag) TAG="${2:?--tag butuh nilai}"; shift 2 ;;
+    --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -85,7 +90,8 @@ cd "$ROOT"
 
 if [[ -z "$TAG" ]]; then
   TAG="$(git rev-parse --short HEAD)"
-  if [[ -n "$(git status --porcelain -- libs services)" ]]; then
+  if [[ -n "$(git status --porcelain -- libs services db)" ]]; then
+    [[ $ALLOW_DIRTY -eq 1 ]] || die "ada perubahan di libs/, services/, atau db/ yang belum di-commit: tag image harus SHA dari commit bersih supaya bisa dilacak dan dibangun ulang. Commit dulu, atau pakai --allow-dirty untuk uji coba."
     TAG="$TAG-dirty-$(date +%Y%m%d%H%M%S)"
   fi
 fi
@@ -109,7 +115,7 @@ if [[ $BUILD_ONLY -eq 0 ]]; then
   echo "  cluster   : $CONTEXT"
   echo "  release   : $RELEASE (namespace $NAMESPACE)"
 fi
-[[ "$TAG" == *-dirty-* ]] && echo "  PERINGATAN: ada perubahan di libs/ atau services/ yang belum di-commit"
+[[ "$TAG" == *-dirty-* ]] && echo "  PERINGATAN: image dibangun dari working tree yang belum di-commit (--allow-dirty); jangan dipakai di produksi"
 
 if [[ $ASSUME_YES -eq 0 && $DRY_RUN -eq 0 ]]; then
   [[ -t 0 ]] || die "tidak ada terminal untuk konfirmasi; pakai -y"
@@ -169,8 +175,10 @@ log "helm upgrade"
 helm "${HELM_ARGS[@]}"
 
 log "Status"
-kubectl -n "$NAMESPACE" rollout status "deploy/$RELEASE" --timeout "$TIMEOUT"
+for svc in "${SERVICES[@]}"; do
+  kubectl -n "$NAMESPACE" rollout status "deploy/$RELEASE-$svc" --timeout "$TIMEOUT"
+done
 kubectl -n "$NAMESPACE" get pods -l "app.kubernetes.io/instance=$RELEASE"
-kubectl -n "$NAMESPACE" get "deploy/$RELEASE" \
-  -o jsonpath='{range .spec.template.spec.containers[*]}{"  "}{.name}{"\t"}{.image}{"\n"}{end}'
+kubectl -n "$NAMESPACE" get deploy -l "app.kubernetes.io/instance=$RELEASE" \
+  -o jsonpath='{range .items[*]}{"  "}{.metadata.labels.app\.kubernetes\.io/component}{"\t"}{.spec.template.spec.containers[0].image}{"\n"}{end}'
 helm history "$RELEASE" -n "$NAMESPACE" --max 3

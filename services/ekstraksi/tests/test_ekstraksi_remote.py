@@ -5,12 +5,14 @@ from typing import Any
 import httpx
 import pytest
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.remote import RemoteModelClient
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.models.ekstraksi import OCR_BACKENDS, RemoteOcrEngine
-from src.services.ekstraksi_service import EkstraksiService
+
+from app.config import Settings
+from app.dependencies import OCR_BACKENDS
+from app.ml.remote import RemoteOcrEngine
+from app.services.ekstraksi_service import EkstraksiService
 
 JPEG = b"\xff\xd8fake-jpeg-bytes"
 SAMPLE: list[dict[str, Any]] = json.loads(
@@ -193,8 +195,8 @@ async def test_remote_backend_is_built_from_settings():
         await engine.aclose()
 
 
-def test_http_extract_with_remote_backend(client, auth, monkeypatch):
-    monkeypatch.setattr("src.api.v1.ekstraksi.get_ocr_engine", lambda: _engine(_reply(SAMPLE)))
+def test_http_extract_with_remote_backend(client, auth, use_engine):
+    use_engine(_engine(_reply(SAMPLE)))
     response = client.post("/v1/ekstraksi/extract", headers=auth, files=image_upload("sample_npwp.jpg", JPEG))
     assert response.status_code == 200, response.text
     data = response.json()["data"]

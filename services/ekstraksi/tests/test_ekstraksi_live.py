@@ -3,11 +3,12 @@ import os
 
 import pytest
 
-from ocr_common.remote import RemoteModelClient
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.models.ekstraksi import PaddleOcrEngine
-from src.services.ekstraksi_service import EkstraksiService
+
+from app.config import Settings
+from app.ml.paddle import PaddleOcrEngine
+from app.services.ekstraksi_service import EkstraksiService
 
 OCR_URL = os.environ.get("EKSTRAKSI_OCR_URL")
 pytestmark = pytest.mark.skipif(not OCR_URL, reason="EKSTRAKSI_OCR_URL tidak di-set; test live dilewati")
@@ -54,8 +55,8 @@ async def test_live_engine_reads_synthetic_npwp(engine):
     assert all(0 <= block["confidence"] <= 1 and block["bbox"] for block in result["blocks"])
 
 
-def test_live_http_extract_returns_model_and_blocks(client, auth, engine, monkeypatch):
-    monkeypatch.setattr("src.api.v1.ekstraksi.get_ocr_engine", lambda: engine)
+def test_live_http_extract_returns_model_and_blocks(client, auth, engine, use_engine):
+    use_engine(engine)
     response = client.post("/v1/ekstraksi/extract", headers=auth, files=image_upload("npwp.jpg", synthetic_npwp_jpeg()))
     assert response.status_code == 200, response.text
     data = response.json()["data"]

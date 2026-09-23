@@ -4,10 +4,11 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 
 set_test_env(GUARDRAILS_BACKEND="mock", AUTH_DISABLED="false")
 
-from src.api.v1.guardrails import get_pipeline_waiter  # noqa: E402
-from src.clients.ekstraksi import get_ekstraksi_client  # noqa: E402
-from src.main import app  # noqa: E402
-from src.services.pipeline_waiter import WaitOutcome  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.dependencies import get_ekstraksi_client, get_guardrails_service, get_pipeline_waiter  # noqa: E402
+from app.main import app  # noqa: E402
+from app.services.guardrails_service import GuardrailsService  # noqa: E402
+from app.services.pipeline_waiter import WaitOutcome  # noqa: E402
 
 STRUCTURING_RESULT = {
     "document_type": "npwp",
@@ -29,8 +30,12 @@ class StubEkstraksi:
     def __init__(self) -> None:
         self.submitted: list[dict] = []
 
-    async def submit(self, request_id, document_type, guardrails, filename, content_type, content) -> dict:
-        self.submitted.append({"request_id": request_id, "document_type": document_type, "guardrails": guardrails})
+    async def submit(
+        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None
+    ) -> dict:
+        self.submitted.append(
+            {"request_id": request_id, "document_type": document_type, "guardrails": guardrails, "file_url": file_url}
+        )
         return {"request_id": request_id, "stage": "OCR", "status": "PROCESSING", "duplicate": False}
 
     async def aclose(self) -> None:
@@ -75,3 +80,14 @@ def stub_waiter():
     app.dependency_overrides[get_pipeline_waiter] = lambda: stub
     yield stub
     app.dependency_overrides.pop(get_pipeline_waiter, None)
+
+
+@pytest.fixture
+def use_classifier():
+    """Serve the routes with this classifier instead of the configured backend."""
+
+    def _use(classifier):
+        app.dependency_overrides[get_guardrails_service] = lambda: GuardrailsService(classifier, get_settings())
+
+    yield _use
+    app.dependency_overrides.pop(get_guardrails_service, None)

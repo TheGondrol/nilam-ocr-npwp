@@ -1,0 +1,19 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $component := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nilam-ocr-npwp.componentName" $component }}
+  labels:
+    {{- include "nilam-ocr-npwp.componentLabels" $component | nindent 4 }}
+spec:
+  maxUnavailable: {{ $.Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "nilam-ocr-npwp.componentSelectorLabels" $component | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

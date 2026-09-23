@@ -27,6 +27,8 @@ jobs:
             requirements-dev.txt
             services/*/requirements.txt
             libs/ocr_common/pyproject.toml
+      - name: Lock files are in sync with requirements.txt and ocr_common's dependencies
+        run: make lock-check
       - run: python -m pip install -r requirements-dev.txt
       - run: make lint
       - run: python -m ruff format --check .
@@ -111,7 +113,7 @@ jobs:
       - name: Placeholder weights (the checkpoint is not in git; this image is never pushed)
         if: matrix.service == 'guardrails'
         run: touch services/guardrails/weights/best_model.pt
-      - name: Build
+      - name: Build (hashes in requirements.lock are verified by pip --require-hashes)
         run: docker build -f services/${{ matrix.service }}/Dockerfile -t ci/${{ matrix.service }} .
       - name: Starts, then stops gracefully on SIGTERM
         run: |

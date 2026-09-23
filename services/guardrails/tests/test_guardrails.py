@@ -5,9 +5,10 @@ from PIL import Image
 
 from ocr_common.errors import ServiceError
 from ocr_common.testing import image_upload
-from src.core.config import Settings
-from src.services.guardrails_service import GuardrailsService
-from src.services.pages import render_pages
+
+from app.config import Settings
+from app.services.guardrails_service import GuardrailsService
+from app.services.pages import render_pages
 
 
 class StubClassifier:
@@ -205,12 +206,12 @@ def test_http_request_id_is_required(client, auth):
     assert body["message"] == "body.request_id: Field required"
 
 
-def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
+def test_http_file_url_is_fetched_by_service_and_forwarded_as_url(client, auth, monkeypatch, stub_ekstraksi):
     async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return _jpeg(), "npwp.jpg", "image/jpeg"
 
-    monkeypatch.setattr("ocr_common.intake.fetch", fake_fetch)
+    monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
     response = client.post(
         "/v1/extract-ocr",
         data={"request_id": "OCR_4", "file_url": "http://minio.local/bucket/npwp.jpg"},
@@ -218,6 +219,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["job_status"] == "completed"
+    assert stub_ekstraksi.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
 
 
 def test_unsupported_content_type_returns_400(client, auth):

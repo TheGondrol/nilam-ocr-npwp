@@ -14,21 +14,25 @@ Satu database PostgreSQL dipakai bersama oleh repo ini **dan** oleh service orke
 | `pipeline_outbox` | **repo ini** | ketiga tahap (dalam transaksi job), relay | relay tiap service, `GET /v1/<tahap>/outbox` | callback dan handoff yang belum terkirim (`PIPELINE_OUTBOX`). Baris dihapus setelah terkirim; yang gagal permanen (4xx, atau 5xx lebih lama dari `PIPELINE_OUTBOX_MAX_AGE_SECONDS`) tetap ada sebagai dead letter dengan `failed_at` + `last_error`, tidak pernah diambil lagi oleh relay, dan dilepas manual dengan `failed_at = NULL, next_attempt_at = now()`. `ds` dipakai untuk membersihkan dead letter lama |
 | `ocr_npwp_alembic_version` | **repo ini** | Alembic | Alembic | versi migrasi repo ini; namanya sengaja tidak `alembic_version` supaya tidak bentrok dengan migrasi tim lain |
 | `orchestration_*`, `auth_*`, `datahub_lookup_log` | **orkestrasi** | orkestrasi | orkestrasi | di luar repo ini. Migrasi di sini tidak pernah membuat atau mengubahnya |
-| `ocr.*`, `structuring.*`, `scoring.*` (schema terpisah) | — | tidak ada | tidak ada | sisa desain lama sebelum tabel pindah ke schema `public`. Kandidat dihapus lewat migrasi setelah dipastikan tidak dipakai siapa pun |
+| `ocr.*`, `structuring.*`, `scoring.*` (schema terpisah) | — | tidak ada | tidak ada | sisa desain lama sebelum tabel pindah ke schema `public`; **dihapus oleh migrasi `0005_drop_legacy_schemas`**. Migrasi itu hanya membuang schema yang isinya persis `jobs` + `results`; kalau ada tabel atau view lain di dalamnya, migrasi berhenti dengan pesan supaya diperiksa dulu. Jumlah baris yang dibuang dicatat di log Alembic |
 
 Guardrails tidak punya tabel: ia membaca status tahap lewat API, bukan lewat database.
 
 Ketiga tahap juga bisa menulis status request ke `orchestration_extract_ocr` di transaksi
 yang sama dengan penyimpanan hasilnya, kalau `ORCHESTRATION_OUTCOME_TABLE` diisi (default
 mati). Yang ditulis: `processing` + tahapnya saat job diklaim, `completed` + `result_data`
-oleh scoring, dan `failed` + `error_code` saat gagal. Tabel itu **milik orkestrasi**, jadi
+oleh scoring, dan `failed` + `error_code` saat gagal. **Kontraknya adalah kolom `downstream_status`**:
+Orkestrasi hanya membaca kolom itu (`processing` | `completed` | `failed`) untuk menjawab polling
+client; kolom lain (`downstream_stage`, `status_code`, `error_code`, `error_message`, `result_data`)
+adalah data pendamping. Request yang ditolak guardrails (400) tidak pernah menulis kolom ini,
+karena tidak ada tahap yang berjalan; Orkestrasi menjawab client dari respons sinkron itu. Tabel itu **milik orkestrasi**, jadi
 kolomnya mereka yang menambahkan; DDL yang dibutuhkan (termasuk `request_id` unik) ada di
 [external/orchestration_extract_ocr.sql](external/orchestration_extract_ocr.sql) dan bisa
 dipasang ke PostgreSQL lokal dengan `make db-external`.
 
 ## Sumber kebenaran
 
-Kolom didefinisikan **sekali** di [`libs/ocr_common/ocr_common/tables.py`](../libs/ocr_common/ocr_common/tables.py).
+Kolom didefinisikan **sekali** di [`libs/ocr_common/ocr_common/pipeline/tables.py`](../libs/ocr_common/ocr_common/pipeline/tables.py).
 Migrasi Alembic dan `create_all` di test memakai definisi yang sama, dan `make db-check`
 gagal kalau keduanya menyimpang.
 

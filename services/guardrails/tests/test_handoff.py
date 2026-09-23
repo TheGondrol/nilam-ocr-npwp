@@ -1,13 +1,16 @@
 import io
 import json
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
 from PIL import Image
 
-from ocr_common.remote import RemoteModelClient
-from src.clients.ekstraksi import EkstraksiJobClient, get_ekstraksi_client
-from src.main import app
+from ocr_common.clients.remote import RemoteModelClient
+
+from app.clients.ekstraksi import EkstraksiJobClient
+from app.dependencies import get_ekstraksi_client
+from app.main import app
 
 RID = "REQ_guardrails_jobs"
 
@@ -169,3 +172,26 @@ def test_check_endpoint_judges_only(client, auth, stub_ekstraksi, stub_waiter):
     assert response.json()["data"]["passed"] is True
     assert stub_ekstraksi.submitted == []
     assert stub_waiter.calls == []
+
+
+def test_a_document_sent_as_file_url_is_handed_over_as_the_same_url(client, auth, ekstraksi, monkeypatch):
+    handler = ekstraksi(_accepted)
+    url = "http://minio.local/bucket/npwp.jpg?X-Amz-Signature=abc"
+
+    async def fake_fetch(fetched, *, limit, timeout=10.0, policy):
+        assert fetched == url
+        return _jpeg(), "npwp.jpg", "image/jpeg"
+
+    monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
+    response = client.post(
+        "/v1/extract-ocr", headers=auth, data={"request_id": RID, "document_type": "npwp", "file_url": url}
+    )
+
+    assert response.status_code == 200
+    [sent] = handler.requests
+    assert sent.url.path == "/v1/ekstraksi/jobs"
+    assert sent.headers["content-type"] == "application/x-www-form-urlencoded", "no bytes: the OCR stage downloads it"
+    form = {key: value[0] for key, value in parse_qs(sent.content.decode()).items()}
+    assert form["request_id"] == RID
+    assert "guardrails" in form
+    assert form["file_url"] == url
