@@ -128,6 +128,7 @@ class PipelineSettings(BaseServiceSettings):
     pipeline_drain_timeout_seconds: float = 30.0
     pipeline_job_lease_seconds: float = Field(DEFAULT_JOB_LEASE_SECONDS, gt=0)
     orchestration_outcome_table: str = ""
+    orchestration_api_events_table: str = ""
     pipeline_outbox: bool = False
     pipeline_outbox_interval_seconds: float = Field(1.0, gt=0)
     pipeline_outbox_batch: int = Field(20, gt=0)
@@ -143,16 +144,20 @@ class PipelineSettings(BaseServiceSettings):
     @property
     def callbacks_enabled(self) -> bool:
         """Stage callbacks are only sent when the orchestrator exposes an endpoint for them. The other way
-        to report the outcome is the orchestrator's own table (ORCHESTRATION_OUTCOME_TABLE)."""
+        to report the outcome is the orchestrator's own tables (ORCHESTRATION_OUTCOME_TABLE,
+        ORCHESTRATION_API_EVENTS_TABLE)."""
         return bool(self.orchestration_url)
 
     @model_validator(mode="after")
     def _guard_pipeline(self) -> Self:
         self.require_outside_local(database_url=self.database_url)
-        if not self.is_local and not self.orchestration_url and not self.orchestration_outcome_table:
+        reports_outcome = (
+            self.orchestration_url or self.orchestration_outcome_table or self.orchestration_api_events_table
+        )
+        if not self.is_local and not reports_outcome:
             raise ValueError(
-                f"ORCHESTRATION_URL or ORCHESTRATION_OUTCOME_TABLE must be set when ENVIRONMENT={self.environment}: "
-                "without either, the orchestrator never learns how a request ended "
+                "ORCHESTRATION_URL, ORCHESTRATION_OUTCOME_TABLE or ORCHESTRATION_API_EVENTS_TABLE must be set when "
+                f"ENVIRONMENT={self.environment}: without one, the orchestrator never learns how a request ended "
                 "(set ENVIRONMENT=local for local development)"
             )
         self.reject_localhost_outside_local(orchestration_url=self.orchestration_url)

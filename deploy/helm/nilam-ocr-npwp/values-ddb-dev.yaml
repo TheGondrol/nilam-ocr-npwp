@@ -18,6 +18,12 @@ orchestration:
   # hasil penelusuran namespace ocr-dev, belum dikonfirmasi tim Orkestrasi.
   # url: http://ocr-orchestration.ocr-dev.svc.cluster.local
 
+commonEnv:
+  # Double write: selain tabel job kita sendiri, keadaan akhir tiap request (COMPLETED dari scoring,
+  # FAILED dari tahap mana pun) ditambahkan sebagai baris GET_OCR_RESULT di log API Orkestrasi,
+  # karena Orkestrasi membaca hasil dari tabel itu, bukan dari GET /v1/scoring/jobs/{request_id}.
+  ORCHESTRATION_API_EVENTS_TABLE: ocr.orchestration_api_events
+
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
   # network policy enforcement, jadi policy hanya terpasang, belum ditegakkan.

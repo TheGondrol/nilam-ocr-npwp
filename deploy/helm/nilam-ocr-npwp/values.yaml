@@ -38,8 +38,9 @@ externalSecret:
     orchestrationApiKey: nilam-ocr-npwp-orchestration-api-key
 
 # Callback tahap ke Orkestrasi. Kosong = tidak ada callback yang dikirim maupun diantrekan;
-# hasil sampai ke Orkestrasi lewat tabelnya sendiri (ORCHESTRATION_OUTCOME_TABLE di commonEnv)
-# dan GET /v1/<tahap>/jobs/{request_id}. Service menolak start kalau keduanya kosong.
+# hasil sampai ke Orkestrasi lewat tabelnya sendiri (ORCHESTRATION_OUTCOME_TABLE dan/atau
+# ORCHESTRATION_API_EVENTS_TABLE di commonEnv) dan GET /v1/<tahap>/jobs/{request_id}.
+# Service menolak start kalau semuanya kosong.
 orchestration:
   url: ""
   callbackPath: /v1/callbacks/stage

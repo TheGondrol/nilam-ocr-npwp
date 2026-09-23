@@ -130,7 +130,7 @@ def test_the_outcome_row_is_off_until_the_table_is_configured():
 
     on = PipelineSettings(api_key="k", environment="local", orchestration_outcome_table=TABLE, _env_file=None)
     writer = build_stage_outcome(on, stage=STAGE_SCORING)
-    assert writer is not None
+    assert isinstance(writer, OrchestrationOutcome)
     assert writer.table.name == TABLE
 
 
