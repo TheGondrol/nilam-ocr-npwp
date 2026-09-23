@@ -28,3 +28,8 @@ services/*/weights/*
 services/structuring/app/vendor/npwp_rules/data/*.xlsx
 
 docs/
+
+# Keluaran lokal tools: log port-forward tracker dan hasil run k6.
+tools/tracker/.port-forward.log
+tools/load-tester/out/*
+!tools/load-tester/out/.gitkeep
