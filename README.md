@@ -115,8 +115,7 @@ nilam-ocr-npwp/
 ├── docker-compose.yml                # 4 image, 4 container, satu network
 ├── docker-compose.db.yml             # overlay PostgreSQL lokal: satu database, semua tabel di schema public
 ├── scripts/smoke_e2e.py              # memerankan Orkestrasi: guardrails -> jobs -> callback, lewat container
-├── tools/tracker/                    # UI pelacak pipeline + outbox (React + FastAPI + Redis), untuk uji coba dan presentasi
-├── tools/load-tester/                # k6 di Docker: laju request yang masih dijawab 200/202, dihitung lewat tracker
+├── tools/                            # (di-gitignore, hanya di laptop) tracker UI pipeline + outbox, load-tester k6
 ├── Makefile · pyproject.toml (ruff) · requirements-dev.txt
 ```
 
