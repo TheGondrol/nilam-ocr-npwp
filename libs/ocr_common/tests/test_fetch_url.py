@@ -9,6 +9,9 @@ from ocr_common.clients.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPo
 
 LOCAL = UrlPolicy(allow_private=True)
 BODY = b"x" * 100
+PDF_BODY = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"x" * 50
+PNG_BODY = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+JPEG_BODY = b"\xff\xd8\xff\xe0" + b"x" * 50
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -25,8 +28,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/slow":
             time.sleep(2)
         body = self.headers["Host"].encode() if self.path == "/host" else BODY
+        disposition = None
+        if self.path.startswith("/share/"):
+            # A MinIO Console share link: an opaque token for a path, the name only in Content-Disposition.
+            body = PDF_BODY
+            disposition = 'attachment; filename="PN2503876I.pdf"'
+        elif self.path.startswith("/signature/"):
+            body = {"pdf": PDF_BODY, "png": PNG_BODY, "jpg": JPEG_BODY}[self.path.rsplit("/", 1)[-1].split(".")[0]]
+        elif self.path == "/disposition-with-path":
+            disposition = "attachment; filename*=UTF-8''..%2F..%2Fetc%2Fscan.png"
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
+        if disposition:
+            self.send_header("Content-Disposition", disposition)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -64,6 +78,31 @@ async def test_downloads_and_guesses_content_type_from_the_extension(port):
     assert (content, filename, content_type) == (BODY, "npwp.jpg", "image/jpeg")
     assert (await fetch(f"http://127.0.0.1:{port}/a.png", limit=1000, policy=LOCAL))[2] == "image/png"
     assert (await fetch(f"http://127.0.0.1:{port}/a.pdf", limit=1000, policy=LOCAL))[2] == "application/pdf"
+
+
+async def test_share_link_without_extension_is_typed_from_its_content_and_named_from_the_header(port):
+    url = f"http://127.0.0.1:{port}/share/aHR0cDovLzEyNy4wLjAuMTo5MDAwL29jci1icmFuY2gvUE4yNTAzODc2SS5wZGY_WC1BbXo"
+    content, filename, content_type = await fetch(url, limit=1000, policy=LOCAL)
+    assert (content, filename, content_type) == (PDF_BODY, "PN2503876I.pdf", "application/pdf")
+
+
+@pytest.mark.parametrize(
+    "path, content_type",
+    [
+        ("/signature/pdf", "application/pdf"),
+        ("/signature/png", "image/png"),
+        ("/signature/jpg", "image/jpeg"),
+        # The signature wins over a misleading extension.
+        ("/signature/pdf.jpg", "application/pdf"),
+    ],
+)
+async def test_generic_content_type_is_resolved_from_the_file_signature(port, path, content_type):
+    assert (await fetch(f"http://127.0.0.1:{port}{path}", limit=1000, policy=LOCAL))[2] == content_type
+
+
+async def test_disposition_file_name_keeps_only_its_last_segment(port):
+    _, filename, content_type = await fetch(f"http://127.0.0.1:{port}/disposition-with-path", limit=1000, policy=LOCAL)
+    assert (filename, content_type) == ("scan.png", "image/png")
 
 
 async def test_reads_at_most_one_byte_over_the_limit(port):

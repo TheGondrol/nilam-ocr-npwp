@@ -6,6 +6,7 @@ policy allows them; redirects are not followed; the body is capped at `limit` by
 """
 
 import asyncio
+import email.message
 import http.client
 import ipaddress
 import logging
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 ALLOWED_SCHEMES = {"http", "https"}
 _CHUNK_BYTES = 64 * 1024
 _TLS = ssl.create_default_context()
+_GENERIC_TYPES = ("", "application/octet-stream", "binary/octet-stream")
+# File signatures, checked before any name: a MinIO Console share link, for one, answers
+# `application/octet-stream` on a path that ends in an opaque token, not in the file name.
+_SIGNATURES = ((b"%PDF-", "application/pdf"), (b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"))
 
 
 class FetchUrlError(Exception):
@@ -95,7 +100,7 @@ def _resolve(host: str, port: int, policy: UrlPolicy) -> str:
 
 def _download(
     parsed: urllib.parse.SplitResult, port: int, policy: UrlPolicy, limit: int, timeout: float
-) -> tuple[bytes, str | None]:
+) -> tuple[bytes, str | None, str | None]:
     host = parsed.hostname or ""
     address = _resolve(host, port, policy)
     connection_class = _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
@@ -119,7 +124,7 @@ def _download(
                 break
             chunks.append(chunk)
             size += len(chunk)
-        return b"".join(chunks), response.getheader("Content-Type")
+        return b"".join(chunks), response.getheader("Content-Type"), response.getheader("Content-Disposition")
     except (OSError, http.client.HTTPException) as exc:
         logger.warning("file_url %s://%s fetch failed: %r", parsed.scheme, host, exc)
         raise FetchUrlError("Could not fetch file_url: connection failed or timed out") from exc
@@ -146,14 +151,33 @@ async def fetch(
     except ValueError as exc:
         raise FetchUrlError("file_url has an invalid port") from exc
 
-    content, header_type = await asyncio.to_thread(_download, parsed, port, policy, limit, timeout)
+    content, header_type, disposition = await asyncio.to_thread(_download, parsed, port, policy, limit, timeout)
 
-    filename = parsed.path.rsplit("/", 1)[-1] or "download"
-    content_type = header_type or ""
-    if content_type.split(";")[0].strip() in ("", "application/octet-stream", "binary/octet-stream"):
-        lowered = filename.lower()
-        if lowered.endswith(".pdf"):
-            content_type = "application/pdf"
-        else:
-            content_type = "image/png" if lowered.endswith(".png") else "image/jpeg"
-    return content, filename, content_type.split(";")[0].strip()
+    filename = _disposition_filename(disposition) or parsed.path.rsplit("/", 1)[-1] or "download"
+    content_type = (header_type or "").split(";")[0].strip().lower()
+    if content_type in _GENERIC_TYPES:
+        content_type = _guess_content_type(content, filename)
+    return content, filename, content_type
+
+
+def _disposition_filename(header: str | None) -> str | None:
+    """The file name a `Content-Disposition` header carries (`filename` or `filename*`), without any path."""
+    if not header:
+        return None
+    message = email.message.Message()
+    message["Content-Disposition"] = header
+    name = message.get_filename()
+    name = name.replace("\\", "/").rsplit("/", 1)[-1].strip() if name else ""
+    return name or None
+
+
+def _guess_content_type(content: bytes, filename: str) -> str:
+    """The type of a download served as `application/octet-stream`: from the file's signature, else from
+    the name's extension, else JPEG (the image check downstream then reports an unreadable file)."""
+    for signature, content_type in _SIGNATURES:
+        if content.startswith(signature):
+            return content_type
+    lowered = filename.lower()
+    if lowered.endswith(".pdf"):
+        return "application/pdf"
+    return "image/png" if lowered.endswith(".png") else "image/jpeg"
