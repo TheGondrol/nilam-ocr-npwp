@@ -29,6 +29,10 @@ CallbackResult = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 """Derives what the callback / the orchestrator's outcome row carries from the stage result."""
 HandoffPayload = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 """Derives the body of the hand-off to the next stage from the stage result."""
+Rejection = Callable[[Mapping[str, Any]], str | None]
+"""The reason the stage result rejects the document, or None. A rejected job is still stored `DONE`
+(its result stays readable), but it is not handed on, its callback is `FAILED` with the reason, and
+the outcome row / event log record a 400."""
 
 
 class StagePipeline:
@@ -65,6 +69,7 @@ class StagePipeline:
         next_stage: str | None = None,
         callback_result: CallbackResult | None = None,
         outcome_data: CallbackResult | None = None,
+        rejection: Rejection | None = None,
         input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """`input` is what a later run of this job needs besides the earlier stages' stored results
@@ -72,7 +77,9 @@ class StagePipeline:
         claimed = await self.repository.claim(request_id, input=input)
         status = STATUS_PROCESSING
         if claimed:
-            self.runner.spawn(self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data))
+            self.runner.spawn(
+                self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection)
+            )
         else:
             record = await self.repository.get(request_id)
             status = record["status"] if record else STATUS_PROCESSING
@@ -87,9 +94,12 @@ class StagePipeline:
         next_stage: str | None = None,
         callback_result: CallbackResult | None = None,
         outcome_data: CallbackResult | None = None,
+        rejection: Rejection | None = None,
     ) -> None:
         """Run a job that is already claimed (by the stale-job reaper) without claiming it again."""
-        self.runner.spawn(self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data))
+        self.runner.spawn(
+            self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection)
+        )
 
     async def get(self, request_id: str) -> dict[str, Any]:
         """The job's record for `GET /v1/<stage>/jobs/{request_id}`; `NotFound` when unknown."""
@@ -114,10 +124,13 @@ class StagePipeline:
         next_stage: str | None,
         callback_result: CallbackResult | None,
         outcome_data: CallbackResult | None = None,
+        rejection: Rejection | None = None,
     ) -> None:
         token = bind_request_id(request_id)  # log lines and downstream calls of this job carry its id
         try:
-            await self._run_bound(request_id, work, handoff_payload, next_stage, callback_result, outcome_data)
+            await self._run_bound(
+                request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection
+            )
         finally:
             reset_request_id(token)
 
@@ -129,22 +142,27 @@ class StagePipeline:
         next_stage: str | None,
         callback_result: CallbackResult | None,
         outcome_data: CallbackResult | None,
+        rejection: Rejection | None = None,
     ) -> None:
         payload: dict[str, Any] | None = None
         final: dict[str, Any] | None = None
+        reason: str | None = None
         started = time.perf_counter()
         try:
             result = dict(await work())
-            payload = dict(handoff_payload(result)) if handoff_payload else None
-            final = dict(callback_result(result)) if callback_result else None
+            reason = rejection(result) if rejection else None
+            if reason is None:
+                payload = dict(handoff_payload(result)) if handoff_payload else None
+                final = dict(callback_result(result)) if callback_result else None
             await self.repository.complete(
                 request_id,
                 result,
-                outcome_data=dict(outcome_data(result)) if outcome_data else None,
-                messages=self._messages(request_id, final, payload, next_stage),
+                outcome_data=dict(outcome_data(result)) if outcome_data and reason is None else None,
+                rejection=reason,
+                messages=self._messages(request_id, final, payload, next_stage, reason),
             )
             metrics.JOB_DURATION.labels(self.stage).observe(time.perf_counter() - started)
-            metrics.JOBS.labels(self.stage, metrics.OUTCOME_DONE).inc()
+            metrics.JOBS.labels(self.stage, metrics.OUTCOME_REJECTED if reason else metrics.OUTCOME_DONE).inc()
         except asyncio.CancelledError:
             logger.warning("%s job %s interrupted by shutdown", self.stage, request_id)
             metrics.JOBS.labels(self.stage, metrics.OUTCOME_INTERRUPTED).inc()
@@ -166,7 +184,9 @@ class StagePipeline:
             return
 
         try:
-            if self.callbacks:
+            if self.callbacks and reason is not None:
+                await self.callback.notify(request_id, self.stage, STATUS_FAILED, error_message=reason)
+            elif self.callbacks:
                 await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
             if payload is not None:
                 await self._hand_off(payload)
@@ -183,11 +203,14 @@ class StagePipeline:
         final: dict[str, Any] | None,
         payload: dict[str, Any] | None,
         next_stage: str | None,
+        reason: str | None = None,
     ) -> list[OutboxMessage]:
         if self.outbox is None:
             return []
         messages = []
-        if self.callbacks:
+        if self.callbacks and reason is not None:
+            messages.append(callback_message(request_id, self.stage, STATUS_FAILED, error_message=reason))
+        elif self.callbacks:
             messages.append(callback_message(request_id, self.stage, STATUS_DONE, result=final))
         if payload is not None and next_stage is not None:
             messages.append(handoff_message(next_stage, payload))

@@ -37,6 +37,7 @@ STRUCTURED_EXAMPLE = {
     },
     "flag": False,
     "flag_reason": None,
+    "reject_reason": None,
 }
 FLAGGED_EXAMPLE = {
     **STRUCTURED_EXAMPLE,

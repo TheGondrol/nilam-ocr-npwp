@@ -7,6 +7,9 @@ from typing import Any
 from ocr_common.types import ContractData, ContractField, FinalField, FinalResult
 
 DOCUMENT_TYPE = "npwp"
+# `errors` of a 400 for a document that is not accepted: by the guardrails model, or by a rejecting
+# check of the structuring rules.
+REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
 NPWP_FIELDS = ("nomor_npwp", "nama", "nama_badan")
 TRUST_SCORES = ("npwp_confidence", "name_confidence")
 
@@ -14,15 +17,14 @@ TRUST_SCORES = ("npwp_confidence", "name_confidence")
 def contract_fields(result: FinalResult, threshold: float) -> ContractData:
     """The `data` of the orchestrator's `extract-ocr` contract: `nomor_npwp` and `nama` (the person's
     name, or the company's registered name) with `confidence` 1 when the trust model's probability
-    reaches `threshold`, else 0, plus the review `flag` / `flag_reason` of the structuring rules."""
+    reaches `threshold`, else 0. The structuring rules' flag stays internal: it is already in the
+    trust model's probability, and a document with a rejecting flag never gets this far."""
     fields = result["fields"]
     scoring = result["scoring"]
     name = fields.get("nama") if _has_value(fields.get("nama")) else fields.get("nama_badan")
     return {
         "nomor_npwp": _field(fields.get("nomor_npwp"), scoring.get("npwp_confidence"), threshold),
         "nama": _field(name, scoring.get("name_confidence"), threshold),
-        "flag": bool(result.get("flag", False)),
-        "flag_reason": result.get("flag_reason"),
     }
 
 

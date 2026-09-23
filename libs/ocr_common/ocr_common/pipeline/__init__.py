@@ -55,6 +55,7 @@ from ocr_common.pipeline.stage import (
     STAGE_STRUCTURING,
     CallbackResult,
     HandoffPayload,
+    Rejection,
     StagePipeline,
     Work,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "OrchestrationCallback",
     "OutboxMessage",
     "OutboxRelay",
+    "Rejection",
     "StaleJob",
     "StaleJobReaper",
     "StageResults",

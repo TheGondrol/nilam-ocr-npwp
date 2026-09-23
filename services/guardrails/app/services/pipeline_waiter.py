@@ -9,6 +9,10 @@ from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING
 
 logger = logging.getLogger(__name__)
 
+# The pipeline stopped because a stage rejected the document (a rejecting check of the structuring
+# rules: `reject_reason` in its result). Final, like FAILED, but answered as a 400.
+STATUS_REJECTED = "REJECTED"
+
 
 class StageStatus(Protocol):
     stage: str
@@ -46,6 +50,9 @@ class PipelineWaiter:
                     if record["status"] == STATUS_FAILED:
                         return WaitOutcome(current, STATUS_FAILED, record.get("error_message"), results)
                     results[current] = record.get("result") or {}
+                    reject_reason = results[current].get("reject_reason")
+                    if reject_reason:
+                        return WaitOutcome(current, STATUS_REJECTED, reject_reason, results)
         except TimeoutError:
             return WaitOutcome(current, STATUS_PROCESSING, results=results)
         return WaitOutcome(current, STATUS_DONE, results=results)

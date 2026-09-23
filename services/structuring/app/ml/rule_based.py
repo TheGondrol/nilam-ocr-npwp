@@ -64,6 +64,7 @@ class RuleBasedNpwpStructurer:
             },
             "flag": False,
             "flag_reason": None,
+            "reject_reason": None,
         }
 
     @staticmethod

@@ -43,8 +43,6 @@ def test_confidence_is_1_from_the_threshold_up():
     assert fields == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 0},
-        "flag": False,
-        "flag_reason": None,
     }
 
 
@@ -53,8 +51,6 @@ def test_missing_value_or_score_gives_confidence_0():
     assert fields == {
         "nomor_npwp": {"value": None, "confidence": 0},
         "nama": {"value": "BUDI SANTOSO", "confidence": 0},
-        "flag": False,
-        "flag_reason": None,
     }
 
 
@@ -110,6 +106,4 @@ def test_confidence_threshold_can_be_changed(client, auth):
     assert response.json()["data"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-        "flag": False,
-        "flag_reason": None,
     }

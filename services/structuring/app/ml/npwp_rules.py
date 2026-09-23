@@ -3,9 +3,9 @@ lines, wired the same way their own regex service wires them (nilamnpwp `regex/m
 
 Per page: the NPWP-shaped lines inside the card region compete on `npwp_priority` (16 digits beat
 15, then OCR score); the name is the nearest name-shaped line to the number (`extract_name`). Per
-document: the first page with a number / name wins, and every check the rules provide becomes a
-soft review flag (`flag`, `flag_reason`) that never rejects the document: it is a feature of the
-trust model and a hint for the reviewer. Digit-homoglyph correction is switched off by the ML team
+document: the first page with a number / name wins, and every check the rules provide raises the
+document flag (`flag`, `flag_reason`), a feature of the trust model. Nine of the eleven checks also
+reject the document (`reject_reason`, see `TOLERATED`). Digit-homoglyph correction is switched off by the ML team
 (`normalize_npwp_raw`: a misread letter is dropped, the flag says so), so a number can come back
 shorter than 15 digits; the trust model then gives it a low confidence."""
 
@@ -32,6 +32,12 @@ FLAG_INVALID_PROVINCE = "Kode provinsi pada NPWP tidak valid, mohon dicek kembal
 FLAG_INVALID_KECAMATAN = "Kode kecamatan pada NPWP tidak valid, mohon dicek kembali"
 FLAG_INVALID_BIRTHDATE = "Tanggal lahir pada NPWP tidak valid, mohon dicek kembali"
 FLAG_INVALID_KPP = "Kode KPP pada NPWP tidak valid, mohon dicek kembali"
+
+# The ML team's decision (23 Sep 2026): of the 11 checks, only these two are tolerated, because a
+# reviewer checks and fixes them. They still raise `flag` for the trust model. Every other check
+# (more pages than allowed, another document, not the standard NPWP format, an online-lookup
+# screenshot, blur / blank, invalid province / kecamatan / birthdate / KPP code) rejects the document.
+TOLERATED = frozenset({FLAG_SINGLE_WORD_NAME, FLAG_HOMOGLYPH})
 
 NUMBER_SIGNALS = (
     "invalid_province_prefix",
@@ -170,10 +176,13 @@ class NpwpRulesStructurer:
         pages = [_process_page(page) for page in _pages(lines)]
 
         flag_reason: str | None = None
+        # The first rejecting check in the same priority order (see `REJECTING`). Tracked on its own
+        # because flag_reason may hold a tolerated reason that outranks it (a single-word name).
+        reject_reason: str | None = None
         guardrail_triggered = False
         too_many_pages = len(pages) > MAX_EXPECTED_PAGES
         if too_many_pages:
-            flag_reason = FLAG_TOO_MANY_PAGES.format(n=len(pages), max=MAX_EXPECTED_PAGES)
+            flag_reason = reject_reason = FLAG_TOO_MANY_PAGES.format(n=len(pages), max=MAX_EXPECTED_PAGES)
 
         number: dict[str, Any] | None = None
         name: dict[str, Any] | None = None
@@ -183,6 +192,7 @@ class NpwpRulesStructurer:
             if page["flag_reasons"]:
                 guardrail_triggered = True
                 flag_reason = flag_reason or page["flag_reasons"][0]
+                reject_reason = reject_reason or page["flag_reasons"][0]
             for signal in number_signals:
                 number_signals[signal] = number_signals[signal] or page[signal]
             # First present wins, so the reported score belongs to the value that is returned.
@@ -195,6 +205,7 @@ class NpwpRulesStructurer:
         if number is None or name is None:
             guardrail_triggered = True
             flag_reason = flag_reason or FLAG_BLANK
+            reject_reason = reject_reason or FLAG_BLANK
 
         single_word_name = any(p["name"] and len(p["name"].split()) == 1 for p in pages)
         checks = (
@@ -208,6 +219,8 @@ class NpwpRulesStructurer:
         for triggered, reason in checks:
             if triggered and flag_reason is None:
                 flag_reason = reason
+            if triggered and reject_reason is None and reason not in TOLERATED:
+                reject_reason = reason
         flag = guardrail_triggered or too_many_pages or any(triggered for triggered, _ in checks)
 
         fields: dict[str, StructuredField] = {}
@@ -233,4 +246,5 @@ class NpwpRulesStructurer:
             },
             "flag": flag,
             "flag_reason": flag_reason,
+            "reject_reason": reject_reason,
         }

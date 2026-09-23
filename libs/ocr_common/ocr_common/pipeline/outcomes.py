@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.config import PipelineSettings
-from ocr_common.npwp import DOCUMENT_TYPE
+from ocr_common.npwp import DOCUMENT_TYPE, REJECTED_CODE
 
 if TYPE_CHECKING:
     from sqlalchemy import Table
@@ -36,6 +36,10 @@ class StageOutcome(Protocol):
         self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
     ) -> None:
         """The request `failed` at this stage, or at `stage` when a hand-off to it failed."""
+        ...
+
+    async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
+        """This stage rejected the document (a 400 with `reason`); the pipeline stops here."""
         ...
 
 
@@ -71,6 +75,10 @@ class OrchestrationOutcome:
             error_code=f"{stage or self._stage}_FAILED",
             error_message=error_message,
         )
+
+    async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
+        """Upsert `failed` with 400 and `DOWNSTREAM_VALIDATION_ERROR`, the reason as the message."""
+        await self._write(conn, request_id, 400, STATUS_FAILED, error_code=REJECTED_CODE, error_message=reason)
 
     async def _write(
         self,
@@ -148,6 +156,12 @@ class ApiEventOutcome:
             error_message=error_message,
         )
 
+    async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
+        """A FAILED row with 400 and `DOWNSTREAM_VALIDATION_ERROR`, the reason as the message."""
+        await self._append(
+            conn, request_id, 400, STATUS_FAILED, self._stage, error_code=REJECTED_CODE, error_message=reason
+        )
+
     async def _append(
         self,
         conn: AsyncConnection,
@@ -203,6 +217,10 @@ class CompositeOutcome:
     ) -> None:
         for writer in self.writers:
             await writer.failed(conn, request_id, error_message, stage=stage)
+
+    async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
+        for writer in self.writers:
+            await writer.rejected(conn, request_id, reason)
 
 
 def build_stage_outcome(settings: PipelineSettings, *, stage: str) -> StageOutcome | None:

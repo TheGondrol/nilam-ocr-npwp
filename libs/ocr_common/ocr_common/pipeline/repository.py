@@ -56,9 +56,11 @@ class JobRepository(Protocol):
         result: dict[str, Any],
         *,
         outcome_data: dict[str, Any] | None = None,
+        rejection: str | None = None,
         messages: Sequence[OutboxMessage] = (),
     ) -> None:
-        """Store `result`, mark `DONE`, and in the same transaction write the outcome row and the outbox messages."""
+        """Store `result`, mark `DONE`, and in the same transaction write the outcome row and the outbox messages.
+        With `rejection` the outcome row records that this stage rejected the document instead."""
         ...
 
     async def fail(self, request_id: str, error_message: str, *, messages: Sequence[OutboxMessage] = ()) -> None:
@@ -138,6 +140,7 @@ class InMemoryJobRepository:
         result: dict[str, Any],
         *,
         outcome_data: dict[str, Any] | None = None,
+        rejection: str | None = None,
         messages: Sequence[OutboxMessage] = (),
     ) -> None:
         """See `JobRepository.complete`; the outcome row and outbox do not exist in memory."""

@@ -1,13 +1,14 @@
 from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.npwp import contract_fields
+from ocr_common.npwp import REJECTED_CODE, contract_fields
 from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED
 from ocr_common.web.envelope import envelope
 
+from app.services.pipeline_waiter import STATUS_REJECTED
+
 COMPLETED_MESSAGE = "OCR extraction completed successfully"
 PROCESSING_MESSAGE = "OCR job accepted; still processing"
-REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
 
 
 def extract_body(
@@ -47,6 +48,19 @@ def extract_response(
         )
         return 400, body
     pipeline = outcome["pipeline"] or {}
+    if pipeline.get("status") == STATUS_REJECTED:
+        # A rejecting check of the structuring rules: answered like a guardrails rejection, with the
+        # rules' own Indonesian reason as the message.
+        return 400, extract_body(
+            400,
+            pipeline["error_message"],
+            errors=REJECTED_CODE,
+            job_status="failed",
+            guardrails=0,
+            request_id=request_id,
+            document_type=document_type,
+            params=params,
+        )
     if pipeline.get("status") == STATUS_DONE:
         data = contract_fields(outcome["result"], threshold)
         return 200, extract_body(

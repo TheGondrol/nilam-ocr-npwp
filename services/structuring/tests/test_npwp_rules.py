@@ -227,7 +227,7 @@ def test_recognised_name_from_the_name_master_wins_the_tie_break(tmp_path, monke
         name_master._load_index.cache_clear()
 
 
-# --- nothing is rejected: the document is flagged for a reviewer -------------------------------
+# --- every check flags; all but two also reject (ML team, 23 Sep 2026) --------------------------
 
 
 @pytest.mark.parametrize(
@@ -241,19 +241,51 @@ def test_recognised_name_from_the_name_master_wins_the_tie_break(tmp_path, monke
         ([_line("Cek NPWP", 40), _line("Nama: (disamarkan)", 90)], npwp_rules.FLAG_WEB_LOOKUP),
         ([_line("npwp", 40, page=p) for p in range(3)], "Dokumen memiliki 3 halaman (lebih dari 2)"),
         ([_line("lorem ipsum 123", 40)], npwp_rules.FLAG_BLANK),
-        ([_line("12.345.678.9-012.345", 120), _line("SUKIRMAN", 200)], npwp_rules.FLAG_SINGLE_WORD_NAME),
+        (_card("7729 0130 1001 0006"), npwp_rules.FLAG_INVALID_PROVINCE),
+        (_card("3329 0199 3001 0006"), npwp_rules.FLAG_INVALID_BIRTHDATE),
+        (_card("3399 9930 1001 0006"), npwp_rules.FLAG_INVALID_KECAMATAN),
+        (_card("48.903.841.4-999.000"), npwp_rules.FLAG_INVALID_KPP),
     ],
 )
-def test_page_checks_flag_but_never_reject(lines, reason):
+def test_rejecting_checks_flag_and_reject(lines, reason):
     document = structure(lines)
     assert document["flag"] is True
     assert reason in document["flag_reason"]
-    assert set(document["fields"]) == {"nomor_npwp", "nama", "nama_badan"}
+    assert reason in document["reject_reason"]
+    assert set(document["fields"]) == {"nomor_npwp", "nama", "nama_badan"}, "the fields are still read"
+
+
+@pytest.mark.parametrize(
+    ("lines", "reason"),
+    [
+        ([_line("12.345.678.9-012.345", 120), _line("SUKIRMAN", 200)], npwp_rules.FLAG_SINGLE_WORD_NAME),
+        (_card("63.48O.341.5-5O1.000"), npwp_rules.FLAG_HOMOGLYPH),
+    ],
+)
+def test_single_word_name_and_letter_in_the_number_are_tolerated(lines, reason):
+    document = structure(lines)
+    assert (document["flag"], document["flag_reason"]) == (True, reason), "still an input of the trust model"
+    assert document["reject_reason"] is None
+
+
+def test_a_clean_card_is_neither_flagged_nor_rejected():
+    document = structure(_card("12.345.678.9-012.345", "BUDI SANTOSO"))
+    assert (document["flag"], document["flag_reason"], document["reject_reason"]) == (False, None, None)
+
+
+def test_a_tolerated_reason_that_outranks_a_rejecting_one_does_not_hide_it():
+    # flag_reason keeps the rules' priority (single-word name first), but the document is still rejected
+    # for its invalid province code, with that message.
+    document = structure(_card("7729 0130 1001 0006", "SUKIRMAN"))
+    assert document["flag_reason"] == npwp_rules.FLAG_SINGLE_WORD_NAME
+    assert document["reject_reason"] == npwp_rules.FLAG_INVALID_PROVINCE
 
 
 def test_the_first_reason_in_priority_order_is_reported():
     lines = [_line("KARTU KELUARGA", 40), *_card("63.48O.341.5-5O1.000", "SUKIRMAN")]
-    assert structure(lines)["flag_reason"].startswith("Dokumen lain terdeteksi")
+    document = structure(lines)
+    assert document["flag_reason"].startswith("Dokumen lain terdeteksi")
+    assert document["reject_reason"].startswith("Dokumen lain terdeteksi")
 
 
 def test_address_and_office_lines_never_become_the_name():
@@ -293,14 +325,16 @@ def test_http_structure_with_real_card(client, auth):
     data = response.json()["data"]
     assert data["fields"]["nomor_npwp"]["value"] == "4318085607040052"
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"
-    assert {"flag", "flag_reason"} <= set(data)
+    assert {"flag", "flag_reason", "reject_reason"} <= set(data)
 
 
-def test_http_bundled_document_is_200_with_a_flag(client, auth):
+def test_http_bundled_document_is_200_with_its_reject_reason(client, auth):
+    # The synchronous debugging endpoint reports the verdict; only the pipeline turns it into a 400.
     lines = [*NEW_CARD, _line("KARTU TANDA PENDUDUK", 1200)]
     response = client.post("/v1/structuring/structure", json={"lines": lines}, headers=auth)
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["flag"] is True
     assert "KARTU TANDA PENDUDUK" in data["flag_reason"]
+    assert "KARTU TANDA PENDUDUK" in data["reject_reason"]
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"

@@ -83,6 +83,9 @@ paths:
         | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
+        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
         | A stage failed in time | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or
         `SCORING_FAILED` |
 
@@ -90,8 +93,15 @@ paths:
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
         or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
         gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
-        default), else `0`. `data.flag` / `data.flag_reason` is the review flag of the structuring rules
-        (never a rejection). `params` is returned as sent.
+        default), else `0`. `params` is returned as sent.
+
+
+        **Rejected by the structuring rules**: the ML team''s rules reject a document that is blurred
+        or blank, not in the standard NPWP format, another document or bundled with one, a screenshot
+        of the online NPWP lookup, longer than the page limit, or whose number carries an invalid birthdate,
+        province, kecamatan or KPP code. `message` is the rules'' Indonesian reason, e.g. `Kode provinsi
+        pada NPWP tidak valid, mohon dicek kembali`. A single-word name or a letter in the number is tolerated:
+        the fields are returned, and the trust model''s confidence already accounts for it.
 
 
         **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
@@ -141,7 +151,6 @@ paths:
                       nama:
                         value: BUDI SANTOSO
                         confidence: 1
-                      flag: false
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     guardrails: 1
@@ -169,8 +178,8 @@ paths:
                       nik: '3123456711950001'
                       refno: PK19039Y8U
         '400':
-          description: 'Rejected by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+          description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
+            `guardrails: 0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
             pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
             file / intake (empty, unsupported type, unreadable, `file_url` refused)'
           content:
@@ -1333,9 +1342,9 @@ components:
         flag:
           type: boolean
           title: Flag
-          description: 'Review flag of the structuring rules (see the structuring result). True never
-            rejects the document: the value is still returned, the trust model''s confidence is lower,
-            and `flag_reason` says why'
+          description: 'Flag of the structuring rules (see the structuring result), an input of the trust
+            model. Only a tolerated flag (single-word name, letter in the number) reaches this result:
+            any other rejects the document at structuring'
           default: false
           examples:
           - false
@@ -1344,7 +1353,7 @@ components:
           - type: string
           - type: 'null'
           title: Flag Reason
-          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          description: Why `flag` is true, in Indonesian; null when not flagged
           examples:
           - null
       type: object
@@ -1653,28 +1662,10 @@ components:
           $ref: '#/components/schemas/ContractField'
           description: 'The name on the card: the taxpayer''s name, or the registered name on a company''s
             card'
-        flag:
-          type: boolean
-          title: Flag
-          description: 'Review flag of the ML team''s structuring rules: another document bundled in,
-            CAPTCHA or lookup screenshot, number or name not found, single-word name, letter in the number,
-            invalid Kode Wilayah / birthdate / KPP code, more than 2 pages. Never a rejection: the values
-            are still returned with a lower confidence, and `flag_reason` says why'
-          examples:
-          - false
-        flag_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Flag Reason
-          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
-          examples:
-          - null
       type: object
       required:
       - nomor_npwp
       - nama
-      - flag
       title: NpwpData
     NpwpFields:
       properties:
@@ -2114,12 +2105,11 @@ components:
         flag:
           type: boolean
           title: Flag
-          description: 'Review flag of the ML team''s rules. True when: another document is bundled in
-            (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup, the number or the
-            name was not found, the name is a single word, the number contains a letter, its province
-            / kecamatan / birthdate / KPP code is invalid, or the upload has more than 2 pages. It never
-            rejects the document: the fields are still returned, and the trust model uses the flag as
-            a feature'
+          description: 'Flag of the ML team''s rules, a feature of the trust model. True when: another
+            document is bundled in (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup,
+            the number or the name was not found, the name is a single word, the number contains a letter,
+            its province / kecamatan / birthdate / KPP code is invalid, or the upload has more than 2
+            pages'
           examples:
           - false
         flag_reason:
@@ -2127,7 +2117,18 @@ components:
           - type: string
           - type: 'null'
           title: Flag Reason
-          description: The first reason `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          description: The first reason `flag` is true, in Indonesian; null when not flagged
+          examples:
+          - null
+        reject_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reject Reason
+          description: The first reason that rejects the document, in Indonesian; null when the document
+            is accepted. Every check rejects except a single-word name and a letter in the number, which
+            only raise `flag`. In the pipeline a rejected document stops here (no scoring) and the client
+            gets a 400 with this message
           examples:
           - null
       type: object

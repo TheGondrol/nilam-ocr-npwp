@@ -19,9 +19,8 @@ RID = "OCR_api_events"
 DATA = {
     "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
     "nama": {"value": "BUDI SANTOSO", "confidence": 0},
-    "flag": False,
-    "flag_reason": None,
 }
+REASON = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
 
 
 async def _repository(tmp_path, stage: str, outcome_factory):
@@ -111,6 +110,43 @@ async def test_a_failed_handoff_names_the_next_stage(scoring):
         "STRUCTURING",
         "STRUCTURING_FAILED",
     )
+
+
+async def test_a_rejection_appends_a_400_failed_row_with_the_reason(tmp_path):
+    repo, table = await _repository(tmp_path, "STRUCTURING", lambda table, stage: ApiEventOutcome(table, stage=stage))
+    try:
+        await repo.claim(RID)
+        await repo.complete(RID, {"reject_reason": REASON}, rejection=REASON)
+
+        [row] = await _rows((repo, table))
+        assert (row["status_code"], row["downstream_status"], row["downstream_stage"]) == (400, "FAILED", "STRUCTURING")
+        assert row["error_code"] == "DOWNSTREAM_VALIDATION_ERROR"
+        assert (row["result_data"]["status"], row["result_data"]["error_message"]) == ("failed", REASON)
+        assert row["result_data"]["result"] is None
+        assert (await repo.get(RID))["status"] == "DONE"
+    finally:
+        await database.dispose_engines()
+
+
+async def test_the_pipeline_records_a_rejection_instead_of_a_completion(tmp_path):
+    repo, table = await _repository(tmp_path, "STRUCTURING", lambda table, stage: ApiEventOutcome(table, stage=stage))
+    try:
+        callback = RecordingCallback()
+        pipeline = StagePipeline(stage="STRUCTURING", repository=repo, callback=callback)
+
+        async def work():
+            return {"fields": {}, "flag": True, "flag_reason": REASON, "reject_reason": REASON}
+
+        await pipeline.submit(
+            RID, work, outcome_data=lambda result: DATA, rejection=lambda result: result.get("reject_reason")
+        )
+        await pipeline.runner.drain(5)
+
+        [row] = await _rows((repo, table))
+        assert (row["status_code"], row["error_code"]) == (400, "DOWNSTREAM_VALIDATION_ERROR")
+        assert [(c["status"], c["error_message"]) for c in callback.calls] == [("FAILED", REASON)]
+    finally:
+        await database.dispose_engines()
 
 
 async def test_a_second_run_appends_and_the_newest_row_is_the_state(scoring):

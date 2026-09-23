@@ -1070,9 +1070,9 @@ components:
         flag:
           type: boolean
           title: Flag
-          description: 'Review flag of the structuring rules (see the structuring result). True never
-            rejects the document: the value is still returned, the trust model''s confidence is lower,
-            and `flag_reason` says why'
+          description: 'Flag of the structuring rules (see the structuring result), an input of the trust
+            model. Only a tolerated flag (single-word name, letter in the number) reaches this result:
+            any other rejects the document at structuring'
           default: false
           examples:
           - false
@@ -1081,7 +1081,7 @@ components:
           - type: string
           - type: 'null'
           title: Flag Reason
-          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          description: Why `flag` is true, in Indonesian; null when not flagged
           examples:
           - null
       type: object
@@ -2022,10 +2022,9 @@ components:
         flag:
           type: boolean
           title: Flag
-          description: 'Review flag of the ML team''s rules: another document bundled in, CAPTCHA or lookup
-            screenshot, number or name not found, single-word name, letter in the number, invalid Kode
-            Wilayah / birthdate / KPP code, more than 2 pages. Never rejects: it is a feature of the trust
-            model'
+          description: 'Flag of the ML team''s rules, a feature of the trust model: another document bundled
+            in, CAPTCHA or lookup screenshot, number or name not found, single-word name, letter in the
+            number, invalid Kode Wilayah / birthdate / KPP code, more than 2 pages'
           default: false
           examples:
           - false
@@ -2034,7 +2033,17 @@ components:
           - type: string
           - type: 'null'
           title: Flag Reason
-          description: Why `flag` is true, in Indonesian, for a reviewer; null when not flagged
+          description: Why `flag` is true, in Indonesian; null when not flagged
+          examples:
+          - null
+        reject_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reject Reason
+          description: Set when a check that rejects the document fired (all but a single-word name and
+            a letter in the number). A rejected document is never handed to scoring; the client gets a
+            400 with this message
           examples:
           - null
       additionalProperties: true

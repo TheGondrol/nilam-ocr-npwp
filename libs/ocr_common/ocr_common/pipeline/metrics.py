@@ -9,6 +9,7 @@ from prometheus_client import Counter, Gauge, Histogram
 from ocr_common.pipeline.outbox import OutboxStats
 
 OUTCOME_DONE = "done"
+OUTCOME_REJECTED = "rejected"
 OUTCOME_FAILED = "failed"
 OUTCOME_CRASHED = "crashed"
 OUTCOME_INTERRUPTED = "interrupted"
