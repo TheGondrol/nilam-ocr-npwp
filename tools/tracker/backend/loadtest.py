@@ -15,12 +15,14 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 
 log = logging.getLogger("tracker.loadtest")
 router = APIRouter(prefix="/api/loadtest")
@@ -33,6 +35,9 @@ K6_TARGET = os.environ.get("K6_TARGET", "http://guardrails:8031")
 K6_TRACKER = os.environ.get("K6_TRACKER") or f"http://host.docker.internal:{os.environ.get('PORT', '8090')}"
 K6_API_KEY = os.environ.get("K6_API_KEY", "")
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".pdf")
+# Batas tracker sendiri, sengaja di atas MAX_UPLOAD_BYTES service (2,5 MB) supaya file besar tetap
+# bisa diunggah untuk menguji jawaban 413.
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_RATE = 50.0
 MAX_DURATION = 1800
 
@@ -52,11 +57,34 @@ def _container(run: str) -> str:
     return f"nilam-lt-{run}"
 
 
-def list_images() -> list[str]:
+def _image_paths() -> list[Path]:
     folder = LT_DIR / "images"
     if not folder.is_dir():
         return []
-    return sorted(p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
+    return sorted(
+        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES), key=lambda p: p.name
+    )
+
+
+def list_images() -> list[str]:
+    return [p.name for p in _image_paths()]
+
+
+def _safe_image_name(filename: str) -> str:
+    """Nama file yang aman dipakai di folder images dan di env IMAGES k6 (dipisah koma)."""
+    name = Path(filename.replace("\\", "/")).name
+    stem, suffix = os.path.splitext(name)
+    suffix = suffix.lower()
+    if suffix not in IMAGE_SUFFIXES:
+        raise HTTPException(status_code=422, detail=f"{name or 'file'}: hanya {', '.join(IMAGE_SUFFIXES)}")
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or "file"
+    return f"{stem[:80]}{suffix}"
+
+
+def _image_path(name: str) -> Path:
+    if name not in list_images():
+        raise HTTPException(status_code=404, detail=f"file {name} tidak ada")
+    return LT_DIR / "images" / name
 
 
 async def _docker(*args: str) -> tuple[int, str]:
@@ -287,6 +315,8 @@ async def config() -> dict[str, Any]:
     code, out = await _docker("image", "inspect", "--format", "{{.Id}}", K6_IMAGE)
     return {
         "images": list_images(),
+        "image_files": [{"name": p.name, "size": p.stat().st_size} for p in _image_paths()],
+        "max_image_bytes": MAX_IMAGE_BYTES,
         "k6_image": K6_IMAGE,
         "k6_image_ready": code == 0,
         "network": K6_NETWORK,
@@ -297,6 +327,52 @@ async def config() -> dict[str, Any]:
         "max_duration": MAX_DURATION,
         "load_tester_dir": str(LT_DIR),
     }
+
+
+@router.post("/images")
+async def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """Simpan file uji ke LT_DIR/images. Nama yang sudah ada tidak ditimpa: diberi akhiran -1, -2, ..."""
+    folder = LT_DIR / "images"
+    folder.mkdir(parents=True, exist_ok=True)
+    checked: list[tuple[str, bytes]] = []
+    for upload in files:
+        name = _safe_image_name(upload.filename or "")
+        content = await upload.read(MAX_IMAGE_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=422, detail=f"{name}: file kosong")
+        if len(content) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail=f"{name}: lebih dari {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+        checked.append((name, content))
+
+    # Semua file diperiksa dulu, baru ditulis: satu file yang ditolak tidak meninggalkan setengah unggahan.
+    saved: list[str] = []
+    for name, content in checked:
+        stem, suffix = os.path.splitext(name)
+        path, n = folder / name, 0
+        while path.exists():
+            n += 1
+            path = folder / f"{stem}-{n}{suffix}"
+        path.write_bytes(content)
+        saved.append(path.name)
+    log.info("file uji diunggah: %s", ", ".join(saved))
+    return {"saved": saved, "images": list_images()}
+
+
+@router.get("/images/{name}")
+async def image(name: str) -> FileResponse:
+    return FileResponse(_image_path(name))
+
+
+@router.delete("/images/{name}")
+async def delete_image(name: str) -> dict[str, Any]:
+    path = _image_path(name)
+    # k6 membuka file di init tiap VU, dan VU tambahan bisa dibuat di tengah run.
+    runs = [json.loads(v) for v in (await ctx["redis"].hgetall("ocr:loadtests")).values()]
+    if any(m.get("status") == "running" and name in m.get("images", []) for m in runs):
+        raise HTTPException(status_code=409, detail=f"{name} sedang dipakai run yang berjalan")
+    path.unlink(missing_ok=True)
+    log.info("file uji dihapus: %s", name)
+    return {"images": list_images()}
 
 
 @router.get("")

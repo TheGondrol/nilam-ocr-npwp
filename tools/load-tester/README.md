@@ -22,8 +22,15 @@ memanggil `http://guardrails:8031` langsung, dan melapor ke tracker lewat
 `http://host.docker.internal:<PORT>`. Container diberi nama `nilam-lt-<run>` dan dihapus setelah
 selesai. Env backend tracker yang terkait: `K6_IMAGE`, `K6_NETWORK`, `K6_TARGET`, `K6_TRACKER`.
 
-Gambar contoh diambil dari `images/` (tidak ikut repo; taruh beberapa foto NPWP di sana, dipakai
-bergiliran). Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
+File uji diambil dari `images/` (tidak ikut repo) dan dipakai bergiliran. Isi folder itu bisa
+dikelola dari sidebar menu **Load testing**: unggah (klik atau seret, JPG/PNG/PDF, maks. 20 MB per
+file), lihat, hapus, dan centang file mana yang dipakai run berikutnya. Nama file dirapikan
+(karakter selain huruf, angka, `._-` jadi `_`) dan tidak pernah menimpa file yang sudah ada
+(diberi akhiran `-1`, `-2`, ...). File yang dipakai run yang sedang berjalan tidak bisa dihapus.
+File di atas 2,5 MB (default `MAX_UPLOAD_BYTES` service) ditandai karena akan dijawab 413; itu
+sengaja dibiarkan bisa diunggah untuk menguji jalur penolakan. Endpoint-nya:
+`POST /api/loadtest/images` (multipart, field `files`), `GET` dan `DELETE /api/loadtest/images/{nama}`.
+Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
 
 ## Menjalankan manual
 
