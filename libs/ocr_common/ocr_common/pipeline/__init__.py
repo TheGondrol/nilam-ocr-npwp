@@ -9,11 +9,15 @@ Modules:
   outbox          transactional outbox: messages written with the result, delivered by OutboxRelay
   outcomes        the orchestrator's own outcome row (ORCHESTRATION_OUTCOME_TABLE)
   outbox_status   schema and handler behind each service's GET /v1/<stage>/outbox
-  results         reading an earlier stage's stored result (hand-off by reference)
+  results         reading an earlier stage's stored result (hand-off by reference; SQL in results_sql)
   reaper          running again the jobs a dead process left PROCESSING
   schemas         Pydantic models of the payloads passed between stages and to the orchestrator
   factory         build_* helpers that wire all of the above from settings
   tables/database SQLAlchemy tables and engine (need the `db` extra)
+
+Nothing imported here may import SQLAlchemy at module level: guardrails uses this package without the
+`db` extra. The SQL implementations (*_sql modules, database, tables) are imported lazily by the
+factory; tests/test_imports.py enforces it.
 """
 
 from ocr_common.pipeline.callbacks import (
@@ -43,7 +47,7 @@ from ocr_common.pipeline.repository import (
     StaleJob,
     build_job_repository,
 )
-from ocr_common.pipeline.results import SqlStageResults, StageResults, load_upstream
+from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.pipeline.runner import CANCEL_GRACE_SECONDS, BackgroundRunner
 from ocr_common.pipeline.stage import (
     STAGE_OCR,
@@ -74,7 +78,6 @@ __all__ = [
     "OrchestrationCallback",
     "OutboxMessage",
     "OutboxRelay",
-    "SqlStageResults",
     "StaleJob",
     "StaleJobReaper",
     "StageResults",

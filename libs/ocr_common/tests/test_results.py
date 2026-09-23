@@ -3,7 +3,8 @@ import pytest
 from ocr_common.errors import ServiceError
 from ocr_common.pipeline import STAGE_OCR, database
 from ocr_common.pipeline.repository_sql import SqlJobRepository
-from ocr_common.pipeline.results import SqlStageResults, load_upstream
+from ocr_common.pipeline.results import load_upstream
+from ocr_common.pipeline.results_sql import SqlStageResults
 
 RID = "REQ_ref"
 OCR = {"engine": "mock", "blocks": [{"text": "NPWP : 12.345.678.9-012.345", "confidence": 0.9, "page": 0}]}

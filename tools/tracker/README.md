@@ -55,7 +55,7 @@ Yang berubah otomatis mengikuti saklar itu:
 
 | | GKE | lokal |
 |---|---|---|
-| service | pod `nilam-ocr-npwp`, lewat `kubectl port-forward` ke 9030-9033 | container di 127.0.0.1:803x |
+| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service, chart 0.2.0) di 9030-9033; release chart lama satu pod: set `GKE_WORKLOAD=deploy/nilam-ocr-npwp` | container di 127.0.0.1:803x |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
 | baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5434}` |
@@ -83,8 +83,10 @@ Aturnya lewat `TRACKER_POLL_INTERVAL` (default 2 detik) dan
     tools/tracker/run.sh --stack    # (lokal saja) nyalakan Redis, keempat container, dan Postgres dulu
     tools/tracker/stop.sh           # matikan yang jalan di latar, termasuk port-forward
 
-Di mode GKE `run.sh` membuka port-forward sendiri dan menutupnya saat berhenti;
-log-nya di `tools/tracker/.port-forward.log`.
+Di mode GKE `run.sh` membuka empat port-forward sendiri (satu per Service) dan menutupnya saat
+berhenti; log-nya di `tools/tracker/.port-forward.log`. Callback dari pod tetap tidak sampai ke
+laptop, jadi status tahap diambil dengan polling dan panel outbox hanya terisi kalau
+`TRACKER_DATABASE_URL` menunjuk database dev.
 
     # manual, kalau perlu:
     pip install -r backend/requirements.txt

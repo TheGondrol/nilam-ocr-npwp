@@ -54,23 +54,37 @@ fi
 docker exec nilam-ocr-redis redis-cli ping >/dev/null 2>&1 \
   || die "Redis tidak jalan. Jalankan dengan --stack, atau: docker start nilam-ocr-redis"
 
-PF_PID=""
+PF_PIDS=()
 if [[ "$TRACKER_TARGET" == "gke" ]]; then
   NS="${GKE_NAMESPACE:-nilam-ocr-npwp}"
-  WORKLOAD="${GKE_WORKLOAD:-deploy/nilam-ocr-npwp}"
+  RELEASE="${GKE_RELEASE:-nilam-ocr-npwp}"
   command -v kubectl >/dev/null 2>&1 || die "kubectl tidak ada di PATH"
-  kubectl -n "$NS" get "$WORKLOAD" >/dev/null 2>&1 \
-    || die "tidak bisa membaca $WORKLOAD di namespace $NS. Jalankan: gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2"
+  kubectl -n "$NS" get svc >/dev/null 2>&1 \
+    || die "tidak bisa membaca namespace $NS. Jalankan: gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2"
 
-  say "target GKE: $NS/$WORKLOAD -> 127.0.0.1:9030-9033 (port-forward)"
-  kubectl -n "$NS" port-forward "$WORKLOAD" 9030:8030 9031:8031 9032:8032 9033:8033 >"$HERE/.port-forward.log" 2>&1 &
-  PF_PID=$!
+  : >"$HERE/.port-forward.log"
+  if [[ -n "${GKE_WORKLOAD:-}" ]]; then
+    # Chart lama (0.1.0): satu pod berisi empat container, satu port-forward untuk semuanya.
+    say "target GKE: $NS/$GKE_WORKLOAD -> 127.0.0.1:9030-9033 (satu port-forward)"
+    kubectl -n "$NS" port-forward "$GKE_WORKLOAD" 9030:8030 9031:8031 9032:8032 9033:8033 >>"$HERE/.port-forward.log" 2>&1 &
+    PF_PIDS+=($!)
+  else
+    # Chart 0.2.0: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
+    say "target GKE: $NS/svc/$RELEASE-{ekstraksi,guardrails,structuring,scoring} -> 127.0.0.1:9030-9033"
+    for pair in "ekstraksi|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033"; do
+      svc="${pair%%|*}"; ports="${pair##*|}"
+      kubectl -n "$NS" get "svc/$RELEASE-$svc" >/dev/null 2>&1 \
+        || die "svc/$RELEASE-$svc tidak ada di $NS. Release masih chart lama? Set GKE_WORKLOAD=deploy/$RELEASE di .env"
+      kubectl -n "$NS" port-forward "svc/$RELEASE-$svc" "$ports" >>"$HERE/.port-forward.log" 2>&1 &
+      PF_PIDS+=($!)
+    done
+  fi
 
-  for _ in $(seq 1 20); do
-    up "$EKSTRAKSI_URL/health" && break
+  for _ in $(seq 1 30); do
+    up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" && break
     sleep 0.5
   done
-  up "$EKSTRAKSI_URL/health" \
+  up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" \
     || die "port-forward tidak siap; lihat $HERE/.port-forward.log"
   say "hasil tiap tahap diambil dengan polling (TRACKER_POLL=${TRACKER_POLL:-0}); callback pod tetap ke Orkestrasi di cluster"
 else
@@ -92,7 +106,7 @@ python -c "import fastapi, httpx, redis" 2>/dev/null \
 # --- jalankan ------------------------------------------------------------------
 cleanup() {
   say "mematikan tracker"
-  kill "${BACKEND_PID:-}" "${FRONTEND_PID:-}" "${PF_PID:-}" 2>/dev/null || true
+  kill "${BACKEND_PID:-}" "${FRONTEND_PID:-}" "${PF_PIDS[@]}" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM

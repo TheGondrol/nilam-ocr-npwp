@@ -3,7 +3,10 @@
 Every `get_*` here is what the routes take through `Depends(...)` and what tests replace through
 `app.dependency_overrides[...]`. Nothing else in the service builds these objects."""
 
+import logging
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from ocr_common.pipeline import (
     STAGE_STRUCTURING,
@@ -27,11 +30,43 @@ from app.ml.rule_based import RuleBasedNpwpStructurer
 from app.services.job_service import StructuringJobService
 from app.services.structuring_service import StructuringService
 
+logger = logging.getLogger(__name__)
+
 DB_TABLE_PREFIX = "structuring"
+
+# The vendored rules read their reference-data paths from these environment variables (the ML team's
+# own convention, so a mounted volume + env var works unchanged). Settings may also come from `.env`,
+# which pydantic does not export, so the values are pushed to the environment here, once, before the
+# rules are first used.
+REFERENCE_DATA_ENV = {
+    "wilayah_codes_path": "WILAYAH_CODES_PATH",
+    "kpp_codes_path": "KPP_CODES_PATH",
+    "name_master_path": "NAME_MASTER_PATH",
+    "npwp_name_list_path": "NPWP_NAME_LIST_PATH",
+}
+
+
+def _build_npwp_rules(settings: Settings) -> NpwpRulesStructurer:
+    for attribute, variable in REFERENCE_DATA_ENV.items():
+        value = getattr(settings, attribute)
+        if value:
+            os.environ[variable] = value
+
+    from app.vendor.npwp_rules import kpp_codes, name_master, wilayah_codes
+
+    for label, path in (
+        ("kode_wilayah.json", wilayah_codes.default_data_path()),
+        ("kpp_codes.json", kpp_codes.default_data_path()),
+        ("name_lnmast.xlsx", name_master.default_master_path()),
+    ):
+        state = "found" if Path(path).is_file() else "MISSING (the check it feeds gives no signal)"
+        logger.info("structuring reference data %s: %s at %s", label, state, path)
+    return NpwpRulesStructurer()
+
 
 # STRUCTURING_BACKEND -> how to build it. Add a backend here and, if it needs settings, in config.py.
 STRUCTURER_BACKENDS: dict[str, Factory[Structurer]] = {
-    "npwp_rules": lambda settings: NpwpRulesStructurer(page_guardrails=settings.structuring_page_guardrails),
+    "npwp_rules": _build_npwp_rules,
     "rule_based": lambda settings: RuleBasedNpwpStructurer(),
 }
 
