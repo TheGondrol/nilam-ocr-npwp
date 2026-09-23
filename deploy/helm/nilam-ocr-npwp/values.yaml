@@ -1,8 +1,9 @@
 nameOverride: ""
 fullnameOverride: ""
 
-replicaCount: 1
 revisionHistoryLimit: 5
+# Default untuk semua service; services.<nama>.terminationGracePeriodSeconds menimpanya.
+# 45 = drain job 30 dtk (PIPELINE_DRAIN_TIMEOUT_SECONDS) + preStop 5 dtk + cadangan.
 terminationGracePeriodSeconds: 45
 
 environment: production
@@ -17,8 +18,24 @@ imagePullSecrets: []
 existingSecret: nilam-ocr-npwp-secrets
 secretKeys:
   apiKey: API_KEY
+  # Opsional: key lain yang juga diterima (dipisah koma) selama rotasi; lihat README "API key".
+  apiKeys: API_KEYS
   databaseUrl: DATABASE_URL
   orchestrationApiKey: ORCHESTRATION_API_KEY
+
+# Buat Secret di atas dari GCP Secret Manager lewat External Secrets Operator.
+# Mati = Secret dibuat manual (lihat README). Butuh CRD ESO dan ClusterSecretStore di cluster.
+externalSecret:
+  enabled: false
+  apiVersion: external-secrets.io/v1
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: gcp-secret-manager
+  remoteKeys:
+    apiKey: nilam-ocr-npwp-api-key
+    databaseUrl: nilam-ocr-npwp-database-url
+    orchestrationApiKey: nilam-ocr-npwp-orchestration-api-key
 
 # Callback tahap ke Orkestrasi. Kosong = tidak ada callback yang dikirim maupun diantrekan;
 # hasil sampai ke Orkestrasi lewat tabelnya sendiri (ORCHESTRATION_OUTCOME_TABLE di commonEnv)
@@ -33,6 +50,11 @@ commonEnv:
   # Kosong = hanya host yang resolve ke alamat publik, jadi MinIO di jaringan internal ditolak: isi sebelum deploy.
   FILE_URL_ALLOWED_HOSTS: ""
 
+# Tiap service = satu Deployment + satu Service `<release>-<nama>` + satu ConfigMap.
+#   entrypoint : dipanggil dari luar release (Orkestrasi). Ikut di Service gabungan `<release>`
+#                dan NetworkPolicy-nya menerima namespace di networkPolicy.clientNamespaces.
+#   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
+#   upstreams  : service lain yang dipanggil; chart mengisi <NAMA>_SERVICE_URL dan NetworkPolicy dari sini.
 services:
   guardrails:
     enabled: true
@@ -40,13 +62,23 @@ services:
       repository: ms-bribrain-nilam-ocr-npwp-guardrails
       tag: ""
     port: 8031
+    entrypoint: true
     pipeline: false
     upstreams: [ekstraksi, structuring, scoring]
+    replicaCount: 1
+    # Satu-satunya service CPU-bound (torch). Nyalakan di produksi; replicaCount diabaikan saat aktif.
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
     startupFailureThreshold: 30
+    terminationGracePeriodSeconds: 30
     env:
       GUARDRAILS_BACKEND: efficientnet
       GUARDRAILS_MODEL_PATH: weights/best_model.pt
       GUARDRAILS_DEVICE: cpu
+      # Samakan dengan limits.cpu; tanpa ini torch membuat thread sebanyak core node.
       GUARDRAILS_TORCH_THREADS: "2"
       # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
       PIPELINE_WAIT_SECONDS: "15"
@@ -64,8 +96,10 @@ services:
       repository: ms-bribrain-nilam-ocr-npwp-ekstraksi
       tag: ""
     port: 8030
+    entrypoint: true
     pipeline: true
     upstreams: [guardrails, structuring, scoring]
+    replicaCount: 1
     startupFailureThreshold: 15
     env:
       EKSTRAKSI_BACKEND: paddle
@@ -86,8 +120,10 @@ services:
       repository: ms-bribrain-nilam-ocr-npwp-structuring
       tag: ""
     port: 8032
+    entrypoint: false
     pipeline: true
     upstreams: [scoring]
+    replicaCount: 1
     startupFailureThreshold: 15
     env:
       STRUCTURING_BACKEND: npwp_rules
@@ -106,8 +142,10 @@ services:
       repository: ms-bribrain-nilam-ocr-npwp-scoring
       tag: ""
     port: 8033
+    entrypoint: false
     pipeline: true
     upstreams: []
+    replicaCount: 1
     startupFailureThreshold: 15
     env:
       SCORING_BACKEND: heuristic
@@ -125,10 +163,29 @@ services:
 service:
   type: ClusterIP
   annotations: {}
+  # Service gabungan bernama `<release>` yang membuka port semua service ber-entrypoint.
+  # Ini alamat yang dipublikasikan ke Orkestrasi (integration.md); internal pipeline memakai
+  # Service per komponen.
+  entrypoint:
+    enabled: true
+
+# Ingress default-deny untuk semua pod release; tiap service hanya menerima dari pemanggilnya
+# (dihitung dari upstreams). Service ber-entrypoint juga menerima dari clientNamespaces dan dari
+# semua pod release (callback mode uji coba). Egress belum dibatasi. Cluster tanpa enforcement
+# (GKE tanpa Dataplane V2 / Calico) mengabaikan policy ini diam-diam.
+networkPolicy:
+  enabled: true
+  clientNamespaces: []
+
+# maxUnavailable, bukan minAvailable: minAvailable 1 menahan upgrade node saat replika 1.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
 
 serviceAccount:
   create: true
   name: ""
+  # Workload Identity: iam.gke.io/gcp-service-account: <gsa>@<project>.iam.gserviceaccount.com
   annotations: {}
 
 podAnnotations: {}

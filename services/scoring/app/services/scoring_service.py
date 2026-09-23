@@ -1,6 +1,6 @@
 from typing import Any
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import BadRequest
 
 from app.config import Settings
 
@@ -16,12 +16,11 @@ class ScoringService:
 
     def score(self, document_type: str, fields: dict[str, dict]) -> dict[str, Any]:
         if document_type not in self._scorer.supported_document_types:
-            raise ServiceError(
-                400,
+            raise BadRequest(
                 f"Unsupported document_type: {document_type}. Supported: {list(self._scorer.supported_document_types)}",
             )
         if not fields:
-            raise ServiceError(400, "No fields to score")
+            raise BadRequest("No fields to score")
 
         result = self._scorer.score(fields)
         score = round(min(max(result["score"], 0.0), 1.0), 4)

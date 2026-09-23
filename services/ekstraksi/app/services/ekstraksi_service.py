@@ -1,17 +1,20 @@
 import time
-from typing import Any
 
 from ocr_common.image_validation import validate_image
+from ocr_common.types import OcrResult
 
 from app.config import Settings
+from app.ml.base import OcrEngine
 
 
 class EkstraksiService:
-    def __init__(self, engine, settings: Settings):
+    """Validates the upload, runs the OCR engine, and shapes the stage result (`OcrResult`)."""
+
+    def __init__(self, engine: OcrEngine, settings: Settings):
         self._engine = engine
         self._settings = settings
 
-    async def extract(self, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
+    async def extract(self, filename: str, content_type: str | None, content: bytes) -> OcrResult:
         validate_image(content_type, content, self._settings)
 
         started = time.perf_counter()

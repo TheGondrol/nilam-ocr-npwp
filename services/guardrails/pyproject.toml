@@ -7,10 +7,3 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.ty.environment]
 root = ["."]
 extra-paths = [".", "../../libs/ocr_common"]
-
-[tool.pyright]
-extraPaths = [".", "../../libs/ocr_common"]
-
-[tool.pyrefly]
-search-path = [".", "../../libs/ocr_common"]
-

@@ -1,12 +1,22 @@
+"""HTTP client to a model service or another stage, mapping transport failures and error statuses to
+`ServiceError`s, and forwarding the current `X-Request-ID`.
+"""
+
 import json
 from typing import Any
 
 import httpx
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError, ServiceError, UpstreamTimeout, UpstreamUnavailable
+from ocr_common.web.request_id import REQUEST_ID_HEADER, current_request_id
 
 
 class RemoteModelClient:
+    """One httpx client per remote service. Timeouts become 504, connection errors 503, and an
+    error status becomes 500 with the remote's message, or the same 4xx when
+    `passthrough_client_errors` is set (a stage relaying another stage's validation error).
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -26,6 +36,7 @@ class RemoteModelClient:
         )
 
     async def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        """GET `path` and decode the JSON body."""
         return await self._request("GET", path, params=params)
 
     async def post_multipart(
@@ -39,32 +50,42 @@ class RemoteModelClient:
         data: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
     ) -> Any:
+        """POST one file as multipart form data, with optional form fields and query params."""
         files = {field: (filename, content, content_type)}
         return await self._request("POST", path, files=files, data=data, params=params)
 
+    async def post_form(self, path: str, *, data: dict[str, Any], params: dict[str, Any] | None = None) -> Any:
+        """A form POST without a file, e.g. a job submitted with `file_url` instead of `file`."""
+        return await self._request("POST", path, data=data, params=params)
+
     async def post_json(self, path: str, payload: Any, *, headers: dict[str, str] | None = None) -> Any:
+        """POST a JSON body and decode the JSON answer."""
         return await self._request("POST", path, json=payload, headers=headers)
 
     async def aclose(self) -> None:
+        """Close the connection pool; call once at shutdown."""
         await self._client.aclose()
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        request_id = current_request_id()
+        if request_id:
+            kwargs["headers"] = {REQUEST_ID_HEADER: request_id, **(kwargs.get("headers") or {})}
         try:
             response = await self._client.request(method, path, **kwargs)
         except (httpx.ReadTimeout, httpx.WriteTimeout) as exc:
-            raise ServiceError(504, f"{self.name} timed out after {self.timeout}s") from exc
+            raise UpstreamTimeout(f"{self.name} timed out after {self.timeout}s") from exc
         except httpx.RequestError as exc:
-            raise ServiceError(503, f"{self.name} is unavailable") from exc
+            raise UpstreamUnavailable(f"{self.name} is unavailable") from exc
 
         if response.status_code >= 400:
             detail = _error_detail(response)
             if self._passthrough and 400 <= response.status_code < 500:
                 raise ServiceError(response.status_code, detail)
-            raise ServiceError(500, f"{self.name} error ({response.status_code}): {detail}")
+            raise InternalError(f"{self.name} error ({response.status_code}): {detail}")
         try:
             return response.json()
         except ValueError as exc:
-            raise ServiceError(500, f"{self.name} returned an invalid response") from exc
+            raise InternalError(f"{self.name} returned an invalid response") from exc
 
 
 def _error_detail(response: httpx.Response) -> str:

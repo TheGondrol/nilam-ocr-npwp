@@ -28,6 +28,7 @@ class SqlOutbox:
         self.pending = asyncio.Event()
 
     async def add(self, conn: AsyncConnection, request_id: str, stage: str, messages: Sequence[OutboxMessage]) -> None:
+        """Insert `messages` for `request_id` and `stage` using the caller's connection."""
         if not messages:
             return
         now = datetime.now(UTC)
@@ -50,9 +51,13 @@ class SqlOutbox:
         )
 
     def wake(self) -> None:
+        """Set the event the relay of this process waits on."""
         self.pending.set()
 
     async def claim(self, stage: str, limit: int, lease_seconds: float) -> list[Row[Any]]:
+        """Lease up to `limit` due messages of `stage` for `lease_seconds` (`FOR UPDATE SKIP LOCKED`),
+        counting the attempt; returns their rows.
+        """
         table = self.table
         now = datetime.now(UTC)
         async with get_engine(self._url).begin() as conn:
@@ -81,10 +86,12 @@ class SqlOutbox:
             return list(rows.all())
 
     async def done(self, message_id: int) -> None:
+        """Delete a delivered message."""
         async with get_engine(self._url).begin() as conn:
             await conn.execute(self.table.delete().where(self.table.c.id == message_id))
 
     async def retry_later(self, message_id: int, delay_seconds: float, error: str) -> None:
+        """Schedule a failed message again after `delay_seconds`, recording the error."""
         now = datetime.now(UTC)
         async with get_engine(self._url).begin() as conn:
             await conn.execute(
@@ -106,7 +113,26 @@ class SqlOutbox:
             if replacement is not None:
                 await self.add(conn, row.request_id, row.stage, [replacement])
 
+    async def release(self, stage: str, request_id: str | None = None) -> int:
+        """Puts the dead letters of `stage` (of one request, or all of them) back in the queue, due now,
+        and wakes the relay. Returns how many were released."""
+        now = datetime.now(UTC)
+        table = self.table
+        statement = (
+            update(table)
+            .where(table.c.stage == stage, table.c.failed_at.is_not(None))
+            .values(failed_at=None, next_attempt_at=now, updated_at=now)
+        )
+        if request_id is not None:
+            statement = statement.where(table.c.request_id == request_id)
+        async with get_engine(self._url).begin() as conn:
+            released = (await conn.execute(statement)).rowcount
+        if released:
+            self.wake()
+        return released
+
     async def stats(self, stage: str) -> OutboxStats:
+        """Count the pending, retrying and dead messages of `stage` and the age of the oldest pending one."""
         table = self.table
         alive = table.c.failed_at.is_(None)
         async with get_engine(self._url).connect() as conn:

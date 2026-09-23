@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from ocr_common.types import FieldConfidences
+
 logger = logging.getLogger(__name__)
 
 FEATURES = (
@@ -104,7 +106,7 @@ class TrustModel:
             ],
         }
 
-    def predict(self, payload: dict[str, Any]) -> dict[str, float | None]:
+    def predict(self, payload: dict[str, Any]) -> FieldConfidences:
         rows = self.feature_rows(payload)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="X does not have valid feature names")

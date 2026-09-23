@@ -13,9 +13,11 @@ from ocr_common.pipeline import (
     NextStageClient,
     OutboxRelay,
     StagePipeline,
+    StaleJobReaper,
     build_next_stage_client,
     build_outbox_relay,
     build_stage_pipeline,
+    build_stale_job_reaper,
 )
 from ocr_common.registry import Factory, build_backend
 
@@ -120,16 +122,15 @@ def get_ekstraksi_service() -> EkstraksiService:
     return EkstraksiService(get_ocr_engine(), get_settings())
 
 
-def get_job_service(
-    ekstraksi: EkstraksiService = Depends(get_ekstraksi_service),
-    settings: Settings = Depends(get_settings),
-) -> EkstraksiJobService:
+def get_job_service() -> EkstraksiJobService:
+    settings = get_settings()
     return EkstraksiJobService(
         get_pipeline(),
-        ekstraksi,
+        get_ekstraksi_service(),
         settings.max_upload_bytes,
         url_policy=settings.file_url_policy,
         simulate_delay=settings.is_local,
+        handoff_by_reference=settings.pipeline_handoff_by_reference,
     )
 
 
@@ -139,3 +140,8 @@ def get_ocr_service(
     stages: StageClients = Depends(get_stage_clients),
 ) -> OcrService:
     return OcrService(repository, ekstraksi, stages)
+
+
+@lru_cache
+def get_reaper() -> StaleJobReaper | None:
+    return build_stale_job_reaper(get_settings(), get_pipeline(), get_job_service().resume)

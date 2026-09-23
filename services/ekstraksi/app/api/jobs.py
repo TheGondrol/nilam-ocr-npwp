@@ -3,12 +3,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 
-from ocr_common.errors import ServiceError
 from ocr_common.pipeline import StagePipeline
 from ocr_common.pipeline.outbox_status import (
+    OUTBOX_RELEASE_DESCRIPTION,
+    OUTBOX_RELEASE_SUMMARY,
     OUTBOX_STATUS_DESCRIPTION,
     OUTBOX_STATUS_SUMMARY,
+    OutboxReleaseResponse,
     OutboxStatusResponse,
+    outbox_release,
+    outbox_release_responses,
     outbox_status,
     outbox_status_responses,
 )
@@ -204,10 +208,7 @@ async def submit_job(
     },
 )
 async def get_job(request_id: str, service: EkstraksiJobService = Depends(get_job_service)):
-    try:
-        data = await service.get(request_id)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = await service.get(request_id)
     return envelope(200, "Success", data, request_id)
 
 
@@ -221,3 +222,18 @@ async def get_job(request_id: str, service: EkstraksiJobService = Depends(get_jo
 )
 async def get_outbox_status(request: Request, pipeline: StagePipeline = Depends(get_pipeline)):
     return envelope(200, "Success", await outbox_status(pipeline), get_request_id(request))
+
+
+@router.post(
+    "/v1/ekstraksi/outbox/release",
+    response_model=OutboxReleaseResponse,
+    operation_id="releaseOcrOutbox",
+    summary=OUTBOX_RELEASE_SUMMARY,
+    description=OUTBOX_RELEASE_DESCRIPTION,
+    responses=outbox_release_responses("OCR"),
+)
+async def release_outbox(
+    request: Request, request_id: str | None = None, pipeline: StagePipeline = Depends(get_pipeline)
+):
+    data = await outbox_release(pipeline, request_id)
+    return envelope(200, "Success", data, request_id or get_request_id(request))

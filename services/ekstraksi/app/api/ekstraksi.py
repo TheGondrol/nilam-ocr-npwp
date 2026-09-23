@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Request, UploadFile
 
-from ocr_common.errors import ServiceError
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import get_request_id
@@ -65,8 +64,5 @@ async def extract(
     service: EkstraksiService = Depends(get_ekstraksi_service),
 ):
     content, filename, content_type = await read_image(request, file, file_url)
-    try:
-        data = await service.extract(filename, content_type, content)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = await service.extract(filename, content_type, content)
     return envelope(200, "Success", data, get_request_id(request))

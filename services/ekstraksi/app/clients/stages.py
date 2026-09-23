@@ -2,14 +2,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError
 
 from app.config import Settings
 
 
 def _data(body: Any, name: str) -> dict[str, Any]:
     if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
-        raise ServiceError(500, f"{name} returned an unexpected response")
+        raise InternalError(f"{name} returned an unexpected response")
     return body["data"]
 
 

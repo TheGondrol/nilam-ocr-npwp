@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from ocr_common.types import FieldConfidences
+
 from app.ml.trust_model import TrustModel
 
 NAME_FIELDS = ("nama", "nama_badan")
@@ -14,7 +16,7 @@ class ConfidenceService:
     def __init__(self, model: TrustModel):
         self._model = model
 
-    def predict(self, payload: dict[str, Any]) -> dict[str, float | None]:
+    def predict(self, payload: dict[str, Any]) -> FieldConfidences:
         return self._model.predict(payload)
 
     @staticmethod

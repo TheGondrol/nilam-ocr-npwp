@@ -6,13 +6,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ocr_common.errors import Conflict
 from ocr_common.pipeline.outbox_sql import SqlOutbox
 from ocr_common.pipeline.stage import StagePipeline
 from ocr_common.web.envelope import envelope
-from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, Stage, SuccessEnvelope, success_examples
+from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, Stage, SuccessEnvelope, error, success_examples
 
 
 class OutboxStatus(BaseModel):
+    """The `data` of `GET /v1/<stage>/outbox`."""
+
     enabled: bool = Field(
         ..., description="false when `PIPELINE_OUTBOX` is off: callbacks are sent directly and nothing is queued"
     )
@@ -41,7 +44,25 @@ class OutboxStatus(BaseModel):
 
 
 class OutboxStatusResponse(SuccessEnvelope):
+    """Envelope of `GET /v1/<stage>/outbox`."""
+
     data: OutboxStatus
+
+
+class OutboxRelease(BaseModel):
+    """The `data` of `POST /v1/<stage>/outbox/release`."""
+
+    stage: Stage = Field(..., description="The stage whose dead letters were released", examples=["OCR"])
+    request_id: str | None = Field(
+        None, description="Only this request's dead letters were released; null = every dead letter of the stage"
+    )
+    released: int = Field(..., description="Dead letters put back in the queue, due immediately", examples=[1])
+
+
+class OutboxReleaseResponse(SuccessEnvelope):
+    """Envelope of `POST /v1/<stage>/outbox/release`."""
+
+    data: OutboxRelease
 
 
 OUTBOX_STATUS_SUMMARY = "Backlog of this stage's undelivered callbacks and hand-offs"
@@ -77,6 +98,51 @@ def outbox_status_responses(stage: str) -> dict[int | str, dict[str, Any]]:
         ),
         401: UNAUTHORIZED,
     }
+
+
+OUTBOX_RELEASE_SUMMARY = "Send this stage's dead letters again"
+OUTBOX_RELEASE_DESCRIPTION = (
+    "Puts the dead letters of this stage back in the outbox queue, due immediately, so the relay delivers "
+    "them again: use it after the receiver was fixed (for example the orchestrator's callback contract, "
+    "or a next stage that was answering 4xx). Optional query `request_id` limits it to one request. "
+    "A message that fails again goes through the same retry and dead-letter rules. "
+    "`409` when `PIPELINE_OUTBOX` is off on this service."
+)
+
+
+def outbox_release_responses(stage: str) -> dict[int | str, dict[str, Any]]:
+    """`responses=` for the release route."""
+    return {
+        200: success_examples(
+            "Dead letters released",
+            released=(
+                "One request",
+                envelope(
+                    200,
+                    "Success",
+                    {"stage": stage, "request_id": REQUEST_ID_EXAMPLE, "released": 1},
+                    REQUEST_ID_EXAMPLE,
+                ),
+            ),
+            nothing=(
+                "Nothing to release",
+                envelope(200, "Success", {"stage": stage, "request_id": None, "released": 0}, REQUEST_ID_EXAMPLE),
+            ),
+        ),
+        401: UNAUTHORIZED,
+        409: error(409, "The outbox is off on this service", "PIPELINE_OUTBOX is off: there is no outbox to release"),
+        422: error(
+            422, "Validation Error", "query.request_id: Input should be a valid string", errors="VALIDATION_ERROR"
+        ),
+    }
+
+
+async def outbox_release(pipeline: StagePipeline, request_id: str | None = None) -> dict[str, Any]:
+    """The `data` of the release response; 409 when the service runs without an outbox."""
+    if not isinstance(pipeline.outbox, SqlOutbox):
+        raise Conflict("PIPELINE_OUTBOX is off: there is no outbox to release")
+    released = await pipeline.outbox.release(pipeline.stage, request_id)
+    return {"stage": pipeline.stage, "request_id": request_id, "released": released}
 
 
 async def outbox_status(pipeline: StagePipeline) -> dict[str, Any]:

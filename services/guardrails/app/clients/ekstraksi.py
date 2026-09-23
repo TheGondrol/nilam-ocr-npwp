@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError
 from ocr_common.pipeline import with_retry
 
 from app.config import Settings
@@ -24,20 +24,26 @@ class EkstraksiJobClient:
         filename: str,
         content_type: str | None,
         content: bytes,
+        *,
+        file_url: str | None = None,
     ) -> dict[str, Any]:
-        body = await with_retry(
-            lambda: self._client.post_multipart(
+        """Hand the document to the OCR stage. When the request came as `file_url`, that URL is forwarded
+        instead of the bytes: the OCR service downloads it itself, and a job left behind by a dead process
+        can be run again from the URL stored with the job."""
+        fields = {"request_id": request_id, "document_type": document_type, "guardrails": json.dumps(guardrails)}
+        if file_url:
+            call = lambda: self._client.post_form(EKSTRAKSI_JOBS_PATH, data={**fields, "file_url": file_url})  # noqa: E731
+        else:
+            call = lambda: self._client.post_multipart(  # noqa: E731
                 EKSTRAKSI_JOBS_PATH,
                 filename=filename or "upload",
                 content=content,
                 content_type=content_type or "application/octet-stream",
-                data={"request_id": request_id, "document_type": document_type, "guardrails": json.dumps(guardrails)},
-            ),
-            self._attempts,
-            self._delay,
-        )
+                data=fields,
+            )
+        body = await with_retry(call, self._attempts, self._delay)
         if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
-            raise ServiceError(500, f"{self._client.name} returned an unexpected response")
+            raise InternalError(f"{self._client.name} returned an unexpected response")
         return body["data"]
 
     async def aclose(self) -> None:

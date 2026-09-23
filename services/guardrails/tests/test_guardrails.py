@@ -206,7 +206,7 @@ def test_http_request_id_is_required(client, auth):
     assert body["message"] == "body.request_id: Field required"
 
 
-def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
+def test_http_file_url_is_fetched_by_service_and_forwarded_as_url(client, auth, monkeypatch, stub_ekstraksi):
     async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return _jpeg(), "npwp.jpg", "image/jpeg"
@@ -219,6 +219,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["job_status"] == "completed"
+    assert stub_ekstraksi.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
 
 
 def test_unsupported_content_type_returns_400(client, auth):

@@ -32,13 +32,16 @@ class GuardrailsJobService:
         content: bytes,
         *,
         received_at: float | None = None,
+        file_url: str | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic() if received_at is None else received_at
         report = await self._guardrails.check(filename, content_type, content)
         if not report["passed"]:
             return {**report, "job": None, "pipeline": None, "result": None}
 
-        job = await self._ekstraksi.submit(request_id, document_type, report, filename, content_type, content)
+        job = await self._ekstraksi.submit(
+            request_id, document_type, report, filename, content_type, content, file_url=file_url
+        )
         if self._waiter is None or self._wait_seconds <= 0:
             return {**report, "job": job, "pipeline": None, "result": None}
 

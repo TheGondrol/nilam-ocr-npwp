@@ -19,12 +19,14 @@ def extract_body(
     errors: str | None = None,
     job_status: str | None = None,
     guardrails: int | None = None,
+    params: Any = None,
 ) -> dict[str, Any]:
     return {
         **envelope(status_code, message, data, request_id, errors=errors),
         "document_type": document_type,
         "job_status": job_status,
         "guardrails": guardrails,
+        "params": params,
     }
 
 
@@ -40,6 +42,7 @@ def extract_response(
             guardrails=0,
             request_id=request_id,
             document_type=document_type,
+            params=params,
         )
         return 400, body
     pipeline = outcome["pipeline"] or {}
@@ -53,6 +56,7 @@ def extract_response(
             guardrails=1,
             request_id=request_id,
             document_type=document_type,
+            params=params,
         )
     if pipeline.get("status") == STATUS_FAILED:
         stage = pipeline["stage"]
@@ -65,6 +69,7 @@ def extract_response(
             guardrails=1,
             request_id=request_id,
             document_type=document_type,
+            params=params,
         )
     return 202, extract_body(
         202,
@@ -72,4 +77,5 @@ def extract_response(
         job_status="processing",
         request_id=request_id,
         document_type=document_type,
+        params=params,
     )

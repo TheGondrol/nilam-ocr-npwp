@@ -9,6 +9,8 @@ Modules:
   outbox          transactional outbox: messages written with the result, delivered by OutboxRelay
   outcomes        the orchestrator's own outcome row (ORCHESTRATION_OUTCOME_TABLE)
   outbox_status   schema and handler behind each service's GET /v1/<stage>/outbox
+  results         reading an earlier stage's stored result (hand-off by reference)
+  reaper          running again the jobs a dead process left PROCESSING
   schemas         Pydantic models of the payloads passed between stages and to the orchestrator
   factory         build_* helpers that wire all of the above from settings
   tables/database SQLAlchemy tables and engine (need the `db` extra)
@@ -25,9 +27,12 @@ from ocr_common.pipeline.factory import (
     build_next_stage_client,
     build_outbox_relay,
     build_stage_pipeline,
+    build_stage_results,
+    build_stale_job_reaper,
     stage_client,
 )
 from ocr_common.pipeline.outbox import OutboxMessage, OutboxRelay, callback_message, handoff_message
+from ocr_common.pipeline.reaper import StaleJobReaper
 from ocr_common.pipeline.repository import (
     STATUS_DONE,
     STATUS_FAILED,
@@ -35,8 +40,10 @@ from ocr_common.pipeline.repository import (
     InMemoryJobRepository,
     JobRecord,
     JobRepository,
+    StaleJob,
     build_job_repository,
 )
+from ocr_common.pipeline.results import SqlStageResults, StageResults, load_upstream
 from ocr_common.pipeline.runner import CANCEL_GRACE_SECONDS, BackgroundRunner
 from ocr_common.pipeline.stage import (
     STAGE_OCR,
@@ -67,6 +74,10 @@ __all__ = [
     "OrchestrationCallback",
     "OutboxMessage",
     "OutboxRelay",
+    "SqlStageResults",
+    "StaleJob",
+    "StaleJobReaper",
+    "StageResults",
     "StageCallback",
     "StagePipeline",
     "Work",
@@ -74,8 +85,11 @@ __all__ = [
     "build_next_stage_client",
     "build_outbox_relay",
     "build_stage_pipeline",
+    "build_stage_results",
+    "build_stale_job_reaper",
     "callback_message",
     "handoff_message",
+    "load_upstream",
     "stage_client",
     "with_retry",
 ]

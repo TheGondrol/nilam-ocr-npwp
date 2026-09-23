@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import BadRequest, Conflict, NotFound, ServiceError
 from ocr_common.npwp import DOCUMENT_TYPE, NPWP_FIELDS
 
 from app.clients.stages import StageClients
@@ -30,9 +30,9 @@ class OcrService:
     ) -> tuple[dict[str, Any], float]:
         record = await self._repository.get(request_id)
         if record is None:
-            raise ServiceError(400, f"Unknown request_id: {request_id}. Call /v1/generate-request-id first.")
+            raise BadRequest(f"Unknown request_id: {request_id}. Call /v1/generate-request-id first.")
         if record["status"] == "completed":
-            raise ServiceError(409, f"request_id {request_id} has already been processed")
+            raise Conflict(f"request_id {request_id} has already been processed")
 
         try:
             data, guardrails = await self._run_pipeline(request_id, filename, content_type, content)
@@ -49,7 +49,7 @@ class OcrService:
         report = await self._stages.guardrails.check(request_id, filename, content_type, content)
         document = report.get("document") or {}
         if document.get("verdict") != "accepted":
-            raise ServiceError(400, _guardrail_message(document))
+            raise BadRequest(_guardrail_message(document))
 
         ocr = await self._ekstraksi.extract(filename, content_type, content)
         lines = [{"text": block["text"], "confidence": block["confidence"]} for block in ocr["blocks"]]
@@ -66,7 +66,7 @@ class OcrService:
     async def get_result(self, request_id: str) -> dict[str, Any]:
         record = await self._repository.get(request_id)
         if record is None:
-            raise ServiceError(404, f"No data found for request_id: {request_id}")
+            raise NotFound(f"No data found for request_id: {request_id}")
 
         return {
             "request_id": request_id,

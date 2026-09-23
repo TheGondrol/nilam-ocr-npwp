@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from ocr_common.errors import ServiceError
 from ocr_common.web.envelope import envelope
 from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, success_examples
@@ -119,8 +118,5 @@ async def score(
     service: ScoringService = Depends(get_scoring_service),
 ):
     fields = {name: value.model_dump() for name, value in body.fields.items()}
-    try:
-        data = service.score(body.document_type, fields)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = service.score(body.document_type, fields)
     return envelope(200, "Success", data, get_request_id(request))

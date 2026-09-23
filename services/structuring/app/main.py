@@ -7,7 +7,7 @@ from ocr_common.web.app import add_stage_callback_webhook, create_app, database_
 
 from app.api import jobs, structuring
 from app.config import get_settings
-from app.dependencies import get_next_stage, get_pipeline, get_relay, get_structurer
+from app.dependencies import get_next_stage, get_pipeline, get_reaper, get_relay, get_structurer
 
 settings = get_settings()
 
@@ -24,7 +24,12 @@ async def lifespan(app: FastAPI):
     relay = get_relay()
     if relay is not None:
         relay.start()
+    reaper = get_reaper()
+    if reaper is not None:
+        reaper.start()
     yield
+    if reaper is not None:
+        await reaper.stop()
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
     await next_stage.aclose()
     if settings.database_url:

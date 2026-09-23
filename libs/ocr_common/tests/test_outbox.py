@@ -392,3 +392,33 @@ async def test_without_callbacks_a_dead_handoff_is_reported_through_the_hook_not
     [row] = await _rows(stage.outbox)
     assert (row["kind"], row["failed_at"] is not None) == (KIND_HANDOFF, True)
     assert failures == [(RID, STAGE_STRUCTURING, "Handoff to STRUCTURING failed: Unknown document_type")]
+
+
+async def test_released_dead_letters_are_claimed_and_delivered_again(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    await _relay(stage, callback=Sink(ServiceError(422, "stage: unexpected value"))).deliver_due()
+    assert (await _rows(stage.outbox))[0]["failed_at"] is not None
+
+    assert await stage.outbox.release(STAGE_OCR, "REQ_lain") == 0
+    assert await stage.outbox.release(STAGE_OCR, RID) == 1
+    assert stage.outbox.pending.is_set()
+    [row] = await _rows(stage.outbox)
+    assert row["failed_at"] is None
+
+    orchestration = Sink()
+    assert await _relay(stage, callback=orchestration).deliver_due() == 1
+    assert [body["status"] for body in orchestration.bodies] == ["FAILED"]
+    assert await _rows(stage.outbox) == []
+
+
+async def test_the_release_handler_answers_409_without_an_outbox(pipeline):
+    from ocr_common.pipeline.outbox_status import outbox_release
+
+    stage, _ = pipeline
+    assert await outbox_release(stage, None) == {"stage": STAGE_OCR, "request_id": None, "released": 0}
+
+    off = StagePipeline(stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=RecordingCallback())
+    with pytest.raises(ServiceError) as raised:
+        await outbox_release(off, None)
+    assert raised.value.status_code == 409

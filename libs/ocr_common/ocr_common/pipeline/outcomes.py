@@ -1,3 +1,7 @@
+"""The orchestrator's own outcome row (`ORCHESTRATION_OUTCOME_TABLE`), upserted by the stages inside
+their job transactions so the orchestrator learns how a request ends without any callback.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -16,25 +20,37 @@ STATUS_FAILED = "failed"
 
 
 class StageOutcome(Protocol):
-    async def claimed(self, conn: AsyncConnection, request_id: str) -> None: ...
+    """What the repository needs from the outcome writer; every call receives the job's connection."""
 
-    async def completed(self, conn: AsyncConnection, request_id: str, data: dict[str, Any] | None) -> None: ...
+    async def claimed(self, conn: AsyncConnection, request_id: str) -> None:
+        """The request is `processing` at this stage."""
+        ...
+
+    async def completed(self, conn: AsyncConnection, request_id: str, data: dict[str, Any] | None) -> None:
+        """The request is `completed` with `data` in the `extract-ocr` contract (scoring only)."""
+        ...
 
     async def failed(
         self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
-    ) -> None: ...
+    ) -> None:
+        """The request `failed` at this stage, or at `stage` when a hand-off to it failed."""
+        ...
 
 
 class OrchestrationOutcome:
+    """Upserts one row per `request_id` in the orchestrator's table with the pipeline's status."""
+
     def __init__(self, table: Table, *, stage: str, document_type: str = DOCUMENT_TYPE):
         self.table = table
         self._stage = stage
         self._document_type = document_type
 
     async def claimed(self, conn: AsyncConnection, request_id: str) -> None:
+        """Upsert `processing` plus this stage."""
         await self._write(conn, request_id, 202, STATUS_PROCESSING)
 
     async def completed(self, conn: AsyncConnection, request_id: str, data: dict[str, Any] | None) -> None:
+        """Upsert `completed` with `result_data`; nothing when `data` is None (not the last stage)."""
         if data is None:
             return
         await self._write(conn, request_id, 200, STATUS_COMPLETED, result_data=data)
@@ -87,6 +103,7 @@ class OrchestrationOutcome:
 
 
 def build_stage_outcome(settings: PipelineSettings, *, stage: str) -> OrchestrationOutcome | None:
+    """The outcome writer for `stage` from settings; None when `ORCHESTRATION_OUTCOME_TABLE` is empty."""
     if not settings.orchestration_outcome_table:
         return None
     from ocr_common.pipeline.tables import orchestration_outcome_table

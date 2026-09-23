@@ -4,7 +4,8 @@
 from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError
+from ocr_common.types import OcrBlock, OcrEngineResult
 
 from app.ml.utils import bbox, confidence
 
@@ -16,7 +17,7 @@ class RemoteOcrEngine:
     def __init__(self, client: RemoteModelClient):
         self._client = client
 
-    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> dict[str, Any]:
+    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> OcrEngineResult:
         body = await self._client.post_multipart(
             self.PREDICT_PATH,
             filename=filename or "upload",
@@ -29,13 +30,13 @@ class RemoteOcrEngine:
         await self._client.aclose()
 
 
-def parse_rec_pages(body: Any, name: str) -> list[dict[str, Any]]:
-    unexpected = ServiceError(500, f"{name} returned an unexpected response")
+def parse_rec_pages(body: Any, name: str) -> list[OcrBlock]:
+    unexpected = InternalError(f"{name} returned an unexpected response")
     pages = body.get("data") if isinstance(body, dict) else body
     if not isinstance(pages, list):
         raise unexpected
 
-    blocks: list[dict[str, Any]] = []
+    blocks: list[OcrBlock] = []
     for position, page in enumerate(pages):
         if not isinstance(page, dict):
             raise unexpected

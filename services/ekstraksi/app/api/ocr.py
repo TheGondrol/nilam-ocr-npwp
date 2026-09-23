@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 
-from ocr_common.errors import ServiceError
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
@@ -96,10 +95,7 @@ async def extract_ocr(
     service: OcrService = Depends(get_ocr_service),
 ):
     content, filename, content_type = await read_image(request, file, file_url)
-    try:
-        data, guardrails = await service.extract(request_id, filename, content_type, content)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data, guardrails = await service.extract(request_id, filename, content_type, content)
     return envelope(200, "Success", data, request_id, guardrails=guardrails)
 
 
@@ -167,8 +163,5 @@ async def extract_ocr(
     },
 )
 async def get_ocr_result(request_id: str, service: OcrService = Depends(get_ocr_service)):
-    try:
-        data = await service.get_result(request_id)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = await service.get_result(request_id)
     return envelope(200, "Success", data, request_id, guardrails=data.pop("guardrails", None))

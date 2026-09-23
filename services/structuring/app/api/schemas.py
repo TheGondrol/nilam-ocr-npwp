@@ -91,7 +91,13 @@ class StructuringJobRequest(BaseModel):
     guardrails: GuardrailsResult | None = Field(
         None, description="Guardrails result submitted with the OCR job; only forwarded to the next stage"
     )
-    ocr: OcrPayload = Field(..., description="Result of the OCR stage")
+    ocr: OcrPayload | None = Field(
+        None,
+        description=(
+            "Result of the OCR stage. Left out when the OCR service hands off by reference "
+            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `ocr_results` of the shared database"
+        ),
+    )
 
 
 class StructuringJobStatus(JobStatusBase):

@@ -9,10 +9,14 @@ from ocr_common.pipeline import (
     STAGE_STRUCTURING,
     NextStageClient,
     OutboxRelay,
+    SqlStageResults,
     StagePipeline,
+    StaleJobReaper,
     build_next_stage_client,
     build_outbox_relay,
     build_stage_pipeline,
+    build_stage_results,
+    build_stale_job_reaper,
 )
 from ocr_common.registry import Factory, build_backend
 
@@ -69,6 +73,11 @@ def get_relay() -> OutboxRelay | None:
     return build_outbox_relay(get_settings(), get_pipeline())
 
 
+@lru_cache
+def get_results() -> SqlStageResults | None:
+    return build_stage_results(get_settings())
+
+
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
@@ -77,4 +86,14 @@ def get_structuring_service() -> StructuringService:
 
 
 def get_job_service() -> StructuringJobService:
-    return StructuringJobService(get_pipeline(), get_structuring_service())
+    return StructuringJobService(
+        get_pipeline(),
+        get_structuring_service(),
+        results=get_results(),
+        handoff_by_reference=get_settings().pipeline_handoff_by_reference,
+    )
+
+
+@lru_cache
+def get_reaper() -> StaleJobReaper | None:
+    return build_stale_job_reaper(get_settings(), get_pipeline(), get_job_service().resume)

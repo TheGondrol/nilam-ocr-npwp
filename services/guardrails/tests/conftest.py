@@ -30,8 +30,12 @@ class StubEkstraksi:
     def __init__(self) -> None:
         self.submitted: list[dict] = []
 
-    async def submit(self, request_id, document_type, guardrails, filename, content_type, content) -> dict:
-        self.submitted.append({"request_id": request_id, "document_type": document_type, "guardrails": guardrails})
+    async def submit(
+        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None
+    ) -> dict:
+        self.submitted.append(
+            {"request_id": request_id, "document_type": document_type, "guardrails": guardrails, "file_url": file_url}
+        )
         return {"request_id": request_id, "stage": "OCR", "status": "PROCESSING", "duplicate": False}
 
     async def aclose(self) -> None:

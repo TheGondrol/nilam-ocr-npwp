@@ -1,7 +1,14 @@
+"""Settings of every service, read from the environment (and `.env` locally) with pydantic-settings.
+
+`BaseServiceSettings` is what all four services share; `PipelineSettings` adds what the three
+asynchronous stages need. Guards on `ENVIRONMENT` make a deployed service refuse to start with a
+laptop-only configuration (mock backends, auth disabled, localhost addresses).
+"""
+
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ocr_common.clients.fetch_url import UrlPolicy
@@ -12,10 +19,16 @@ DEFAULT_JOB_LEASE_SECONDS = 300.0
 
 
 class BaseServiceSettings(BaseSettings):
+    """Settings shared by all services: API keys, environment, upload limits, `file_url` policy, logging."""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
-    api_key: str = Field(..., min_length=1, validation_alias=AliasChoices("API_KEY", "MOCK_API_KEY"))
+    api_key: str = Field(..., min_length=1)
+    api_keys: str = ""
     auth_disabled: bool = False
+
+    log_format: Literal["json", "text"] | None = None
+    log_level: str = "INFO"
 
     environment: Environment = "production"
     service_base_url: str | None = None
@@ -28,16 +41,32 @@ class BaseServiceSettings(BaseSettings):
 
     @property
     def is_local(self) -> bool:
+        """True for `ENVIRONMENT=local`: the laptop mode where the safety guards are off."""
         return self.environment == "local"
 
     @property
+    def accepted_api_keys(self) -> tuple[str, ...]:
+        """Keys a caller may present: `API_KEY` (also the key this service sends to the others) plus the
+        comma-separated `API_KEYS`. Rotation: add the new key to `API_KEYS` everywhere, move the callers,
+        make it `API_KEY`, drop the old one."""
+        extra = tuple(key.strip() for key in self.api_keys.split(",") if key.strip())
+        return (self.api_key, *(key for key in extra if key != self.api_key))
+
+    @property
+    def effective_log_format(self) -> Literal["json", "text"]:
+        """`LOG_FORMAT` when set; otherwise text on a laptop and JSON (for Cloud Logging) when deployed."""
+        return self.log_format or ("text" if self.is_local else "json")
+
+    @property
     def file_url_policy(self) -> UrlPolicy:
+        """The `UrlPolicy` for `file_url` downloads built from `FILE_URL_ALLOWED_HOSTS` and the environment."""
         hosts = tuple(
             host.strip().lower().rstrip(".") for host in self.file_url_allowed_hosts.split(",") if host.strip()
         )
         return UrlPolicy(allowed_hosts=hosts, allow_private=self.is_local)
 
     def require_outside_local(self, **values: object) -> None:
+        """Raises unless every given value is set, when not local; used by the subclasses' validators."""
         if self.is_local:
             return
         missing = [name.upper() for name, value in values.items() if not value]
@@ -48,6 +77,7 @@ class BaseServiceSettings(BaseSettings):
             )
 
     def reject_localhost_outside_local(self, **urls: str | None) -> None:
+        """Raises when a service URL points to localhost outside local: inside a pod that is the service itself."""
         if self.is_local:
             return
         local = [name.upper() for name, url in urls.items() if url and urlsplit(url).hostname in _LOCAL_HOSTS]
@@ -58,6 +88,7 @@ class BaseServiceSettings(BaseSettings):
             )
 
     def reject_mock_backend_outside_local(self, **backends: str) -> None:
+        """Raises when a backend is `mock` outside local: a mock fabricates results."""
         if self.is_local:
             return
         mocked = [name.upper() for name, backend in backends.items() if backend == "mock"]
@@ -78,6 +109,10 @@ class BaseServiceSettings(BaseSettings):
 
 
 class PipelineSettings(BaseServiceSettings):
+    """Settings of the three stage services: database, orchestrator callback or outcome table, job
+    lease, outbox, stale-job reaper, hand-off by reference.
+    """
+
     database_url: str | None = None
 
     orchestration_url: str | None = None
@@ -97,6 +132,10 @@ class PipelineSettings(BaseServiceSettings):
     pipeline_outbox_max_backoff_seconds: float = Field(300.0, gt=0)
     pipeline_outbox_max_age_seconds: float = Field(24 * 3600.0, gt=0)
     pipeline_outbox_stale_after_seconds: float = Field(300.0, gt=0)
+    pipeline_handoff_by_reference: bool = False
+    pipeline_stale_jobs: bool = True
+    pipeline_stale_job_interval_seconds: float = Field(30.0, gt=0)
+    pipeline_stale_job_batch: int = Field(10, gt=0)
 
     @property
     def callbacks_enabled(self) -> bool:
@@ -114,4 +153,9 @@ class PipelineSettings(BaseServiceSettings):
                 "(set ENVIRONMENT=local for local development)"
             )
         self.reject_localhost_outside_local(orchestration_url=self.orchestration_url)
+        if self.pipeline_handoff_by_reference and not self.database_url:
+            raise ValueError(
+                "PIPELINE_HANDOFF_BY_REFERENCE=true needs DATABASE_URL: the next stage reads this stage's "
+                "result from the shared database instead of the hand-off body"
+            )
         return self

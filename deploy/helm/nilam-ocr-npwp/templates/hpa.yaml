@@ -1,0 +1,29 @@
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled (dig "autoscaling" "enabled" false $svc) }}
+{{- $component := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "nilam-ocr-npwp.componentName" $component }}
+  labels:
+    {{- include "nilam-ocr-npwp.componentLabels" $component | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "nilam-ocr-npwp.componentName" $component }}
+  minReplicas: {{ $svc.autoscaling.minReplicas }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
+{{- end }}

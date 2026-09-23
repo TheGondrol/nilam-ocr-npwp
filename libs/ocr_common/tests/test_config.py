@@ -96,3 +96,24 @@ def test_mock_backend_guard():
         settings.reject_mock_backend_outside_local(guardrails_backend="mock")
     settings.reject_mock_backend_outside_local(guardrails_backend="efficientnet")
     base(environment="local").reject_mock_backend_outside_local(guardrails_backend="mock")
+
+
+def test_handoff_by_reference_needs_the_shared_database():
+    with pytest.raises(ValueError, match="PIPELINE_HANDOFF_BY_REFERENCE=true needs DATABASE_URL"):
+        PipelineSettings(api_key="x", environment="local", pipeline_handoff_by_reference=True, _env_file=None)
+    settings = PipelineSettings(
+        api_key="x",
+        environment="local",
+        pipeline_handoff_by_reference=True,
+        database_url="postgresql+asyncpg://u:p@h/db",
+        _env_file=None,
+    )
+    assert settings.pipeline_handoff_by_reference
+
+
+def test_stale_job_reaper_is_on_by_default_with_sane_bounds():
+    settings = pipeline(environment="local")
+    assert settings.pipeline_stale_jobs is True
+    assert settings.pipeline_stale_job_interval_seconds == 30.0
+    with pytest.raises(ValidationError):
+        pipeline(environment="local", pipeline_stale_job_batch=0)

@@ -13,7 +13,7 @@ info:
     ## Conventions (the same for every nilam-ocr service)
 
 
-    **Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+    **Authentication.** Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.
 
     A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
 
@@ -139,6 +139,24 @@ paths:
               example:
                 status: not_ready
                 checks: {}
+  /metrics:
+    get:
+      tags:
+      - Health
+      summary: Prometheus metrics
+      description: 'Prometheus text exposition of this process: `http_requests_total` and `http_request_duration_seconds`
+        per route template, and for the pipeline stages `pipeline_jobs_total` (by outcome), `pipeline_job_duration_seconds`,
+        `pipeline_stale_jobs_reclaimed_total`, `pipeline_outbox_deliveries_total` and the outbox backlog
+        gauges (`pipeline_outbox_pending`, `_retrying`, `_dead_letters`, `_oldest_pending_seconds`). Scraped
+        inside the cluster; does not require an API key.'
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics in the Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
   /v1/extract-ocr:
     post:
       tags:
@@ -216,6 +234,9 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     guardrails: 1
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
         '202':
           description: 'Accepted, but still running when the wait ran out: the result follows in the SCORING
             callback'
@@ -233,6 +254,9 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: processing
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
             0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), or a bad file / intake (empty,
@@ -250,6 +274,9 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 0
+                params:
+                  nik: '3123456711950001'
+                  refno: PK19039Y8U
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -278,6 +305,9 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 1
+                params:
+                  nik: '3123456711950001'
+                  refno: PK19039Y8U
         '500':
           description: The guardrails model or the ekstraksi service failed or answered in an unexpected
             shape
@@ -620,6 +650,7 @@ components:
       - message
       - errors
       title: ErrorResponse
+      description: Every error response.
     ExtractOcrResponse:
       properties:
         status_code:
@@ -817,6 +848,7 @@ components:
       - device
       - backends
       title: HealthResponse
+      description: '`GET /health`.'
     NpwpData:
       properties:
         nomor_npwp:
@@ -900,6 +932,7 @@ components:
       - status
       - checks
       title: ReadyResponse
+      description: '`GET /ready`.'
   securitySchemes:
     APIKeyHeader:
       type: apiKey

@@ -1,3 +1,8 @@
+"""The FastAPI application factory shared by the services: logging, request id, metrics, the standard
+envelope for every error, the health, readiness and metrics routes, and the callback webhook
+documentation.
+"""
+
 import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -6,10 +11,13 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI, Header, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from ocr_common.config import BaseServiceSettings
+from ocr_common.errors import ServiceError
 from ocr_common.web.envelope import envelope
+from ocr_common.web.logging import configure_logging
+from ocr_common.web.metrics import MetricsMiddleware, metrics_response
 from ocr_common.web.request_id import RequestIdMiddleware, get_request_id
 from ocr_common.web.schemas import HealthResponse, ReadyResponse, success_examples
 
@@ -20,6 +28,7 @@ ReadinessCheck = Callable[[], Awaitable[None]]
 
 
 def database_readiness(database_url: str | None) -> dict[str, ReadinessCheck]:
+    """A readiness check named `database` that runs `SELECT 1`; empty when there is no database."""
     if not database_url:
         return {}
 
@@ -35,7 +44,7 @@ API_CONVENTIONS = """
 
 ## Conventions (the same for every nilam-ocr service)
 
-**Authentication.** Every endpoint except `/health` and `/ready` requires the header `X-API-Key`.
+**Authentication.** Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.
 A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
 
 **Envelope.** Every JSON response, success or error, has the same shape:
@@ -78,8 +87,8 @@ def create_app(
     readiness_example: dict[str, str] | None = None,
     lifespan: Lifespan | None = None,
 ) -> FastAPI:
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    """Build the app of a service with everything every service has in common; see the module docstring."""
+    configure_logging(fmt=settings.effective_log_format, level=settings.log_level, service=service_name)
 
     servers: list[dict[str, Any]] = [{"url": "/", "description": "This host (where this page is served)"}]
     if settings.service_base_url:
@@ -117,6 +126,7 @@ def create_app(
             "AUTH_DISABLED=true: X-API-Key is NOT checked on this service; only for local development"
         )
 
+    app.add_middleware(MetricsMiddleware, service=service_name or title)
     app.add_middleware(RequestIdMiddleware)
     _register_exception_handlers(app)
     app.include_router(
@@ -128,6 +138,8 @@ def create_app(
 
 
 def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> None:
+    """Document (as an OpenAPI webhook) the callback this service sends to the orchestrator."""
+
     @app.webhooks.post(
         "stageCallback",
         operation_id="stageCallback",
@@ -250,10 +262,40 @@ def _health_router(
             status_code=200 if ok else 503, content={"status": "ready" if ok else "not_ready", "checks": checks}
         )
 
+    @router.get(
+        "/metrics",
+        response_class=PlainTextResponse,
+        operation_id="getMetrics",
+        summary="Prometheus metrics",
+        description=(
+            "Prometheus text exposition of this process: `http_requests_total` and "
+            "`http_request_duration_seconds` per route template, and for the pipeline stages "
+            "`pipeline_jobs_total` (by outcome), `pipeline_job_duration_seconds`, "
+            "`pipeline_stale_jobs_reclaimed_total`, `pipeline_outbox_deliveries_total` and the outbox backlog "
+            "gauges (`pipeline_outbox_pending`, `_retrying`, `_dead_letters`, `_oldest_pending_seconds`). "
+            "Scraped inside the cluster; does not require an API key."
+        ),
+        responses={200: {"description": "Metrics in the Prometheus text format", "content": {"text/plain": {}}}},
+    )
+    async def metrics(request: Request):
+        return metrics_response(request)
+
     return router
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ServiceError)
+    async def service_error_handler(request: Request, exc: ServiceError):
+        """Every domain error carries its HTTP status; this is the one place it becomes a response, so
+        routes raise and never translate."""
+        request_id = get_request_id(request)
+        if exc.status_code >= 500:
+            logger.error("%s %s -> %d: %s", request.method, request.url.path, exc.status_code, exc.message)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=envelope(exc.status_code, exc.message, None, request_id, errors=exc.message),
+        )
+
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         request_id = get_request_id(request)

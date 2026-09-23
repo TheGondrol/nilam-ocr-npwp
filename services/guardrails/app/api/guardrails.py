@@ -2,9 +2,8 @@ import json
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
-from ocr_common.errors import ServiceError
 from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
@@ -42,6 +41,7 @@ _COMPLETED = extract_body(
     errors=None,
     request_id=RID,
     document_type="npwp",
+    params=_PARAMS,
 )
 _PROCESSING = extract_body(
     202,
@@ -49,6 +49,7 @@ _PROCESSING = extract_body(
     job_status="processing",
     request_id=RID,
     document_type="npwp",
+    params=_PARAMS,
 )
 _REJECTED = extract_body(
     400,
@@ -58,6 +59,7 @@ _REJECTED = extract_body(
     guardrails=0,
     request_id=RID,
     document_type="npwp",
+    params=_PARAMS,
 )
 _FAILED = extract_body(
     422,
@@ -67,6 +69,7 @@ _FAILED = extract_body(
     guardrails=1,
     request_id=RID,
     document_type="npwp",
+    params=_PARAMS,
 )
 
 _ACCEPTED_PAGE = {"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}
@@ -223,12 +226,9 @@ async def extract_ocr(
         )
 
     content, filename, content_type = await read_image(request, file, file_url)
-    try:
-        outcome = await service.submit(
-            request_id, document_type, filename, content_type, content, received_at=received_at
-        )
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    outcome = await service.submit(
+        request_id, document_type, filename, content_type, content, received_at=received_at, file_url=file_url
+    )
     status_code, body = extract_response(
         outcome,
         request_id=request_id,
@@ -274,8 +274,5 @@ async def check_document(
     service: GuardrailsService = Depends(get_guardrails_service),
 ):
     content, filename, content_type = await read_image(request, file, file_url)
-    try:
-        report = await service.check(filename, content_type, content)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    report = await service.check(filename, content_type, content)
     return envelope(200, "OK", report, request_id or get_request_id(request))

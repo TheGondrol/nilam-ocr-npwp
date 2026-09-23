@@ -149,3 +149,22 @@ async def test_non_json_success_body_maps_to_500():
         await _client(handler).get_json("/health")
     assert exc.value.status_code == 500
     assert exc.value.message == "demo model returned an invalid response"
+
+
+async def test_post_form_sends_fields_without_a_file():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(202, json={"ok": True})
+
+    client = RemoteModelClient("http://svc", 5.0, name="svc", transport=httpx.MockTransport(handler))
+    try:
+        assert await client.post_form("/jobs", data={"request_id": "REQ_1", "file_url": "http://minio/a.jpg"}) == {
+            "ok": True
+        }
+    finally:
+        await client.aclose()
+    [request] = seen
+    assert request.headers["content-type"] == "application/x-www-form-urlencoded"
+    assert b"file_url=http%3A%2F%2Fminio%2Fa.jpg" in request.content

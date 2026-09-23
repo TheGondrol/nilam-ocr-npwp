@@ -1,3 +1,5 @@
+"""Receiving a document: as an uploaded `file`, or as a `file_url` this service downloads."""
+
 from fastapi import File, Form, HTTPException, Request, UploadFile
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -17,6 +19,7 @@ FileUrlField = Form(
 def resolve_intake(
     file: UploadFile | str | None, file_url: str | None
 ) -> tuple[StarletteUploadFile | None, str | None]:
+    """Exactly one of `file` and `file_url` must be given; returns `(upload, url)`, else 400."""
     file_url = file_url or None
     upload = file if isinstance(file, StarletteUploadFile) and file.filename else None
     if (upload is None) == (file_url is None):
@@ -27,6 +30,7 @@ def resolve_intake(
 async def read_image(
     request: Request, file: UploadFile | str | None, file_url: str | None
 ) -> tuple[bytes, str, str | None]:
+    """The document's `(content, filename, content_type)` from the upload or the download; 400 on a refused URL."""
     upload, file_url = resolve_intake(file, file_url)
 
     if file_url is not None:

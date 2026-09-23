@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
-from ocr_common.errors import ServiceError
 from ocr_common.web.envelope import envelope
 from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, success_examples
@@ -62,8 +61,5 @@ async def structure(
     body: StructureRequest,
     service: StructuringService = Depends(get_structuring_service),
 ):
-    try:
-        data = service.structure([line.model_dump() for line in body.lines])
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = service.structure([line.model_dump() for line in body.lines])
     return envelope(200, "Success", data, get_request_id(request))

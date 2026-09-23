@@ -1,3 +1,7 @@
+"""The tables of this repository, defined once here and used by the services, the Alembic migrations
+and the tests. `orchestration_outcome_table` describes a table the orchestrator owns.
+"""
+
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -19,6 +23,7 @@ PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
 
 
 def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table]:
+    """The `<prefix>_jobs` and `<prefix>_results` tables of one stage on `metadata`."""
     jobs = Table(
         f"{table_prefix}_jobs",
         metadata,
@@ -26,6 +31,7 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
         Column("status", Text, nullable=False),
         Column("error_message", Text, nullable=True),
         Column("attempts", Integer, nullable=False, server_default=text("1")),
+        Column("input", JSON_TYPE, nullable=True),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
@@ -65,6 +71,7 @@ OCR_NPWP_REQUESTS = Table(
 
 
 def outbox_table(metadata: MetaData) -> Table:
+    """The `pipeline_outbox` table shared by the three stages."""
     return Table(
         "pipeline_outbox",
         metadata,
@@ -99,6 +106,7 @@ def outbox_table(metadata: MetaData) -> Table:
 
 
 def orchestration_outcome_table(name: str) -> Table:
+    """The orchestrator's outcome table (`ORCHESTRATION_OUTCOME_TABLE`) as this code needs it; owned by them."""
     return Table(
         name,
         MetaData(),
@@ -117,6 +125,7 @@ def orchestration_outcome_table(name: str) -> Table:
 
 
 def repo_metadata() -> MetaData:
+    """Every table this repository migrates, for Alembic's autogenerate and `alembic check`."""
     metadata = MetaData()
     for table_prefix in PIPELINE_TABLE_PREFIXES:
         pipeline_tables(table_prefix, metadata)

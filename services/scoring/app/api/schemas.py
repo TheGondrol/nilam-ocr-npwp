@@ -65,7 +65,14 @@ class ScoringJobRequest(BaseModel):
         None,
         description="Result of the OCR stage; `n_boxes`, `num_pages`, `avg/min_doc_score` are computed from `blocks`",
     )
-    structuring: StructuringPayload = Field(..., description="Result of the structuring stage")
+    structuring: StructuringPayload | None = Field(
+        None,
+        description=(
+            "Result of the structuring stage. Left out when the structuring service hands off by reference "
+            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `structuring_results` (and `ocr_results`) "
+            "of the shared database"
+        ),
+    )
 
 
 class ScoringJobResult(FieldConfidences):

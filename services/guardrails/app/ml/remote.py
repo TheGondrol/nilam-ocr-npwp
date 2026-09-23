@@ -4,7 +4,7 @@ and the response already carries the per-page and document verdicts."""
 from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError
 
 
 class RemoteGuardrailsModel:
@@ -57,4 +57,4 @@ def parse_report(body: Any, name: str) -> dict[str, Any]:
             ],
         }
     except (KeyError, TypeError, ValueError) as exc:
-        raise ServiceError(500, f"{name} returned an unexpected response") from exc
+        raise InternalError(f"{name} returned an unexpected response") from exc

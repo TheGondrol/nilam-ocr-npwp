@@ -1,13 +1,21 @@
+"""`StagePipeline`: how one stage runs a job. Claim it, answer 202, do the work in the background,
+store the result, notify the orchestrator and hand the job to the next stage (directly, or through
+the outbox), and report every failure as a `FAILED` job.
+"""
+
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError, NotFound, ServiceError
+from ocr_common.pipeline import metrics
 from ocr_common.pipeline.callbacks import NextStage, StageCallback
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage, OutboxRelay, callback_message, handoff_message
 from ocr_common.pipeline.repository import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRepository
 from ocr_common.pipeline.runner import BackgroundRunner
+from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +23,17 @@ STAGE_OCR = "OCR"
 STAGE_STRUCTURING = "STRUCTURING"
 STAGE_SCORING = "SCORING"
 
-Work = Callable[[], Awaitable[dict[str, Any]]]
-CallbackResult = Callable[[dict[str, Any]], dict[str, Any]]
-HandoffPayload = Callable[[dict[str, Any]], dict[str, Any]]
+Work = Callable[[], Awaitable[Mapping[str, Any]]]
+"""The job itself: returns the stage result (a TypedDict of `ocr_common.types`, or any mapping)."""
+CallbackResult = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+"""Derives what the callback / the orchestrator's outcome row carries from the stage result."""
+HandoffPayload = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+"""Derives the body of the hand-off to the next stage from the stage result."""
 
 
 class StagePipeline:
+    """The per-service orchestration of one job; built by `pipeline.factory.build_stage_pipeline`."""
+
     def __init__(
         self,
         *,
@@ -52,8 +65,11 @@ class StagePipeline:
         next_stage: str | None = None,
         callback_result: CallbackResult | None = None,
         outcome_data: CallbackResult | None = None,
+        input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        claimed = await self.repository.claim(request_id)
+        """`input` is what a later run of this job needs besides the earlier stages' stored results
+        (document_type, guardrails report, file_url); the stale-job reaper hands it back to `resume`."""
+        claimed = await self.repository.claim(request_id, input=input)
         status = STATUS_PROCESSING
         if claimed:
             self.runner.spawn(self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data))
@@ -62,10 +78,24 @@ class StagePipeline:
             status = record["status"] if record else STATUS_PROCESSING
         return {"request_id": request_id, "stage": self.stage, "status": status, "duplicate": not claimed}
 
+    async def resume(
+        self,
+        request_id: str,
+        work: Work,
+        *,
+        handoff_payload: HandoffPayload | None = None,
+        next_stage: str | None = None,
+        callback_result: CallbackResult | None = None,
+        outcome_data: CallbackResult | None = None,
+    ) -> None:
+        """Run a job that is already claimed (by the stale-job reaper) without claiming it again."""
+        self.runner.spawn(self._run(request_id, work, handoff_payload, next_stage, callback_result, outcome_data))
+
     async def get(self, request_id: str) -> dict[str, Any]:
+        """The job's record for `GET /v1/<stage>/jobs/{request_id}`; `NotFound` when unknown."""
         record = await self.repository.get(request_id)
         if record is None:
-            raise ServiceError(404, f"No {self.stage} job found for request_id: {request_id}")
+            raise NotFound(f"No {self.stage} job found for request_id: {request_id}")
         return {"stage": self.stage, **record}
 
     async def aclose(self, drain_timeout: float, *, relay: OutboxRelay | None = None) -> None:
@@ -85,29 +115,50 @@ class StagePipeline:
         callback_result: CallbackResult | None,
         outcome_data: CallbackResult | None = None,
     ) -> None:
+        token = bind_request_id(request_id)  # log lines and downstream calls of this job carry its id
+        try:
+            await self._run_bound(request_id, work, handoff_payload, next_stage, callback_result, outcome_data)
+        finally:
+            reset_request_id(token)
+
+    async def _run_bound(
+        self,
+        request_id: str,
+        work: Work,
+        handoff_payload: HandoffPayload | None,
+        next_stage: str | None,
+        callback_result: CallbackResult | None,
+        outcome_data: CallbackResult | None,
+    ) -> None:
         payload: dict[str, Any] | None = None
         final: dict[str, Any] | None = None
+        started = time.perf_counter()
         try:
-            result = await work()
-            payload = handoff_payload(result) if handoff_payload else None
-            final = callback_result(result) if callback_result else None
+            result = dict(await work())
+            payload = dict(handoff_payload(result)) if handoff_payload else None
+            final = dict(callback_result(result)) if callback_result else None
             await self.repository.complete(
                 request_id,
                 result,
-                outcome_data=outcome_data(result) if outcome_data else None,
+                outcome_data=dict(outcome_data(result)) if outcome_data else None,
                 messages=self._messages(request_id, final, payload, next_stage),
             )
+            metrics.JOB_DURATION.labels(self.stage).observe(time.perf_counter() - started)
+            metrics.JOBS.labels(self.stage, metrics.OUTCOME_DONE).inc()
         except asyncio.CancelledError:
             logger.warning("%s job %s interrupted by shutdown", self.stage, request_id)
+            metrics.JOBS.labels(self.stage, metrics.OUTCOME_INTERRUPTED).inc()
             await self._failed(
                 request_id, f"{self.stage} stage was interrupted by a service shutdown; submit the job again"
             )
             raise
         except ServiceError as exc:
+            metrics.JOBS.labels(self.stage, metrics.OUTCOME_FAILED).inc()
             await self._failed(request_id, exc.message)
             return
         except Exception:
             logger.exception("%s job %s crashed", self.stage, request_id)
+            metrics.JOBS.labels(self.stage, metrics.OUTCOME_CRASHED).inc()
             await self._failed(request_id, f"Internal error in {self.stage} stage")
             return
 
@@ -144,7 +195,7 @@ class StagePipeline:
 
     async def _hand_off(self, payload: dict[str, Any]) -> None:
         if self.next_stage_client is None:
-            raise ServiceError(500, f"the {self.stage} stage has no next stage to hand off to")
+            raise InternalError(f"the {self.stage} stage has no next stage to hand off to")
         await self.next_stage_client.submit(payload)
 
     async def _handoff_failed(self, request_id: str, next_stage: str | None, reason: str) -> None:

@@ -1,3 +1,5 @@
+"""Pydantic models and helpers of the response envelope and of the documented examples."""
+
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -11,6 +13,8 @@ JobState = Literal["PROCESSING", "DONE", "FAILED"]
 
 
 class SuccessEnvelope(BaseModel):
+    """Base of every success response model; subclasses declare `data`."""
+
     status_code: int = Field(200, description="Same as the HTTP status code", examples=[200])
     status_desc: str = Field("OK", description="Reason phrase of `status_code`", examples=["OK"])
     message: str = Field("Success", description="Human-readable outcome", examples=["Success"])
@@ -26,6 +30,8 @@ class SuccessEnvelope(BaseModel):
 
 
 class ErrorResponse(BaseModel):
+    """Every error response."""
+
     status_code: int = Field(..., description="Same as the HTTP status code", examples=[400])
     status_desc: str = Field(..., description="Reason phrase of `status_code`", examples=["Bad Request"])
     message: str = Field(..., description="Human-readable cause; safe to log", examples=["Uploaded file is empty"])
@@ -44,6 +50,8 @@ class ErrorResponse(BaseModel):
 
 
 class JobAccepted(BaseModel):
+    """`data` of `POST /v1/<stage>/jobs`."""
+
     request_id: str = Field(..., description="Echo of the submitted request_id", examples=[REQUEST_ID_EXAMPLE])
     stage: Stage = Field(..., description="Pipeline stage that accepted the job", examples=["OCR"])
     status: JobState = Field(
@@ -65,6 +73,8 @@ class JobAccepted(BaseModel):
 
 
 class JobAcceptedResponse(SuccessEnvelope):
+    """Envelope of `POST /v1/<stage>/jobs`."""
+
     status_code: int = Field(202, description="Same as the HTTP status code", examples=[202])
     status_desc: str = Field("Accepted", description="Reason phrase of `status_code`", examples=["Accepted"])
     message: str = Field("Accepted", description="Human-readable outcome", examples=["Accepted"])
@@ -72,6 +82,8 @@ class JobAcceptedResponse(SuccessEnvelope):
 
 
 class JobStatusBase(BaseModel):
+    """Common fields of `GET /v1/<stage>/jobs/{request_id}`; each stage adds its `result`."""
+
     request_id: str = Field(..., description="request_id of the pipeline run", examples=[REQUEST_ID_EXAMPLE])
     stage: Stage = Field(..., description="Pipeline stage this job belongs to", examples=["OCR"])
     status: JobState = Field(
@@ -93,6 +105,8 @@ class JobStatusBase(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """`GET /health`."""
+
     status: str = Field(..., description="Always `healthy` while the process is alive", examples=["healthy"])
     version: str = Field(..., description="Service version", examples=["1.0.0"])
     device: str = Field(..., description="Where this service computes", examples=["cpu"])
@@ -104,6 +118,8 @@ class HealthResponse(BaseModel):
 
 
 class ReadyResponse(BaseModel):
+    """`GET /ready`."""
+
     status: Literal["ready", "not_ready"] = Field(
         ..., description="`ready` (HTTP 200) when every check is `ok`, else `not_ready` (HTTP 503)", examples=["ready"]
     )
@@ -122,6 +138,7 @@ def error(
     request_id: str | None = None,
     errors: str | None = None,
 ) -> dict:
+    """A documented error response with its own envelope example."""
     return {
         "model": ErrorResponse,
         "description": description,
@@ -134,6 +151,7 @@ def error(
 
 
 def success_examples(description: str, **named: tuple[str, Any]) -> dict:
+    """A documented 200 response with named envelope examples."""
     return {
         "description": description,
         "content": {

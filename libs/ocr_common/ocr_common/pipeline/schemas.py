@@ -1,3 +1,7 @@
+"""Pydantic models of the payloads passed between stages and to the orchestrator, used by the routes
+for validation and by the OpenAPI documents.
+"""
+
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +16,8 @@ class _Forwarded(BaseModel):
 
 
 class GuardrailsPage(_Forwarded):
+    """One page of the guardrails report."""
+
     page_index: int | None = Field(None, ge=0, description="0-based page number", examples=[0])
     proba_approve: float | None = Field(
         None, ge=0, le=1, description="Probability that this page is an acceptable document", examples=[0.9821]
@@ -21,6 +27,8 @@ class GuardrailsPage(_Forwarded):
 
 
 class GuardrailsDocument(_Forwarded):
+    """The guardrails verdict for the whole document."""
+
     verdict: Verdict | None = Field(None, description="Document verdict", examples=["accepted"])
     confidence: float | None = Field(
         None,
@@ -38,6 +46,8 @@ class GuardrailsDocument(_Forwarded):
 
 
 class GuardrailsResult(_Forwarded):
+    """The guardrails report, forwarded unchanged down the pipeline."""
+
     model_config = ConfigDict(
         json_schema_extra={
             "description": (
@@ -54,6 +64,8 @@ class GuardrailsResult(_Forwarded):
 
 
 class BoundingBoxPayload(_Forwarded):
+    """Upright box around a text line."""
+
     x1: float = Field(..., description="Left edge, pixels", examples=[271])
     y1: float = Field(..., description="Top edge, pixels", examples=[358])
     x2: float = Field(..., description="Right edge, pixels", examples=[1347])
@@ -61,6 +73,8 @@ class BoundingBoxPayload(_Forwarded):
 
 
 class OcrBlockPayload(_Forwarded):
+    """One OCR text line."""
+
     text: str = Field(..., description="One OCR text line", examples=["12.345.678.9-012.345"])
     confidence: float = Field(1.0, ge=0, le=1, description="Recognition score of this line", examples=[0.9999])
     bbox: BoundingBoxPayload | None = Field(
@@ -74,6 +88,8 @@ class OcrBlockPayload(_Forwarded):
 
 
 class OcrPayload(_Forwarded):
+    """The OCR stage result as the next stages receive it."""
+
     model_config = ConfigDict(
         json_schema_extra={
             "description": "Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring."
@@ -92,6 +108,8 @@ class OcrPayload(_Forwarded):
 
 
 class StructuredFieldPayload(_Forwarded):
+    """One named field read by structuring."""
+
     value: str | None = Field(None, description="null when the field was not found", examples=["3201234567890001"])
     confidence: float = Field(
         1.0, ge=0, le=1, description="OCR score of the line the value came from", examples=[0.9762]
@@ -111,6 +129,8 @@ class StructuredFieldPayload(_Forwarded):
 
 
 class StructuringPayload(_Forwarded):
+    """The structuring stage result as scoring receives it."""
+
     model_config = ConfigDict(
         json_schema_extra={
             "description": "Result of the structuring stage (`structuring_results`), forwarded to scoring."
@@ -125,6 +145,8 @@ class StructuringPayload(_Forwarded):
 
 
 class FinalField(BaseModel):
+    """A field of the final result."""
+
     value: str | None = Field(None, description="null when the field was not found", examples=["3201234567890001"])
     confidence: float = Field(
         ..., ge=0, le=1, description="OCR score of the line the value came from", examples=[0.9762]
@@ -132,6 +154,8 @@ class FinalField(BaseModel):
 
 
 class FieldConfidences(BaseModel):
+    """The trust model's per-field confidences."""
+
     model_config = ConfigDict(
         json_schema_extra={
             "description": "Output of the ML team's trust model: probability that each extracted field is correct."
@@ -147,6 +171,8 @@ class FieldConfidences(BaseModel):
 
 
 class FinalResult(BaseModel):
+    """What the SCORING callback carries when the request completed."""
+
     model_config = ConfigDict(
         json_schema_extra={
             "description": "What the pipeline produced for one request_id. Carried by the SCORING / DONE callback."
@@ -181,6 +207,8 @@ class FinalResult(BaseModel):
 
 
 class StageCallback(BaseModel):
+    """Body of the callback of the OCR and STRUCTURING stages."""
+
     model_config = ConfigDict(
         json_schema_extra={"description": "Body of the callback a stage POSTs to the orchestrator when it finishes."}
     )
@@ -207,6 +235,8 @@ class StageCallback(BaseModel):
 
 
 class ScoringStageCallback(StageCallback):
+    """Body of the SCORING callback: the same, plus the final result."""
+
     stage: Literal["SCORING"] = Field("SCORING", description="Always `SCORING`: the last stage", examples=["SCORING"])
     result: FinalResult | None = Field(  # type: ignore[assignment]
         None, description="The final result of the request when `status` is `DONE`; null when `FAILED`"

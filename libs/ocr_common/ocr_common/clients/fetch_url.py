@@ -1,3 +1,10 @@
+"""Downloading a document from a `file_url` without letting the URL reach anything private.
+
+The host is resolved once and the connection is pinned to that address, so a DNS rebinding cannot
+redirect the request later; private, loopback and link-local addresses are refused unless the
+policy allows them; redirects are not followed; the body is capped at `limit` bytes.
+"""
+
 import asyncio
 import http.client
 import ipaddress
@@ -16,21 +23,31 @@ _TLS = ssl.create_default_context()
 
 
 class FetchUrlError(Exception):
+    """The URL could not be used or fetched; the message is safe to return to the caller (400)."""
+
     pass
 
 
 @dataclass(frozen=True)
 class UrlPolicy:
+    """Which hosts and addresses a `file_url` may point to (`FILE_URL_ALLOWED_HOSTS`, `ENVIRONMENT`)."""
+
     allowed_hosts: tuple[str, ...] = ()
     allow_private: bool = False
 
     def host_allowed(self, host: str) -> bool:
+        """True when `host` matches the allow-list (`.example.internal` = any subdomain), or
+        when the list is empty.
+        """
         if not self.allowed_hosts:
             return True
         host = host.lower().rstrip(".")
         return any(host == entry or (entry.startswith(".") and host.endswith(entry)) for entry in self.allowed_hosts)
 
     def address_allowed(self, address: str) -> bool:
+        """True when a resolved address may be connected to: any address with `allow_private`,
+        otherwise only public ones (or any non-special address when a host allow-list is set).
+        """
         if self.allow_private:
             return True
         ip = ipaddress.ip_address(address.split("%", 1)[0])
@@ -113,6 +130,9 @@ def _download(
 async def fetch(
     url: str, *, limit: int, timeout: float = 10.0, policy: UrlPolicy = STRICT_URL_POLICY
 ) -> tuple[bytes, str, str]:
+    """Downloads `url` under `policy` and returns `(content, filename, content_type)`; raises `FetchUrlError`
+    when the URL is refused, unreachable, too large, or answers a redirect or an error status.
+    """
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ALLOWED_SCHEMES:
         raise FetchUrlError(f"Unsupported URL scheme: {parsed.scheme or '(none)'}")

@@ -24,6 +24,11 @@ services/*/weights/*
 !services/*/weights/.gitkeep
 !services/scoring/weights/trust_model.joblib
 
-tools/
+# Alat lokal (tools/tracker, tools/load-tester) ikut repo; yang tidak: dependensi, build, keluaran, log.
+tools/tracker/frontend/node_modules/
+tools/tracker/frontend/dist/
+tools/tracker/.port-forward.log
+tools/load-tester/images/
+tools/load-tester/out/
 
 docs/

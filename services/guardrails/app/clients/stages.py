@@ -2,7 +2,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ocr_common.clients.remote import RemoteModelClient
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError, ServiceError
 from ocr_common.pipeline import STAGE_OCR, STAGE_SCORING, STAGE_STRUCTURING
 
 from app.config import Settings
@@ -23,7 +23,7 @@ class StageStatusClient:
             raise
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, dict):
-            raise ServiceError(500, f"{self._client.name} returned an unexpected response")
+            raise InternalError(f"{self._client.name} returned an unexpected response")
         return data
 
     async def aclose(self) -> None:

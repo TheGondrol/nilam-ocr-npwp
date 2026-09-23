@@ -1,3 +1,5 @@
+"""The response envelope shared by every endpoint of every service."""
+
 from typing import Any
 
 STATUS_DESC = {
@@ -23,6 +25,7 @@ def envelope(
     errors: str | None = None,
     guardrails: float | None = None,
 ) -> dict:
+    """`{status_code, status_desc, message, data, errors, request_id}`, plus `guardrails` when given."""
     body = {
         "status_code": status_code,
         "status_desc": STATUS_DESC.get(status_code, "Error"),

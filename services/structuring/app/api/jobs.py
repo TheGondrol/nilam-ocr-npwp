@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
-from ocr_common.errors import ServiceError
 from ocr_common.pipeline import StagePipeline
 from ocr_common.pipeline.outbox_status import (
+    OUTBOX_RELEASE_DESCRIPTION,
+    OUTBOX_RELEASE_SUMMARY,
     OUTBOX_STATUS_DESCRIPTION,
     OUTBOX_STATUS_SUMMARY,
+    OutboxReleaseResponse,
     OutboxStatusResponse,
+    outbox_release,
+    outbox_release_responses,
     outbox_status,
     outbox_status_responses,
 )
@@ -67,14 +71,13 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "STRUCTURING", "created_at": 
             ),
         ),
         401: UNAUTHORIZED,
-        422: error(422, "Validation Error", "body.ocr: Field required", errors="VALIDATION_ERROR"),
+        422: error(422, "Validation Error", "body.request_id: Field required", errors="VALIDATION_ERROR"),
     },
 )
 async def submit_job(body: StructuringJobRequest, service: StructuringJobService = Depends(get_job_service)):
     guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
-    data = await service.submit(
-        body.request_id, body.document_type, guardrails, body.ocr.model_dump(exclude_unset=True)
-    )
+    ocr = body.ocr.model_dump(exclude_unset=True) if body.ocr is not None else None
+    data = await service.submit(body.request_id, body.document_type, guardrails, ocr)
     return envelope(202, "Accepted", data, body.request_id)
 
 
@@ -140,10 +143,7 @@ async def submit_job(body: StructuringJobRequest, service: StructuringJobService
     },
 )
 async def get_job(request_id: str, service: StructuringJobService = Depends(get_job_service)):
-    try:
-        data = await service.get(request_id)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    data = await service.get(request_id)
     return envelope(200, "Success", data, request_id)
 
 
@@ -157,3 +157,18 @@ async def get_job(request_id: str, service: StructuringJobService = Depends(get_
 )
 async def get_outbox_status(request: Request, pipeline: StagePipeline = Depends(get_pipeline)):
     return envelope(200, "Success", await outbox_status(pipeline), get_request_id(request))
+
+
+@router.post(
+    "/v1/structuring/outbox/release",
+    response_model=OutboxReleaseResponse,
+    operation_id="releaseStructuringOutbox",
+    summary=OUTBOX_RELEASE_SUMMARY,
+    description=OUTBOX_RELEASE_DESCRIPTION,
+    responses=outbox_release_responses("STRUCTURING"),
+)
+async def release_outbox(
+    request: Request, request_id: str | None = None, pipeline: StagePipeline = Depends(get_pipeline)
+):
+    data = await outbox_release(pipeline, request_id)
+    return envelope(200, "Success", data, request_id or get_request_id(request))

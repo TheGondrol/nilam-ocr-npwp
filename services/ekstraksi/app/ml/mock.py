@@ -3,9 +3,9 @@ bytes, so the same upload always reads the same."""
 
 import hashlib
 import random
-from typing import Any
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError
+from ocr_common.types import OcrBlock, OcrEngineResult
 
 NAMA_POOL = [
     "BUDI SANTOSO",
@@ -40,9 +40,9 @@ def _format_npwp(d: str) -> str:
 class MockOcrEngine:
     name = "mock"
 
-    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> dict[str, Any]:
+    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> OcrEngineResult:
         if "servererror" in (filename or "").lower():
-            raise ServiceError(500, "Internal server error while processing OCR")
+            raise InternalError("Internal server error while processing OCR")
 
         rng = random.Random(hashlib.sha256(content).hexdigest())
         lines = [
@@ -52,7 +52,7 @@ class MockOcrEngine:
             f"NAMA : {rng.choice(NAMA_POOL)}",
             f"NAMA BADAN : {rng.choice(NAMA_BADAN_POOL)}",
         ]
-        blocks = [
+        blocks: list[OcrBlock] = [
             {
                 "text": text,
                 "confidence": round(rng.uniform(0.85, 0.99), 3),

@@ -5,7 +5,17 @@ Every `get_*` here is what the routes take through `Depends(...)` and what tests
 
 from functools import lru_cache
 
-from ocr_common.pipeline import STAGE_SCORING, OutboxRelay, StagePipeline, build_outbox_relay, build_stage_pipeline
+from ocr_common.pipeline import (
+    STAGE_SCORING,
+    OutboxRelay,
+    SqlStageResults,
+    StagePipeline,
+    StaleJobReaper,
+    build_outbox_relay,
+    build_stage_pipeline,
+    build_stage_results,
+    build_stale_job_reaper,
+)
 from ocr_common.registry import Factory, build_backend
 
 from app.config import Settings, get_settings
@@ -51,6 +61,11 @@ def get_relay() -> OutboxRelay | None:
     return build_outbox_relay(get_settings(), get_pipeline())
 
 
+@lru_cache
+def get_results() -> SqlStageResults | None:
+    return build_stage_results(get_settings())
+
+
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
@@ -63,4 +78,14 @@ def get_confidence_service() -> ConfidenceService:
 
 
 def get_job_service() -> ScoringJobService:
-    return ScoringJobService(get_pipeline(), get_confidence_service(), get_settings().field_confidence_threshold)
+    return ScoringJobService(
+        get_pipeline(),
+        get_confidence_service(),
+        get_settings().field_confidence_threshold,
+        results=get_results(),
+    )
+
+
+@lru_cache
+def get_reaper() -> StaleJobReaper | None:
+    return build_stale_job_reaper(get_settings(), get_pipeline(), get_job_service().resume)

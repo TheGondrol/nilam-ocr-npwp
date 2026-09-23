@@ -4,8 +4,9 @@ NPWP number."""
 
 from typing import Any
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import BadRequest
 from ocr_common.npwp import NPWP_FIELDS
+from ocr_common.types import OcrBlock, StructuredField
 
 from app.ml.utils import is_badan, normalize_npwp
 from app.vendor.npwp_rules import npwp as rules
@@ -16,10 +17,10 @@ def _format_npwp(digits: str) -> str:
     return normalize_npwp(digits) if len(digits) == 15 else digits
 
 
-def _page_results(lines: list[dict]) -> list[dict[str, Any]]:
+def _page_results(lines: list[OcrBlock]) -> list[dict[str, Any]]:
     """Regroup the lines per page into the {rec_texts, rec_scores, rec_polys} shape the rules expect.
     Lines without a bbox get a synthetic top-to-bottom layout."""
-    by_page: dict[int, list[dict]] = {}
+    by_page: dict[int, list[OcrBlock]] = {}
     for line in lines:
         by_page.setdefault(int(line.get("page") or 0), []).append(line)
 
@@ -29,8 +30,8 @@ def _page_results(lines: list[dict]) -> list[dict[str, Any]]:
         positioned = all(line.get("bbox") for line in page_lines)
         polys = []
         for order, line in enumerate(page_lines):
-            if positioned:
-                b = line["bbox"]
+            b = line.get("bbox")
+            if positioned and b is not None:
                 polys.append([[b["x1"], b["y1"]], [b["x2"], b["y1"]], [b["x2"], b["y2"]], [b["x1"], b["y2"]]])
             else:
                 top = order * 10
@@ -51,12 +52,12 @@ class NpwpRulesStructurer:
     def __init__(self, page_guardrails: bool = True):
         self._page_guardrails = page_guardrails
 
-    def structure(self, lines: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    def structure(self, lines: list[OcrBlock]) -> dict[str, StructuredField]:
         pages = _page_results(lines)
         if self._page_guardrails:
             self._reject_non_npwp(pages)
 
-        fields: dict[str, dict] = {}
+        fields: dict[str, StructuredField] = {}
         number = self._pick_number(pages)
         if number is not None:
             fields["nomor_npwp"] = number
@@ -78,27 +79,27 @@ class NpwpRulesStructurer:
             }
             break
 
-        empty = {"value": None, "confidence": 0.0, "source": None, "signals": None}
-        return {name: fields.get(name, dict(empty)) for name in NPWP_FIELDS}
+        return {
+            name: fields.get(name, StructuredField(value=None, confidence=0.0, source=None, signals=None))
+            for name in NPWP_FIELDS
+        }
 
     @staticmethod
     def _reject_non_npwp(pages: list[dict[str, Any]]) -> None:
         if len(pages) > rules.MAX_EXPECTED_PAGES:
-            raise ServiceError(
-                400, f"Upload has {len(pages)} pages; an NPWP upload is at most {rules.MAX_EXPECTED_PAGES}"
-            )
+            raise BadRequest(f"Upload has {len(pages)} pages; an NPWP upload is at most {rules.MAX_EXPECTED_PAGES}")
         for page in pages:
             texts = page["rec_texts"]
             keyword = rules.find_other_document_keyword(texts)
             if keyword is not None:
-                raise ServiceError(400, f"Upload contains another document ({keyword}); send the NPWP card only")
+                raise BadRequest(f"Upload contains another document ({keyword}); send the NPWP card only")
             if rules.contains_captcha(texts):
-                raise ServiceError(400, "Page shows a CAPTCHA challenge, not an NPWP card")
+                raise BadRequest("Page shows a CAPTCHA challenge, not an NPWP card")
             if rules.contains_web_lookup_screenshot(texts):
-                raise ServiceError(400, "Page is a screenshot of the DJP NPWP lookup, not an NPWP card")
+                raise BadRequest("Page is a screenshot of the DJP NPWP lookup, not an NPWP card")
 
     @staticmethod
-    def _pick_number(pages: list[dict[str, Any]]) -> dict | None:
+    def _pick_number(pages: list[dict[str, Any]]) -> StructuredField | None:
         inside, anywhere = [], []
         n_matches = 0
         for page in pages:

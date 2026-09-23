@@ -150,3 +150,63 @@ def test_a_delay_token_in_the_file_name_holds_the_job_back_in_local_mode(harness
 
     assert wait_for_job(client, "/v1/ekstraksi/jobs/REQ_slow", timeout=0.3)["status"] == "PROCESSING"
     assert wait_for_job(client, "/v1/ekstraksi/jobs/REQ_slow", timeout=3)["status"] == "DONE"
+
+
+def test_handoff_by_reference_leaves_the_ocr_result_out_of_the_payload(auth):
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = EkstraksiJobService(
+        pipeline, get_ekstraksi_service(), 5 * 1024 * 1024, simulate_delay=True, handoff_by_reference=True
+    )
+    app.dependency_overrides[get_job_service] = lambda: service
+    try:
+        with make_client(app) as client:
+            _submit(client, auth, "REQ_ref")
+            job = wait_for_job(client, "/v1/ekstraksi/jobs/REQ_ref")
+    finally:
+        app.dependency_overrides.pop(get_job_service, None)
+
+    assert job["status"] == "DONE"
+    assert next_stage.payloads == [{"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}]
+
+
+def _stale_service():
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_OCR, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    return EkstraksiJobService(pipeline, get_ekstraksi_service(), 5 * 1024 * 1024), pipeline, callback, next_stage
+
+
+async def test_a_stale_job_sent_as_file_url_is_fetched_and_run_again(monkeypatch):
+    service, pipeline, callback, next_stage = _stale_service()
+    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS, "file_url": "http://minio:9000/b/npwp.jpg"}
+    await pipeline.repository.claim("REQ_stale", input=stored_input)
+
+    async def fake_fetch(url, *, limit, timeout=10.0, policy):
+        assert url == stored_input["file_url"]
+        return b"\xff\xd8fake-jpeg-bytes", "npwp.jpg", "image/jpeg"
+
+    monkeypatch.setattr("app.services.job_service.fetch", fake_fetch)
+    await service.resume("REQ_stale", stored_input)
+    await pipeline.runner.drain(5)
+
+    assert (await pipeline.get("REQ_stale"))["status"] == "DONE"
+    assert next_stage.payloads[0]["guardrails"] == GUARDRAILS
+    assert [(c["stage"], c["status"]) for c in callback.calls] == [("OCR", "DONE")]
+
+
+async def test_a_stale_job_of_an_inline_upload_fails_with_a_reason():
+    service, pipeline, callback, next_stage = _stale_service()
+    await pipeline.repository.claim("REQ_gone", input={"document_type": "npwp", "guardrails": None, "file_url": None})
+
+    await service.resume("REQ_gone", {"document_type": "npwp", "guardrails": None, "file_url": None})
+    await pipeline.runner.drain(5)
+
+    job = await pipeline.get("REQ_gone")
+    assert job["status"] == "FAILED"
+    assert "uploaded inline" in job["error_message"]
+    assert [(c["stage"], c["status"]) for c in callback.calls] == [("OCR", "FAILED")]
+    assert next_stage.payloads == []

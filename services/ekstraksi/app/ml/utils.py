@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from ocr_common.types import BoundingBox
+
 
 def model_name(models: Any) -> str | None:
     if not isinstance(models, dict):
@@ -19,7 +21,7 @@ def confidence(score: Any) -> float:
         return 0.0
 
 
-def bbox(poly: Any) -> dict[str, int] | None:
+def bbox(poly: Any) -> BoundingBox | None:
     """Upright box around a polygon of [x, y] points; None when the polygon is missing or malformed."""
     try:
         xs = [float(point[0]) for point in poly]

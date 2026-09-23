@@ -17,20 +17,10 @@ section-order = ["future", "standard-library", "third-party", "ocr-common", "fir
 [tool.ruff.lint.per-file-ignores]
 "services/*/app/api/**" = ["B008", "B904"]
 "services/*/app/dependencies.py" = ["B008"]
-"libs/ocr_common/ocr_common/intake.py" = ["B008"]
-
-[tool.pyrefly]
-search-path = [
-    "libs/ocr_common",
-]
-
-[tool.pyright]
-extraPaths = [
-    "libs/ocr_common",
-]
+"libs/ocr_common/ocr_common/web/intake.py" = ["B008"]
+"tools/tracker/backend/*.py" = ["B008", "B904"]
 
 [tool.ty.environment]
 extra-paths = [
     "libs/ocr_common",
 ]
-

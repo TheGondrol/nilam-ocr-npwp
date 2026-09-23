@@ -1,4 +1,6 @@
-from typing import Any, Protocol
+from typing import Protocol
+
+from ocr_common.types import OcrBlock, StructuredField
 
 
 class Structurer(Protocol):
@@ -6,9 +8,9 @@ class Structurer(Protocol):
 
     Returns one entry per field in `ocr_common.npwp.NPWP_FIELDS`, each
     {value, confidence, source, signals}; `value` is None when the field was not found.
-    Raises `ServiceError(400, ...)` when the lines are not a lone NPWP card.
+    Raises `BadRequest` when the lines are not a lone NPWP card.
     """
 
     name: str
 
-    def structure(self, lines: list[dict[str, Any]]) -> dict[str, dict[str, Any]]: ...
+    def structure(self, lines: list[OcrBlock]) -> dict[str, StructuredField]: ...

@@ -1,3 +1,9 @@
+"""Transactional outbox: the messages a finished job must send (callback, hand-off) are written in the
+same transaction as its result and delivered afterwards by `OutboxRelay`, so a crash between the two
+loses nothing. The table itself lives in `outbox_sql` (SQLAlchemy); this module has no database
+dependency so that a service without one can import the message helpers.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ocr_common.errors import ServiceError
+from ocr_common.errors import InternalError, ServiceError
+from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 if TYPE_CHECKING:
     from sqlalchemy import Row
@@ -30,12 +37,16 @@ WATCH_INTERVAL_SECONDS = 60.0
 
 @dataclass(frozen=True)
 class OutboxMessage:
+    """A message to deliver: `kind` is `callback` or `handoff`, `payload` is what to send."""
+
     kind: str
     payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class OutboxStats:
+    """One reading of a stage's backlog, as `GET /v1/<stage>/outbox` and the metrics report it."""
+
     stage: str
     pending: int
     retrying: int
@@ -51,6 +62,7 @@ def callback_message(
     result: dict[str, Any] | None = None,
     error_message: str | None = None,
 ) -> OutboxMessage:
+    """The callback body for `(stage, status)` of `request_id`, as a message."""
     return OutboxMessage(
         KIND_CALLBACK,
         {
@@ -64,19 +76,28 @@ def callback_message(
 
 
 def handoff_message(next_stage: str, body: dict[str, Any]) -> OutboxMessage:
+    """The hand-off to `next_stage` with `body`, as a message."""
     return OutboxMessage(KIND_HANDOFF, {"next_stage": next_stage, "body": body})
 
 
 class Outbox(Protocol):
-    async def add(
-        self, conn: AsyncConnection, request_id: str, stage: str, messages: Sequence[OutboxMessage]
-    ) -> None: ...
+    """What the repository needs from an outbox: add messages inside its transaction, wake the relay after."""
 
-    def wake(self) -> None: ...
+    async def add(self, conn: AsyncConnection, request_id: str, stage: str, messages: Sequence[OutboxMessage]) -> None:
+        """Insert `messages` for `request_id` using the caller's connection (inside its transaction)."""
+        ...
+
+    def wake(self) -> None:
+        """Tell the relay of this process that new rows are committed."""
+        ...
 
 
 class Sender(Protocol):
-    async def send(self, body: dict[str, Any], /) -> None: ...
+    """Anything that can send one message body: the orchestrator callback or the next-stage client."""
+
+    async def send(self, body: dict[str, Any], /) -> None:
+        """Send `body` once; raise `ServiceError` on failure."""
+        ...
 
 
 HandoffFailed = Callable[[str, str, str], Awaitable[None]]
@@ -126,9 +147,11 @@ class OutboxRelay:
 
     @property
     def stage(self) -> str:
+        """The stage whose messages this relay delivers."""
         return self._stage
 
     def start(self) -> None:
+        """Start the delivery loop as a background task (idempotent)."""
         if self._task is None:
             self._stopping.clear()
             self._task = asyncio.create_task(self.run(), name=f"outbox-relay-{self._stage}")
@@ -153,6 +176,7 @@ class OutboxRelay:
             logger.exception("outbox relay %s: shutdown delivery failed", self._stage)
 
     async def run(self) -> None:
+        """The delivery loop: deliver what is due, then sleep until woken, stopped, or the poll interval passes."""
         while not self._stopping.is_set():
             try:
                 delivered = await self.deliver_due()
@@ -187,6 +211,9 @@ class OutboxRelay:
         except Exception:
             logger.exception("outbox relay %s: could not read the backlog", self._stage)
             return None
+        from ocr_common.pipeline import metrics
+
+        metrics.observe_outbox(stats)
         stale = stats.oldest_pending_seconds is not None and stats.oldest_pending_seconds > self._stale_after
         if stale or stats.dead_letters:
             logger.warning(
@@ -200,18 +227,27 @@ class OutboxRelay:
         return stats
 
     async def deliver_due(self) -> int:
+        """Claim and send one batch of due messages; returns how many were delivered."""
+        from ocr_common.pipeline import metrics
+
         rows = await self._outbox.claim(self._stage, self._batch, self._lease)
         delivered = 0
         for row in sorted(rows, key=lambda row: (row.kind != KIND_HANDOFF, row.id)):
+            token = bind_request_id(row.request_id)
             try:
                 await self._send(row)
             except ServiceError as exc:
                 if exc.status_code >= 500 and self._age(row) < self._max_age:
                     await self._outbox.retry_later(row.id, self._backoff(row.attempts), exc.message)
+                    metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "retry").inc()
                     continue
                 await self._give_up(row, exc.message)
+                metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "dead").inc()
                 continue
+            finally:
+                reset_request_id(token)
             await self._outbox.done(row.id)
+            metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "delivered").inc()
             delivered += 1
         return delivered
 
@@ -227,7 +263,7 @@ class OutboxRelay:
             await self._callback.send(row.payload)
             return
         if self._next_stage is None:
-            raise ServiceError(500, f"{row.stage} has no next stage to hand off to")
+            raise InternalError(f"{row.stage} has no next stage to hand off to")
         await self._next_stage.send(row.payload["body"])
 
     async def _give_up(self, row: Row[Any], reason: str) -> None:
