@@ -4,23 +4,25 @@ the SCORING callback, and its mapping to the orchestrator's `extract-ocr` contra
 from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.types import ContractField, FinalField, FinalResult
+from ocr_common.types import ContractData, ContractField, FinalField, FinalResult
 
 DOCUMENT_TYPE = "npwp"
 NPWP_FIELDS = ("nomor_npwp", "nama", "nama_badan")
 TRUST_SCORES = ("npwp_confidence", "name_confidence")
 
 
-def contract_fields(result: FinalResult, threshold: float) -> dict[str, ContractField]:
+def contract_fields(result: FinalResult, threshold: float) -> ContractData:
     """The `data` of the orchestrator's `extract-ocr` contract: `nomor_npwp` and `nama` (the person's
     name, or the company's registered name) with `confidence` 1 when the trust model's probability
-    reaches `threshold`, else 0."""
+    reaches `threshold`, else 0, plus the review `flag` / `flag_reason` of the structuring rules."""
     fields = result["fields"]
     scoring = result["scoring"]
     name = fields.get("nama") if _has_value(fields.get("nama")) else fields.get("nama_badan")
     return {
         "nomor_npwp": _field(fields.get("nomor_npwp"), scoring.get("npwp_confidence"), threshold),
         "nama": _field(name, scoring.get("name_confidence"), threshold),
+        "flag": bool(result.get("flag", False)),
+        "flag_reason": result.get("flag_reason"),
     }
 
 
@@ -40,8 +42,8 @@ def final_result(
     structuring: Mapping[str, Any],
     scoring: Mapping[str, Any],
 ) -> FinalResult:
-    """Combines the structuring fields, the trust model's confidences and the guardrails report that was
-    submitted into the `FinalResult` the SCORING callback carries."""
+    """Combines the structuring fields and flag, the trust model's confidences and the guardrails report
+    that was submitted into the `FinalResult` the SCORING callback carries."""
     fields: dict[str, FinalField] = {
         name: {"value": field.get("value"), "confidence": field.get("confidence", 1.0)}
         for name, field in (structuring.get("fields") or {}).items()
@@ -51,4 +53,6 @@ def final_result(
         "fields": fields,
         "scoring": {"npwp_confidence": scoring["npwp_confidence"], "name_confidence": scoring["name_confidence"]},
         "guardrails": guardrails,
+        "flag": bool(structuring.get("flag", False)),
+        "flag_reason": structuring.get("flag_reason"),
     }

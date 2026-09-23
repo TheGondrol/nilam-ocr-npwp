@@ -1,3 +1,7 @@
+"""The ML team's trust model (weights/trust_model.joblib, retrained 21 Sep 2026): a pooled npwp+name
+logistic regression that answers "how likely is this field's value correct". One feature row per
+field, computed exactly as their `scoring/trust_scoring.py` computes it from a live request."""
+
 import logging
 import warnings
 from pathlib import Path
@@ -12,16 +16,25 @@ logger = logging.getLogger(__name__)
 FEATURES = (
     "field_is_npwp",
     "field_score",
-    "field_corrected",
     "shape_confidence",
     "field_multiple_candidates",
-    "n_boxes_per_page",
+    "name_max_char_len",
     "avg_doc_score",
     "min_doc_score",
     "flag",
     "guardrail_probability",
 )
-UNDEFINED_FEATURES = ("shape_confidence",)
+PAYLOAD_KEYS = (
+    "npwp",
+    "npwp_score",
+    "npwp_candidate_count",
+    "name_base",
+    "name_score",
+    "avg_doc_score",
+    "min_doc_score",
+    "flag",
+    "guardrail_probability",
+)
 MISSING = float("nan")
 
 
@@ -36,6 +49,25 @@ def _number(value: Any) -> float:
 
 def _has_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def npwp_shape_confidence(npwp: str | None) -> int:
+    """2 = 16-digit NIK-based format, 1 = legacy 15 digits, 0 = anything else or missing. Counted on the
+    digits only, so both `12.345.678.9-012.000` and `123456789012000` are tier 1."""
+    digits = "".join(ch for ch in npwp if ch.isdigit()) if npwp else ""
+    return {16: 2, 15: 1}.get(len(digits), 0)
+
+
+def name_shape_confidence(name_base: str | None) -> int:
+    """2 = a normal multi-word name, 1 = exactly one word, 0 = empty or missing."""
+    words = len(name_base.split()) if name_base else 0
+    return 2 if words >= 2 else words
+
+
+def name_max_char_len(name_base: str | None) -> int:
+    """Longest whitespace-separated token of the base name read (0 when missing): an abnormally long token
+    means OCR ran words together."""
+    return max((len(token) for token in name_base.split()), default=0) if name_base else 0
 
 
 class TrustModel:
@@ -66,42 +98,37 @@ class TrustModel:
         self.metadata: dict[str, Any] = {
             "steps": [type(step).__name__ for _, step in self._pipeline.steps],
             "features": list(FEATURES),
-            "undefined_features": list(UNDEFINED_FEATURES),
             "train_report": {key: _plain(value) for key, value in (bundle.get("train_report") or {}).items()},
         }
         logger.info("trust model loaded from %s: %s", path, self.metadata)
 
     @staticmethod
-    def _shape_confidence(payload: dict[str, Any], *, is_npwp: bool) -> float:
-        return MISSING
-
-    def feature_rows(self, payload: dict[str, Any]) -> dict[str, list[float]]:
-        n_boxes, num_pages = _number(payload.get("n_boxes")), _number(payload.get("num_pages"))
-        boxes_per_page = n_boxes / num_pages if num_pages and num_pages > 0 else MISSING
+    def feature_rows(payload: dict[str, Any]) -> dict[str, list[float]]:
+        """The two feature rows (npwp, name) of one request, in `FEATURES` order. A missing input is NaN
+        and the model's own median imputer fills it, as in training."""
         candidates = payload.get("npwp_candidate_count")
-        multiple = MISSING if candidates is None else float(candidates > 1)
         document = [
-            boxes_per_page,
             _number(payload.get("avg_doc_score")),
             _number(payload.get("min_doc_score")),
-            _number(payload.get("flag")),
+            float(bool(payload.get("flag"))),
             _number(payload.get("guardrail_probability")),
         ]
+        name_base = payload.get("name_base")
         return {
             "npwp": [
                 1.0,
                 _number(payload.get("npwp_score")),
-                _number(payload.get("npwp_has_homoglyph")),
-                self._shape_confidence(payload, is_npwp=True),
-                multiple,
+                float(npwp_shape_confidence(payload.get("npwp"))),
+                MISSING if candidates is None else float(int(candidates) > 1),
+                MISSING,  # name-only feature, imputed for the npwp row as in training
                 *document,
             ],
             "name": [
                 0.0,
                 _number(payload.get("name_score")),
-                _number(payload.get("name_corrected")),
-                self._shape_confidence(payload, is_npwp=False),
-                multiple,
+                float(name_shape_confidence(name_base)),
+                MISSING,  # no name-candidate scorer exists; NaN in training too
+                float(name_max_char_len(name_base)),
                 *document,
             ],
         }
@@ -114,7 +141,7 @@ class TrustModel:
 
         return {
             "npwp_confidence": round(float(probabilities[0]), 4) if _has_text(payload.get("npwp")) else None,
-            "name_confidence": round(float(probabilities[1]), 4) if _has_text(payload.get("name")) else None,
+            "name_confidence": round(float(probabilities[1]), 4) if _has_text(payload.get("name_base")) else None,
         }
 
 

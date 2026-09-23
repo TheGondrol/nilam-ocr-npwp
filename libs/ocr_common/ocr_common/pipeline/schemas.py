@@ -120,9 +120,13 @@ class StructuredFieldPayload(_Forwarded):
     signals: dict[str, Any] | None = Field(
         None,
         description=(
-            "Inputs for the scoring model. nomor_npwp: `has_homoglyph` (an OCR letter/digit mix-up such as O->0 "
-            "was corrected), `candidate_count` (NPWP-shaped numbers found in the document). "
-            "nama / nama_badan: `corrected` (the name was changed by the name-master correction)"
+            "Inputs for the scoring model and review signals of the ML team's rules. nomor_npwp: "
+            "`candidate_count` (NPWP-shaped numbers found in the document), `has_homoglyph` (OCR read a letter "
+            "where a digit belongs), `invalid_province_prefix` / `invalid_kecamatan_prefix` / `invalid_birthdate` "
+            "(16-digit NIK-based number fails the Kode Wilayah / birthdate check), `invalid_kpp_prefix` (15-digit "
+            "number's KPP office code is unknown). nama / nama_badan: `name_base` (the read before any "
+            "normalisation; the trust model measures the name on this), `corrected` (the returned name differs "
+            "from `name_base`)"
         ),
         examples=[{"has_homoglyph": False, "candidate_count": 2}],
     )
@@ -141,6 +145,20 @@ class StructuringPayload(_Forwarded):
     fields: dict[str, StructuredFieldPayload] = Field(
         ...,
         description="Always `nomor_npwp`, `nama`, `nama_badan`. A person's card fills `nama`, a company's `nama_badan`",
+    )
+    flag: bool = Field(
+        False,
+        description=(
+            "Review flag of the ML team's rules: another document bundled in, CAPTCHA or lookup screenshot, "
+            "number or name not found, single-word name, letter in the number, invalid Kode Wilayah / birthdate / "
+            "KPP code, more than 2 pages. Never rejects: it is a feature of the trust model"
+        ),
+        examples=[False],
+    )
+    flag_reason: str | None = Field(
+        None,
+        description="Why `flag` is true, in Indonesian, for a reviewer; null when not flagged",
+        examples=[None],
     )
 
 
@@ -203,6 +221,17 @@ class FinalResult(BaseModel):
     )
     guardrails: GuardrailsResult | None = Field(
         None, description="The guardrails result that was submitted with the job, returned unchanged"
+    )
+    flag: bool = Field(
+        False,
+        description=(
+            "Review flag of the structuring rules (see the structuring result). True never rejects the document: "
+            "the value is still returned, the trust model's confidence is lower, and `flag_reason` says why"
+        ),
+        examples=[False],
+    )
+    flag_reason: str | None = Field(
+        None, description="Why `flag` is true, in Indonesian, for a reviewer; null when not flagged", examples=[None]
     )
 
 

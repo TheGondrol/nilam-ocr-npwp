@@ -23,6 +23,10 @@ class ConfidenceService:
     def payload_from_chain(
         guardrails: dict[str, Any] | None, ocr: dict[str, Any] | None, structuring: dict[str, Any]
     ) -> dict[str, Any]:
+        """The ML team's scoring payload from the chained stage results: number and name signals from
+        structuring (the name as its base read, before normalisation), the document-level OCR scores from
+        the OCR blocks, the flag from the structuring rules, and the guardrails confidence of an accepted
+        document."""
         fields = structuring.get("fields") or {}
         number = fields.get("nomor_npwp") if _has_value(fields.get("nomor_npwp")) else None
         name = next((fields[key] for key in NAME_FIELDS if _has_value(fields.get(key))), None)
@@ -31,21 +35,16 @@ class ConfidenceService:
 
         blocks = (ocr or {}).get("blocks") or []
         scores = [float(block["confidence"]) for block in blocks if block.get("confidence") is not None]
-        pages = {int(block.get("page") or 0) for block in blocks}
 
         document = (guardrails or {}).get("document") or {}
         return {
             "npwp": re.sub(r"\D", "", str(number["value"])) if number else None,
             "npwp_score": number.get("confidence") if number else None,
-            "npwp_has_homoglyph": number_signals.get("has_homoglyph"),
             "npwp_candidate_count": number_signals.get("candidate_count"),
-            "name": str(name["value"]) if name else None,
+            "name_base": (name_signals.get("name_base") or str(name["value"])) if name else None,
             "name_score": name.get("confidence") if name else None,
-            "name_corrected": name_signals.get("corrected"),
-            "n_boxes": len(blocks) or None,
-            "num_pages": len(pages) or None,
             "avg_doc_score": round(sum(scores) / len(scores), 6) if scores else None,
             "min_doc_score": min(scores) if scores else None,
-            "flag": None,
+            "flag": bool(structuring.get("flag", False)),
             "guardrail_probability": document.get("confidence") if document.get("verdict") == "accepted" else None,
         }

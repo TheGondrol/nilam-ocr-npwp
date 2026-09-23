@@ -19,6 +19,8 @@ STRUCTURING = {
         "nama": {"value": "BUDI SANTOSO", "confidence": 0.95, "source": "NAMA : BUDI SANTOSO"},
         "nama_badan": {"value": None, "confidence": 0.0, "source": None},
     },
+    "flag": True,
+    "flag_reason": "Nama hanya terdiri dari 1 kata, mohon dicek kembali",
 }
 
 
@@ -61,8 +63,9 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
     assert set(result) == {"npwp_confidence", "name_confidence", "payload"}
     assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
     assert result["payload"]["npwp"] == "123456789012345"
-    assert result["payload"]["name"] == "BUDI SANTOSO"
-    assert result["payload"]["n_boxes"] == 1
+    assert result["payload"]["name_base"] == "BUDI SANTOSO"
+    assert result["payload"]["avg_doc_score"] == 0.96
+    assert result["payload"]["flag"] is True
     assert result["payload"]["guardrail_probability"] is None
 
     assert len(callback.calls) == 1
@@ -77,6 +80,8 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
         },
         "scoring": {"npwp_confidence": result["npwp_confidence"], "name_confidence": result["name_confidence"]},
         "guardrails": GUARDRAILS,
+        "flag": True,
+        "flag_reason": "Nama hanya terdiri dari 1 kata, mohon dicek kembali",
     }
 
 
@@ -146,7 +151,7 @@ def test_by_reference_reads_structuring_and_ocr_from_the_database(auth):
 
     assert job["status"] == "DONE"
     assert job["result"]["payload"]["npwp"] == "123456789012345"
-    assert job["result"]["payload"]["n_boxes"] == 1, "the OCR blocks were read from the database too"
+    assert job["result"]["payload"]["avg_doc_score"] == 0.96, "the OCR blocks were read from the database too"
     [call] = callback.calls
     assert call["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
     assert call["result"]["guardrails"] == GUARDRAILS

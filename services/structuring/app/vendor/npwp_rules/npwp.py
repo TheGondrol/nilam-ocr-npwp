@@ -1,6 +1,10 @@
+import itertools
 import re
 
 import numpy as np
+
+from .kpp_codes import is_valid_kpp_code
+from .wilayah_codes import is_valid_kecamatan_code
 
 # OCR occasionally misreads a single digit as a visually similar letter in
 # an otherwise digit-shaped run (e.g. "1Z30" for "1230", "9O" for "90") -
@@ -53,26 +57,27 @@ _AMBIGUOUS_DIGIT = "T"
 def _resolve_province_prefix(digit_like: str) -> str:
     """Given a digit-like string (letters not yet translated) whose first
     two characters are meant to be a NIK/16-digit-NPWP province code,
-    replace an ambiguous "T" in the FIRST of those two positions with
-    whichever of "1"/"7" completes a real code from PROVINCE_CODES. Only
-    ever resolves position 1, never position 2 (e.g. won't touch "3T...")
-    - deliberately narrower than "T anywhere in the prefix": position 1 is
-    the one actually confirmed against a real scan ("T701..." on
-    PK24055W7U, whose true leading digit is "1" per the card's own NPWP16
-    label); position-2 resolution was only checked on paper against the
-    PROVINCE_CODES table, never against an observed case, so it's left
-    unresolved rather than fired on an unverified assumption. Leaves "T"
-    untouched (for normalize_npwp's final \\D-strip to drop, same as any
-    other unresolvable character) if it isn't in position 1, or if both/
-    neither substitution yields a valid code - no signal means no guess,
-    same stance name_master.py takes on ambiguous name matches."""
-    if digit_like[:1] != _AMBIGUOUS_DIGIT:
+    replace an ambiguous "T" in EITHER of those two positions with
+    whichever of "1"/"7" completes a real code from PROVINCE_CODES. Any
+    other homoglyph letter in the prefix is translated first (e.g. the "S"
+    in "ST71" -> "5", so "5T" resolves to "51" Bali, not "57"). Position 1
+    is confirmed against a real scan ("T701..." on PK24055W7U, true leading
+    digit "1"); position 2 against "ST71 0302 0880 0005" on PN2510K1RI (Kota
+    Denpasar, Bali). Leaves the string untouched (for normalize_npwp's
+    final \\D-strip to drop the "T", same as any other unresolvable
+    character) if there's no "T" in the prefix, or if zero or more than one
+    substitution yields a valid code - no signal means no guess, same
+    stance name_master.py takes on ambiguous name matches."""
+    prefix = digit_like[:2].translate(_DIGIT_HOMOGLYPHS)
+    if _AMBIGUOUS_DIGIT not in prefix:
         return digit_like
-    prefix = digit_like[:2]
     valid = [
-        prefix.replace(_AMBIGUOUS_DIGIT, digit, 1)
-        for digit in ("1", "7")
-        if prefix.replace(_AMBIGUOUS_DIGIT, digit, 1) in PROVINCE_CODES
+        code
+        for code in (
+            "".join(choice)
+            for choice in itertools.product(*(("1", "7") if ch == _AMBIGUOUS_DIGIT else (ch,) for ch in prefix))
+        )
+        if code in PROVINCE_CODES
     ]
     if len(valid) != 1:
         return digit_like
@@ -333,6 +338,104 @@ def contains_digit_homoglyph(text: str) -> bool:
     text (before normalize_npwp's translation), since the corrected/
     normalized string never contains letters by construction."""
     return text.translate(_DIGIT_HOMOGLYPHS) != text
+
+
+def has_invalid_province_prefix(text: str) -> bool:
+    """True if this matched NPWP-shaped string is the 16-digit NIK-based
+    format and its first two digits, after the same homoglyph correction
+    and "T" disambiguation normalize_npwp() applies, don't correspond to
+    any real code in PROVINCE_CODES - e.g. a cleanly-OCR'd "77..." prefix,
+    which involves no ambiguous letter and so gives
+    _resolve_province_prefix nothing to act on. This is a review flag, not
+    a correction: unlike _resolve_province_prefix (which only substitutes
+    a digit when exactly one candidate is valid), there's no safe guess to
+    make here - the mismatch might be a genuine misread, or a real code
+    this table is missing. Always False for the legacy 15-digit format,
+    whose first two digits are a taxpayer-type code, not a province code.
+    Also False when a "T" in the prefix was left unresolved (zero or more
+    than one valid completion) - that ambiguity is already the caller's
+    signal via the "T" surviving in the raw match text, and normalize_npwp
+    itself will end up dropping it, so this check doesn't pile a second,
+    misleading flag on the same 16th-character shortfall."""
+    digit_like = re.sub(rf"[^{_DIGIT_LIKE}]", "", text)
+    if len(digit_like) != 16:
+        return False
+    normalized = _normalize_npwp_run(digit_like)
+    if len(normalized) != 16:
+        return False
+    return normalized[:2] not in PROVINCE_CODES
+
+
+def has_invalid_kecamatan_prefix(text: str) -> bool:
+    """True if this matched NPWP-shaped string is the 16-digit NIK-based
+    format and its first six digits (province+kabupaten/kota+kecamatan),
+    after the same normalization has_invalid_province_prefix applies,
+    don't correspond to any real kecamatan code in the Depdagri reference
+    table (see wilayah_codes.is_valid_kecamatan_code) - a strictly broader
+    check than has_invalid_province_prefix's, since a code that exists at
+    the kecamatan level necessarily has a valid province and kabupaten/kota
+    prefix too (build_wilayah_codes.py's own parse-time sanity checks
+    guarantee that). Kept as a separate flag rather than replacing
+    has_invalid_province_prefix so the reference-data-unavailable case
+    (is_valid_kecamatan_code returns None) degrades independently of the
+    always-available 2-digit check: False here (like that function) means
+    "no signal", not "confirmed valid" - see is_valid_kecamatan_code."""
+    digit_like = re.sub(rf"[^{_DIGIT_LIKE}]", "", text)
+    if len(digit_like) != 16:
+        return False
+    normalized = _normalize_npwp_run(digit_like)
+    if len(normalized) != 16:
+        return False
+    return is_valid_kecamatan_code(normalized[:6]) is False
+
+
+def has_invalid_birthdate_digits(text: str) -> bool:
+    """True if this matched NPWP-shaped string is the 16-digit NIK-based
+    format and digits 7-12 (the NIK's embedded birthdate, DDMMYY) don't
+    form a plausible date - day (digits 7-8) outside 01-31, or outside
+    41-71 for a female NIK (the standard NIK convention adds 40 to the day
+    of month for women), or month (digits 9-10) outside 01-12. The year
+    (digits 11-12) is deliberately left unchecked: a bare two-digit year is
+    genuinely ambiguous between 19xx/20xx with nothing else on the card to
+    resolve it, so unlike day/month there's no value in that pair that's
+    actually out of range - every 00-99 is a plausible birth year. Same
+    normalization as has_invalid_province_prefix/has_invalid_kecamatan_prefix;
+    always False for the legacy 15-digit format, which has no NIK-style
+    birthdate encoded in it at all."""
+    digit_like = re.sub(rf"[^{_DIGIT_LIKE}]", "", text)
+    if len(digit_like) != 16:
+        return False
+    normalized = _normalize_npwp_run(digit_like)
+    if len(normalized) != 16:
+        return False
+    day = int(normalized[6:8])
+    month = int(normalized[8:10])
+    valid_day = 1 <= day <= 31 or 41 <= day <= 71
+    valid_month = 1 <= month <= 12
+    return not (valid_day and valid_month)
+
+
+def has_invalid_kpp_prefix(text: str) -> bool:
+    """True if this matched NPWP-shaped string is the legacy 15-digit
+    format (AA.BBB.CCC.D-EEE.FFF) and its digits 10-12 (EEE, the
+    registering KPP office's code) don't correspond to any real code in
+    the Depdagri/DJP reference table (see kpp_codes.is_valid_kpp_code) -
+    unlike has_invalid_province_prefix/has_invalid_kecamatan_prefix, this
+    only applies to the 15-digit format: the 16-digit NIK-based format has
+    no KPP code encoded in it at all, its digits 10-12 are part of the
+    NIK's own serial number instead. Same normalization approach as the
+    other has_invalid_* checks - always False for a 16-digit match, and
+    False (not a confirmed-valid signal) if a "T" in the digit run was
+    left unresolved (dropped by the final \\D-strip, shortening the
+    normalized string below 15) or if the reference data couldn't be
+    loaded (see is_valid_kpp_code)."""
+    digit_like = re.sub(rf"[^{_DIGIT_LIKE}]", "", text)
+    if len(digit_like) != 15:
+        return False
+    normalized = _normalize_npwp_run(digit_like)
+    if len(normalized) != 15:
+        return False
+    return is_valid_kpp_code(normalized[9:12]) is False
 
 
 # Counts digit-LIKE characters (see _DIGIT_LIKE) rather than str.isdigit(),

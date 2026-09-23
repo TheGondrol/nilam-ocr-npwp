@@ -12,8 +12,8 @@ from ocr_common.pipeline import (
     STAGE_STRUCTURING,
     NextStageClient,
     OutboxRelay,
-    SqlStageResults,
     StagePipeline,
+    StageResults,
     StaleJobReaper,
     build_next_stage_client,
     build_outbox_relay,
@@ -109,7 +109,7 @@ def get_relay() -> OutboxRelay | None:
 
 
 @lru_cache
-def get_results() -> SqlStageResults | None:
+def get_results() -> StageResults | None:
     return build_stage_results(get_settings())
 
 

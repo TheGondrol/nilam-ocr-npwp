@@ -9,6 +9,7 @@ STATUS_DESC = {
     401: "Unauthorized",
     404: "Not Found",
     409: "Conflict",
+    413: "Payload Too Large",
     422: "Unprocessable Entity",
     429: "Too Many Requests",
     500: "Internal Server Error",

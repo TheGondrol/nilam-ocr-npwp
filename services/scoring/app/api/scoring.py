@@ -14,19 +14,15 @@ from app.services.scoring_service import ScoringService
 router = APIRouter(tags=["Scoring"], dependencies=[Depends(verify_api_key)])
 
 CONFIDENCE_PAYLOAD_EXAMPLE = {
-    "npwp": "123456789012345",
-    "npwp_score": 0.9992,
-    "npwp_has_homoglyph": False,
+    "npwp": "12.345.678.9-012.000",
+    "npwp_score": 0.98,
     "npwp_candidate_count": 1,
-    "name": "BUDI SANTOSO",
-    "name_score": 0.9773,
-    "name_corrected": False,
-    "n_boxes": 6,
-    "num_pages": 1,
-    "avg_doc_score": 0.984883,
-    "min_doc_score": 0.9747,
-    "flag": None,
-    "guardrail_probability": 0.9821,
+    "name_base": "PT CONTOH INDONESIA",
+    "name_score": 0.95,
+    "avg_doc_score": 0.91,
+    "min_doc_score": 0.62,
+    "flag": False,
+    "guardrail_probability": 0.98,
 }
 
 
@@ -36,27 +32,29 @@ CONFIDENCE_PAYLOAD_EXAMPLE = {
     operation_id="predictConfidence",
     summary="Per-field confidence from the trust model, synchronous (no job, no callback)",
     description=(
-        "The ML team's scoring contract: the payload carries the chained results of the previous stages, "
-        "the answer is the probability that each extracted field is correct (`npwp_confidence`, "
-        "`name_confidence`), from `weights/trust_model.joblib` (imputer -> scaler -> logistic regression, "
-        "one feature row per field). There is no document score and no approve/reject decision here; "
-        "thresholds are the caller's. A field whose value is null gets a null confidence. Any other null "
-        "is treated as missing and filled by the model's own median imputer."
+        "The ML team's scoring contract (`POST /v1/score` of their scoring service, model of 21 Sep 2026): the "
+        "payload carries the signals of the previous stages, the answer is the probability that each extracted "
+        "field is correct (`npwp_confidence`, `name_confidence`), from `weights/trust_model.joblib` (imputer -> "
+        "scaler -> logistic regression, one feature row per field: `field_is_npwp`, `field_score`, "
+        "`shape_confidence`, `field_multiple_candidates`, `name_max_char_len`, `avg_doc_score`, `min_doc_score`, "
+        "`flag`, `guardrail_probability`). There is no document score and no approve/reject decision here; "
+        "thresholds are the caller's. A field whose value is null gets a null confidence. Any other null is "
+        "treated as missing and filled by the model's own median imputer."
     ),
     responses={
         200: success_examples(
             "Probability that each extracted field is correct",
             both=(
                 "Both fields present",
-                envelope(200, "Success", {"npwp_confidence": 0.9806, "name_confidence": 0.9948}, REQUEST_ID_EXAMPLE),
+                envelope(200, "Success", {"npwp_confidence": 0.9835, "name_confidence": 0.9806}, REQUEST_ID_EXAMPLE),
             ),
-            corrected_name=(
-                "`name_corrected: true`: the model was trained on data where a corrected field is almost always wrong",
-                envelope(200, "Success", {"npwp_confidence": 0.9737, "name_confidence": 0.001}, REQUEST_ID_EXAMPLE),
+            flagged=(
+                "`flag: true` (a review flag of the structuring rules) lowers both confidences",
+                envelope(200, "Success", {"npwp_confidence": 0.9757, "name_confidence": 0.9725}, REQUEST_ID_EXAMPLE),
             ),
             no_name=(
-                "`name` is null: a field that was not found has no confidence",
-                envelope(200, "Success", {"npwp_confidence": 0.9737, "name_confidence": None}, REQUEST_ID_EXAMPLE),
+                "`name_base` is null: a field that was not found has no confidence",
+                envelope(200, "Success", {"npwp_confidence": 0.9835, "name_confidence": None}, REQUEST_ID_EXAMPLE),
             ),
         ),
         401: UNAUTHORIZED,

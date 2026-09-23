@@ -12,6 +12,9 @@ from app.ml.utils import image_to_tensor
 
 logger = logging.getLogger(__name__)
 
+CLASS_ACCEPTED = "accepted"
+CLASS_REJECT = "reject"
+
 
 class EfficientNetPageClassifier:
     name = "efficientnet"
@@ -32,7 +35,17 @@ class EfficientNetPageClassifier:
 
         checkpoint = torch.load(path, map_location=device, weights_only=True)
         state_dict = checkpoint["model_state_dict"]
-        self.class_names: list[str] = list(checkpoint.get("class_names") or ["accepted", "reject"])
+        # The output index of each class comes from the checkpoint, never from a fixed order: the 23 Sep
+        # 2026 checkpoint stores ['reject', 'accepted'], the earlier one ['accepted', 'reject'], and
+        # reading them the wrong way round accepts blank pages and rejects real cards.
+        self.class_names: list[str] = [str(name).lower() for name in checkpoint.get("class_names") or []]
+        if sorted(self.class_names) != [CLASS_ACCEPTED, CLASS_REJECT]:
+            raise RuntimeError(
+                f"Unexpected class_names in checkpoint: {self.class_names} (expected {CLASS_ACCEPTED} and "
+                f"{CLASS_REJECT}, in the order the model outputs them)"
+            )
+        self._accepted_index = self.class_names.index(CLASS_ACCEPTED)
+        self._reject_index = self.class_names.index(CLASS_REJECT)
         self.image_size: int = int(checkpoint.get("image_size") or 224)
         self.reject_threshold: float = float(checkpoint.get("reject_threshold") or 0.5)
         self.metadata: dict[str, Any] = {
@@ -45,8 +58,6 @@ class EfficientNetPageClassifier:
             "image_size": self.image_size,
             "reject_threshold": self.reject_threshold,
         }
-        if [c.lower() for c in self.class_names] != ["accepted", "reject"]:
-            raise RuntimeError(f"Unexpected class_names in checkpoint: {self.class_names}")
 
         model = efficientnet_b0(weights=None, num_classes=len(self.class_names))
         model.load_state_dict(state_dict, strict=True)
@@ -62,4 +73,6 @@ class EfficientNetPageClassifier:
         batch = self._torch.stack([image_to_tensor(page, self.image_size) for page in pages]).to(self._device)
         with self._torch.inference_mode():
             probabilities = self._torch.softmax(self._model(batch), dim=1).cpu()
-        return [(round(float(p[0]), 4), round(float(p[1]), 4)) for p in probabilities]
+        return [
+            (round(float(p[self._accepted_index]), 4), round(float(p[self._reject_index]), 4)) for p in probabilities
+        ]

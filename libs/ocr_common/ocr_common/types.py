@@ -49,11 +49,20 @@ class StructuredField(TypedDict):
     signals: NotRequired[dict[str, Any] | None]
 
 
-class StructuringResult(TypedDict):
-    """The stored result of the structuring stage: one `StructuredField` per name in `npwp.NPWP_FIELDS`."""
+class StructuredDocument(TypedDict):
+    """What a structurer (`app/ml/*` of structuring) returns: one `StructuredField` per name in
+    `npwp.NPWP_FIELDS`, plus the document-level review flag of the ML team's rules. The flag never
+    rejects the document: it lowers the trust model's confidence and tells a reviewer why."""
+
+    fields: dict[str, StructuredField]
+    flag: bool
+    flag_reason: str | None
+
+
+class StructuringResult(StructuredDocument):
+    """The stored result of the structuring stage: the structured document plus its document type."""
 
     document_type: str
-    fields: dict[str, StructuredField]
 
 
 class FieldConfidences(TypedDict):
@@ -84,6 +93,8 @@ class FinalResult(TypedDict):
     fields: dict[str, FinalField]
     scoring: FieldConfidences
     guardrails: dict[str, Any] | None
+    flag: bool
+    flag_reason: str | None
 
 
 class ContractField(TypedDict):
@@ -91,3 +102,12 @@ class ContractField(TypedDict):
 
     value: str | None
     confidence: int
+
+
+class ContractData(TypedDict):
+    """`data` of the orchestrator's `extract-ocr` contract."""
+
+    nomor_npwp: ContractField
+    nama: ContractField
+    flag: bool
+    flag_reason: str | None

@@ -54,7 +54,7 @@ def _build_remote(settings: Settings) -> RemoteOcrEngine:
         name="ekstraksi OCR model",
         headers=headers,
     )
-    return RemoteOcrEngine(client)
+    return RemoteOcrEngine(client, params=settings.ekstraksi_ocr_params)
 
 
 # EKSTRAKSI_BACKEND -> how to build it. Add a backend here and, if it needs settings, in config.py.

@@ -42,11 +42,15 @@ class StructuredField(BaseModel):
     signals: dict[str, Any] | None = Field(
         None,
         description=(
-            "Inputs for the scoring model (backend `npwp_rules` only; null otherwise). nomor_npwp: `has_homoglyph` "
-            "(an OCR letter/digit mix-up such as O->0 was corrected) and `candidate_count` (NPWP-shaped numbers "
-            "found in the document). nama / nama_badan: `corrected` (the name-master correction changed the name)"
+            "Inputs for the scoring model and review signals (backend `npwp_rules` only; null otherwise). "
+            "nomor_npwp: `candidate_count` (NPWP-shaped numbers found in the document), `has_homoglyph` (OCR read a "
+            "letter where a digit belongs; the letter is dropped, not corrected), `invalid_province_prefix` / "
+            "`invalid_kecamatan_prefix` / `invalid_birthdate` (a 16-digit NIK-based number fails the Kode Wilayah "
+            "or birthdate check), `invalid_kpp_prefix` (a 15-digit number's KPP office code is unknown). "
+            "nama / nama_badan: `name_base` (the read before any normalisation; the trust model measures the name "
+            "on this), `corrected` (`value` differs from `name_base`)"
         ),
-        examples=[{"has_homoglyph": False, "candidate_count": 1}],
+        examples=[{"candidate_count": 1, "has_homoglyph": False}],
     )
 
 
@@ -65,17 +69,33 @@ class StructuredDocument(BaseModel):
                     "value": "12.345.678.9-012.345",
                     "confidence": 0.9992,
                     "source": "NPWP : 12.345.678.9-012.345",
-                    "signals": {"has_homoglyph": False, "candidate_count": 1},
+                    "signals": {"candidate_count": 1, "has_homoglyph": False},
                 },
                 "nama": {
                     "value": "BUDI SANTOSO",
                     "confidence": 0.9773,
                     "source": "BUDI SANTOSO",
-                    "signals": {"corrected": False},
+                    "signals": {"name_base": "BUDI SANTOSO", "corrected": False},
                 },
                 "nama_badan": {"value": None, "confidence": 0.0, "source": None, "signals": None},
             }
         ],
+    )
+    flag: bool = Field(
+        ...,
+        description=(
+            "Review flag of the ML team's rules. True when: another document is bundled in (KTP, KK, Akta), the "
+            "page is a CAPTCHA or a screenshot of the DJP lookup, the number or the name was not found, the name "
+            "is a single word, the number contains a letter, its province / kecamatan / birthdate / KPP code is "
+            "invalid, or the upload has more than 2 pages. It never rejects the document: the fields are still "
+            "returned, and the trust model uses the flag as a feature"
+        ),
+        examples=[False],
+    )
+    flag_reason: str | None = Field(
+        None,
+        description="The first reason `flag` is true, in Indonesian, for a reviewer; null when not flagged",
+        examples=[None],
     )
 
 

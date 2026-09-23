@@ -16,5 +16,10 @@ class StructuringService:
         if not cleaned:
             raise BadRequest("No text lines to structure")
 
-        fields = self._structurer.structure(cleaned)
-        return {"document_type": DOCUMENT_TYPE, "fields": fields}
+        document = self._structurer.structure(cleaned)
+        return {
+            "document_type": DOCUMENT_TYPE,
+            "fields": document["fields"],
+            "flag": document["flag"],
+            "flag_reason": document["flag_reason"],
+        }

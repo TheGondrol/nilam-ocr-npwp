@@ -16,6 +16,7 @@ from ocr_common.clients.fetch_url import UrlPolicy
 Environment = Literal["local", "dev", "staging", "production"]
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 DEFAULT_JOB_LEASE_SECONDS = 300.0
+DEFAULT_MAX_UPLOAD_BYTES = int(2.5 * 1024 * 1024)
 
 
 class BaseServiceSettings(BaseSettings):
@@ -34,7 +35,9 @@ class BaseServiceSettings(BaseSettings):
     service_base_url: str | None = None
     port: int = 8000
 
-    max_upload_bytes: int = 5 * 1024 * 1024
+    # 2,5 MB: an NPWP document is 1-2 MB, a few reach 2.1 MB (ML team, 23 Sep 2026); larger uploads are
+    # refused with 413 before any model runs.
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
     file_url_allowed_hosts: str = ""
     field_confidence_threshold: float = Field(0.5, ge=0, le=1)

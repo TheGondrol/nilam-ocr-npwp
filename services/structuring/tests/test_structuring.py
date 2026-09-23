@@ -15,40 +15,42 @@ LINES: list[OcrBlock] = [
 ]
 
 
-def _values(fields):
-    return {name: f["value"] for name, f in fields.items()}
+def _values(document):
+    return {name: f["value"] for name, f in document["fields"].items()}
 
 
 def test_rule_based_parses_labeled_lines():
-    fields = RuleBasedNpwpStructurer().structure(LINES)
-    assert _values(fields) == {
+    document = RuleBasedNpwpStructurer().structure(LINES)
+    assert _values(document) == {
         "nomor_npwp": "12.345.678.9-012.345",
         "nama": "BUDI SANTOSO",
         "nama_badan": "PT CIPTA KARYA MANDIRI",
     }
+    fields = document["fields"]
     assert fields["nomor_npwp"]["confidence"] == 0.96
     assert fields["nomor_npwp"]["source"] == "NPWP : 12.345.678.9-012.345"
+    assert (document["flag"], document["flag_reason"]) == (False, None)
 
 
 def test_rule_based_handles_paddle_style_lines_without_spaces():
-    fields = RuleBasedNpwpStructurer().structure([{"text": "NPWP:12.345.678.9-012.345", "confidence": 0.9}])
+    fields = RuleBasedNpwpStructurer().structure([{"text": "NPWP:12.345.678.9-012.345", "confidence": 0.9}])["fields"]
     assert fields["nomor_npwp"]["value"] == "12.345.678.9-012.345"
 
 
 def test_rule_based_falls_back_to_patterns_for_unlabeled_lines():
-    fields = RuleBasedNpwpStructurer().structure(
+    document = RuleBasedNpwpStructurer().structure(
         [{"text": "123456789012345", "confidence": 0.8}, {"text": "PT SINAR ABADI SEJAHTERA", "confidence": 0.7}]
     )
-    assert _values(fields) == {
+    assert _values(document) == {
         "nomor_npwp": "12.345.678.9-012.345",
         "nama": None,
         "nama_badan": "PT SINAR ABADI SEJAHTERA",
     }
-    assert fields["nama"] == {"value": None, "confidence": 0.0, "source": None}
+    assert document["fields"]["nama"] == {"value": None, "confidence": 0.0, "source": None}
 
 
 def test_nama_badan_is_not_mistaken_for_nama():
-    fields = RuleBasedNpwpStructurer().structure([{"text": "NAMA BADAN : PT X Y", "confidence": 0.9}])
+    fields = RuleBasedNpwpStructurer().structure([{"text": "NAMA BADAN : PT X Y", "confidence": 0.9}])["fields"]
     assert fields["nama"]["value"] is None
     assert fields["nama_badan"]["value"] == "PT X Y"
 
@@ -75,6 +77,7 @@ def test_http_structure(client, auth):
     data = response.json()["data"]
     assert data["document_type"] == "npwp"
     assert data["fields"]["nama"]["value"] == "BUDI SANTOSO"
+    assert (data["flag"], data["flag_reason"]) == (False, None)
 
 
 def test_http_structure_blank_lines_returns_400(client, auth):

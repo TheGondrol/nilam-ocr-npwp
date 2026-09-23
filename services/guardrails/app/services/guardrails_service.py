@@ -5,7 +5,7 @@ from starlette.concurrency import run_in_threadpool
 from ocr_common.image_validation import validate_image
 
 from app.config import Settings
-from app.services.pages import render_pages
+from app.services.pages import check_page_count, render_pages
 
 VERDICT_ACCEPTED = "accepted"
 VERDICT_REJECT = "reject"
@@ -19,6 +19,9 @@ def _reject_reason(document: dict[str, Any]) -> str:
 
 
 class GuardrailsService:
+    """The entry checks of the pipeline, in order: type / empty / size (413 above `MAX_UPLOAD_BYTES`), page
+    count (400 above `GUARDRAILS_MAX_DOCUMENT_PAGES`), then the guardrails model's verdict."""
+
     def __init__(self, classifier, settings: Settings):
         self._classifier = classifier
         self._settings = settings
@@ -27,7 +30,9 @@ class GuardrailsService:
         validate_image(content_type, content, self._settings)
 
         if hasattr(self._classifier, "check_document"):
+            # The model service renders the PDF itself, so the page count is only known from its answer.
             report = await self._classifier.check_document(filename, content, content_type)
+            check_page_count(int(report["document"]["n_pages"]), self._settings.guardrails_max_document_pages)
         else:
             report = await run_in_threadpool(self._check_locally, filename, content_type, content)
 
@@ -40,6 +45,7 @@ class GuardrailsService:
             content,
             dpi=self._settings.guardrails_pdf_dpi,
             max_pages=self._settings.guardrails_max_pages,
+            max_document_pages=self._settings.guardrails_max_document_pages,
         )
         predictions = self._classifier.classify(filename, pages)
 

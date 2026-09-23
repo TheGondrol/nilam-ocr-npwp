@@ -45,6 +45,12 @@ class Conflict(_StatusError):
     status_code = 409
 
 
+class PayloadTooLarge(_StatusError):
+    """413: the document exceeds `MAX_UPLOAD_BYTES`; the caller must send a smaller file."""
+
+    status_code = 413
+
+
 class UnprocessableEntity(_StatusError):
     """422: the request is well-formed but cannot be acted on."""
 

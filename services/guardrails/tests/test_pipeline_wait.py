@@ -57,6 +57,8 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
     assert body["data"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+        "flag": False,
+        "flag_reason": None,
     }
     [(request_id, timeout)] = stub_waiter.calls
     assert request_id == RID

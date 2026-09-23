@@ -7,14 +7,15 @@ from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnv
 
 
 class ConfidenceRequest(BaseModel):
+    """The ML team's scoring payload (nilamnpwp `scoring/schemas.py`, model retrained 21 Sep 2026)."""
+
     npwp: str | None = Field(
-        None, description="Extracted NPWP number, digits only; null when not found", examples=["123456789012000"]
+        None,
+        description="Extracted NPWP number, digits or printed form; null when not found",
+        examples=["12.345.678.9-012.000"],
     )
     npwp_score: float | None = Field(
         None, ge=0, le=1, description="OCR score of the line the number came from", examples=[0.98]
-    )
-    npwp_has_homoglyph: bool | None = Field(
-        None, description="An OCR letter/digit mix-up in the number (O->0, S->5, ...) was corrected", examples=[False]
     )
     npwp_candidate_count: int | None = Field(
         None,
@@ -22,28 +23,32 @@ class ConfidenceRequest(BaseModel):
         description="NPWP-shaped numbers found in the document (a card may print a 15- and a 16-digit one)",
         examples=[1],
     )
-    name: str | None = Field(
-        None, description="Extracted person or company name; null when not found", examples=["PT CONTOH INDONESIA"]
+    name_base: str | None = Field(
+        None,
+        description=(
+            "The name as OCR read it, BEFORE any normalisation or correction (`signals.name_base` of the "
+            "structuring result); null when not found. The model measures the name's shape on this"
+        ),
+        examples=["PT CONTOH INDONESIA"],
     )
     name_score: float | None = Field(
-        None, ge=0, le=1, description="OCR score of the line the name came from", examples=[0.96]
+        None, ge=0, le=1, description="OCR score of the line the name came from", examples=[0.95]
     )
-    name_corrected: bool | None = Field(
-        None, description="The name-master correction changed the name", examples=[False]
-    )
-    n_boxes: int | None = Field(None, ge=0, description="OCR text lines in the whole document", examples=[34])
-    num_pages: int | None = Field(None, ge=0, description="Pages in the document", examples=[1])
-    avg_doc_score: float | None = Field(None, ge=0, le=1, description="Mean OCR score over all lines", examples=[0.912])
+    avg_doc_score: float | None = Field(None, ge=0, le=1, description="Mean OCR score over all lines", examples=[0.91])
     min_doc_score: float | None = Field(
         None, ge=0, le=1, description="Lowest OCR score over all lines", examples=[0.62]
     )
     flag: bool | None = Field(
         None,
-        description="Document flag defined by the ML team; no pipeline stage produces it yet, so it is sent as null",
+        description="Review flag of the structuring rules (`flag` of the structuring result); null counts as false",
         examples=[False],
     )
     guardrail_probability: float | None = Field(
-        None, ge=0, le=1, description="`document.confidence` of the guardrails result", examples=[0.9821]
+        None,
+        ge=0,
+        le=1,
+        description="`document.confidence` of the guardrails result when the document was accepted",
+        examples=[0.98],
     )
 
 
@@ -62,8 +67,7 @@ class ScoringJobRequest(BaseModel):
         None, description="Guardrails result submitted with the OCR job; returned unchanged in the final result"
     )
     ocr: OcrPayload | None = Field(
-        None,
-        description="Result of the OCR stage; `n_boxes`, `num_pages`, `avg/min_doc_score` are computed from `blocks`",
+        None, description="Result of the OCR stage; `avg_doc_score` / `min_doc_score` are computed from `blocks`"
     )
     structuring: StructuringPayload | None = Field(
         None,

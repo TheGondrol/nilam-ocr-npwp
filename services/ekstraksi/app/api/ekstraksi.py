@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request, UploadFile
 
+from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import get_request_id
@@ -49,7 +50,12 @@ OCR_RESULT_EXAMPLE = {
             "Text lines found in the document",
             npwp_card=("An NPWP card", envelope(200, "Success", OCR_RESULT_EXAMPLE, REQUEST_ID_EXAMPLE)),
         ),
-        400: error(400, "Bad file (empty, too large, unsupported type) or bad intake", "Uploaded file is empty"),
+        400: error(400, "Bad file (empty, unsupported type) or bad intake", "Uploaded file is empty"),
+        413: error(
+            413,
+            "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default)",
+            PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB"),
+        ),
         401: UNAUTHORIZED,
         500: error(500, "OCR engine failed", "ekstraksi OCR model error (500): error: OpenCV ..."),
         503: error(503, "OCR model unreachable", "ekstraksi OCR model is unavailable"),

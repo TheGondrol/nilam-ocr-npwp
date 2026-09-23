@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Self
+from typing import Any, Self
 
 from pydantic import model_validator
 
@@ -13,6 +13,9 @@ class Settings(PipelineSettings):
     ekstraksi_ocr_url: str | None = None
     ekstraksi_ocr_api_key: str | None = None
     ekstraksi_ocr_timeout_seconds: float = 30.0
+    # `remote` only: extra form fields sent with every /v1/predict/json call (JSON object). The ML team's
+    # OCR model will serve several document types in production and take its parameters per call.
+    ekstraksi_ocr_params: dict[str, Any] = {}
 
     guardrails_service_url: str = "http://127.0.0.1:8031"
     guardrails_api_key: str | None = None

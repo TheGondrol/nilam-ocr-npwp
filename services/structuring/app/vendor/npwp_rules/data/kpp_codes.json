@@ -1,0 +1,694 @@
+{
+ "101": {
+  "name": "KPP Banda Aceh",
+  "item_number": 1
+ },
+ "102": {
+  "name": "KPP Lhokseumawe",
+  "item_number": 2
+ },
+ "103": {
+  "name": "KPP Meulaboh",
+  "item_number": 3
+ },
+ "119": {
+  "name": "KPP Binjai",
+  "item_number": 4
+ },
+ "111": {
+  "name": "KPP Medan Barat",
+  "item_number": 5
+ },
+ "121": {
+  "name": "KPP Medan Polonia",
+  "item_number": 6
+ },
+ "112": {
+  "name": "KPP Medan Belawan",
+  "item_number": 7
+ },
+ "113": {
+  "name": "KPP Medan Timur",
+  "item_number": 8
+ },
+ "122": {
+  "name": "KPP Medan Kota",
+  "item_number": 9
+ },
+ "114": {
+  "name": "KPP Tebing Tinggi",
+  "item_number": 10
+ },
+ "115": {
+  "name": "KPP Kisaran",
+  "item_number": 11
+ },
+ "116": {
+  "name": "KPP Rantau Prapat",
+  "item_number": 12
+ },
+ "117": {
+  "name": "KPP Pematang Siantar",
+  "item_number": 13
+ },
+ "118": {
+  "name": "KPP Padang Sidempuan",
+  "item_number": 14
+ },
+ "202": {
+  "name": "KPP Bukit Tinggi",
+  "item_number": 15
+ },
+ "201": {
+  "name": "KPP Padang",
+  "item_number": 16
+ },
+ "211": {
+  "name": "KPP Pekanbaru Senapelan",
+  "item_number": 17
+ },
+ "216": {
+  "name": "KPP Pekanbaru Tampan",
+  "item_number": 18
+ },
+ "212": {
+  "name": "KPP Dumai",
+  "item_number": 19
+ },
+ "213": {
+  "name": "KPP Rengat",
+  "item_number": 20
+ },
+ "214": {
+  "name": "KPP Tamjun Pinang",
+  "item_number": 21
+ },
+ "215": {
+  "name": "KPP Batam",
+  "item_number": 22
+ },
+ "331": {
+  "name": "KPP Jambi",
+  "item_number": 23
+ },
+ "332": {
+  "name": "KPP Muara Bungo",
+  "item_number": 24
+ },
+ "301": {
+  "name": "KPP Palembang Ilir Timur",
+  "item_number": 25
+ },
+ "307": {
+  "name": "KPP Palembang Ilir Barat",
+  "item_number": 26
+ },
+ "306": {
+  "name": "KPP Palembang Seberang Ulu",
+  "item_number": 27
+ },
+ "303": {
+  "name": "KPP Lubuk Linggau",
+  "item_number": 28
+ },
+ "302": {
+  "name": "KPP Baturaja",
+  "item_number": 29
+ },
+ "304": {
+  "name": "KPP Pangkal Pinang",
+  "item_number": 30
+ },
+ "305": {
+  "name": "KPP Tanjung Pandan",
+  "item_number": 31
+ },
+ "311": {
+  "name": "KPP Bengkulu",
+  "item_number": 32
+ },
+ "321": {
+  "name": "KPP Metro",
+  "item_number": 33
+ },
+ "322": {
+  "name": "KPP Bandar Lampung",
+  "item_number": 34
+ },
+ "001": {
+  "name": "KPP Jakarta Matraman",
+  "item_number": 35
+ },
+ "002": {
+  "name": "KPP Jakarta Jatinegara",
+  "item_number": 36
+ },
+ "003": {
+  "name": "KPP Jakarta Pulo Gadung",
+  "item_number": 37
+ },
+ "004": {
+  "name": "KPP Jakarta Cakung Satu",
+  "item_number": 38
+ },
+ "006": {
+  "name": "KPP Jakarta Cakung Dua",
+  "item_number": 39
+ },
+ "005": {
+  "name": "KPP Jakarta Kramatjati",
+  "item_number": 40
+ },
+ "011": {
+  "name": "KPP Jakarta Setiabudi Satu",
+  "item_number": 41
+ },
+ "018": {
+  "name": "KPP Jakarta Setiabudi Dua",
+  "item_number": 42
+ },
+ "015": {
+  "name": "KPP Jakarta Tebet",
+  "item_number": 43
+ },
+ "012": {
+  "name": "KPP Jakarta Kebayoran Baru Satu",
+  "item_number": 44
+ },
+ "019": {
+  "name": "KPP Jakarta Kebayoran Baru Dua",
+  "item_number": 45
+ },
+ "013": {
+  "name": "KPP Jakarta Kebayoran Lama",
+  "item_number": 46
+ },
+ "014": {
+  "name": "KPP Jakarta Mampang Prapatan",
+  "item_number": 47
+ },
+ "061": {
+  "name": "KPP Jakarta Pancoran",
+  "item_number": 48
+ },
+ "016": {
+  "name": "KPP Jakarta Cilandak",
+  "item_number": 49
+ },
+ "017": {
+  "name": "KPP Jakarta Pasar Minggu",
+  "item_number": 50
+ },
+ "041": {
+  "name": "KPP Jakarta Penjaringan",
+  "item_number": 51
+ },
+ "044": {
+  "name": "KPP Jakarta Pademangan",
+  "item_number": 52
+ },
+ "042": {
+  "name": "KPP Jakarta Tanjung Priok",
+  "item_number": 53
+ },
+ "045": {
+  "name": "KPP Jakarta Koja",
+  "item_number": 54
+ },
+ "043": {
+  "name": "KPP Jakarta Kelapa Gading",
+  "item_number": 55
+ },
+ "031": {
+  "name": "KPP Jakarta Palmerah",
+  "item_number": 56
+ },
+ "036": {
+  "name": "KPP Jakarta Grogol Petamburan",
+  "item_number": 57
+ },
+ "032": {
+  "name": "KPP Jakarta Tamansari Satu",
+  "item_number": 58
+ },
+ "037": {
+  "name": "KPP Jakarta Tamansari Dua",
+  "item_number": 59
+ },
+ "033": {
+  "name": "KPP Jakarta Tambora",
+  "item_number": 60
+ },
+ "022": {
+  "name": "KPP Jakarta Tanah Abang Satu",
+  "item_number": 61
+ },
+ "072": {
+  "name": "KPP Jakarta Tanah Abang Dua",
+  "item_number": 62
+ },
+ "034": {
+  "name": "KPP Jakarta Cengkareng",
+  "item_number": 63
+ },
+ "035": {
+  "name": "KPP Jakarta Kebon Jeruk",
+  "item_number": 64
+ },
+ "025": {
+  "name": "KPP Jakarta Gambir Satu",
+  "item_number": 65
+ },
+ "028": {
+  "name": "KPP Jakarta Gambir Dua",
+  "item_number": 66
+ },
+ "029": {
+  "name": "KPP Jakarta Gambir Tiga",
+  "item_number": 67
+ },
+ "026": {
+  "name": "KPP Jakarta Sawah Besar",
+  "item_number": 68
+ },
+ "027": {
+  "name": "KPP Jakarta Kemayoran",
+  "item_number": 69
+ },
+ "024": {
+  "name": "KPP Jakarta Cempaka Putih",
+  "item_number": 70
+ },
+ "021": {
+  "name": "KPP Jakarta Menteng Satu",
+  "item_number": 71
+ },
+ "071": {
+  "name": "KPP Jakarta Menteng Dua",
+  "item_number": 72
+ },
+ "023": {
+  "name": "KPP Jakarta Senen",
+  "item_number": 73
+ },
+ "051": {
+  "name": "KPP Perusahaan Negara dan Daerah",
+  "item_number": 74
+ },
+ "052": {
+  "name": "KPP Penanaman Modal Asing Satu",
+  "item_number": 75
+ },
+ "055": {
+  "name": "KPP Penanaman Modasl Asing Dua",
+  "item_number": 76
+ },
+ "056": {
+  "name": "KPP Penanaman Modal Asing Tiga",
+  "item_number": 77
+ },
+ "057": {
+  "name": "KPP Penanaman Modal Asing Empat",
+  "item_number": 78
+ },
+ "058": {
+  "name": "KPP Penanaman Modal Asing Lima",
+  "item_number": 79
+ },
+ "053": {
+  "name": "KPP Badan dan Orang Asing",
+  "item_number": 80
+ },
+ "054": {
+  "name": "KPP Perusahaan Masuk Bursa",
+  "item_number": 81
+ },
+ "401": {
+  "name": "KPP Serang",
+  "item_number": 82
+ },
+ "402": {
+  "name": "KPP Tangerang",
+  "item_number": 83
+ },
+ "411": {
+  "name": "KPP Serpong",
+  "item_number": 84
+ },
+ "403": {
+  "name": "KPP Cibinong",
+  "item_number": 85
+ },
+ "412": {
+  "name": "KPP Depok",
+  "item_number": 86
+ },
+ "404": {
+  "name": "KPP Bogor",
+  "item_number": 87
+ },
+ "405": {
+  "name": "KPP Sukabumi",
+  "item_number": 88
+ },
+ "407": {
+  "name": "KPP Bekasi",
+  "item_number": 89
+ },
+ "413": {
+  "name": "KPP Cikarang",
+  "item_number": 90
+ },
+ "408": {
+  "name": "KPP Karawang",
+  "item_number": 91
+ },
+ "421": {
+  "name": "KPP Cimahi",
+  "item_number": 92
+ },
+ "428": {
+  "name": "KPP Bandung Bojonagara",
+  "item_number": 93
+ },
+ "423": {
+  "name": "KPP Bandung Cibeunying",
+  "item_number": 94
+ },
+ "429": {
+  "name": "KPP Bandung Cicadas",
+  "item_number": 95
+ },
+ "424": {
+  "name": "KPP Bandung Karees",
+  "item_number": 96
+ },
+ "422": {
+  "name": "KPP Jakarta Tegallega",
+  "item_number": 97
+ },
+ "406": {
+  "name": "KPP Cianjur",
+  "item_number": 98
+ },
+ "409": {
+  "name": "KPP Purwakarta",
+  "item_number": 99
+ },
+ "425": {
+  "name": "KPP Tasikmalaya",
+  "item_number": 100
+ },
+ "426": {
+  "name": "KPP Cirebon",
+  "item_number": 101
+ },
+ "501": {
+  "name": "KPP Tegal",
+  "item_number": 102
+ },
+ "502": {
+  "name": "KPP Pekalongan",
+  "item_number": 103
+ },
+ "503": {
+  "name": "KPP Semarang Barat",
+  "item_number": 104
+ },
+ "508": {
+  "name": "KPP Semarang Selatan",
+  "item_number": 105
+ },
+ "504": {
+  "name": "KPP Semarang Timur",
+  "item_number": 106
+ },
+ "509": {
+  "name": "KPP Semarang Tengah",
+  "item_number": 107
+ },
+ "505": {
+  "name": "KPP Salatiga",
+  "item_number": 108
+ },
+ "506": {
+  "name": "KPP Kudus",
+  "item_number": 109
+ },
+ "507": {
+  "name": "KPP Pati",
+  "item_number": 110
+ },
+ "521": {
+  "name": "KPP Purwokerto",
+  "item_number": 111
+ },
+ "522": {
+  "name": "KPP Cilacap",
+  "item_number": 112
+ },
+ "523": {
+  "name": "KPP Kebumen",
+  "item_number": 113
+ },
+ "524": {
+  "name": "KPP Magelang",
+  "item_number": 114
+ },
+ "541": {
+  "name": "KPP Yogyakarta Satu",
+  "item_number": 115
+ },
+ "542": {
+  "name": "KPP Yogyakarta Dua",
+  "item_number": 116
+ },
+ "525": {
+  "name": "KPP Klaten",
+  "item_number": 117
+ },
+ "526": {
+  "name": "KPP Surakarta",
+  "item_number": 118
+ },
+ "604": {
+  "name": "KPP Surabaya Sukomanunggal",
+  "item_number": 119
+ },
+ "605": {
+  "name": "KPP Surabaya Krembangan",
+  "item_number": 120
+ },
+ "613": {
+  "name": "KPP Surabaya Pabean Cantikan",
+  "item_number": 121
+ },
+ "606": {
+  "name": "KPP Surabaya Gubeng",
+  "item_number": 122
+ },
+ "607": {
+  "name": "KPP Surabaya Tegalsari",
+  "item_number": 123
+ },
+ "614": {
+  "name": "KPP Surabaya Sawahan",
+  "item_number": 124
+ },
+ "609": {
+  "name": "KPP Surabaya Wonocolo",
+  "item_number": 125
+ },
+ "615": {
+  "name": "KPP Surabaya Rungkut",
+  "item_number": 126
+ },
+ "611": {
+  "name": "KPP Surabaya Genteng",
+  "item_number": 127
+ },
+ "616": {
+  "name": "KPP Surabaya Simokerto",
+  "item_number": 128
+ },
+ "612": {
+  "name": "KPP Gresik",
+  "item_number": 129
+ },
+ "621": {
+  "name": "KPP Madiun",
+  "item_number": 130
+ },
+ "601": {
+  "name": "KPP Bojonegoro",
+  "item_number": 131
+ },
+ "608": {
+  "name": "KPP Pamekasan",
+  "item_number": 132
+ },
+ "602": {
+  "name": "KPP Mojokerto",
+  "item_number": 133
+ },
+ "603": {
+  "name": "KPP Sidoarjo Barat",
+  "item_number": 134
+ },
+ "617": {
+  "name": "KPP Sidoarjo Timur",
+  "item_number": 135
+ },
+ "622": {
+  "name": "KPP Kediri",
+  "item_number": 136
+ },
+ "629": {
+  "name": "KPP Tulungagung",
+  "item_number": 137
+ },
+ "623": {
+  "name": "KPP Malang",
+  "item_number": 138
+ },
+ "628": {
+  "name": "KPP Batu",
+  "item_number": 139
+ },
+ "624": {
+  "name": "KPP Pasuruan",
+  "item_number": 140
+ },
+ "625": {
+  "name": "KPP Probolinggo",
+  "item_number": 141
+ },
+ "626": {
+  "name": "KPP Jember",
+  "item_number": 142
+ },
+ "627": {
+  "name": "KPP Banyuwangi",
+  "item_number": 143
+ },
+ "701": {
+  "name": "KPP Pontianak",
+  "item_number": 144
+ },
+ "702": {
+  "name": "KPP Singkawang",
+  "item_number": 145
+ },
+ "711": {
+  "name": "KPP Palangkaraya",
+  "item_number": 146
+ },
+ "712": {
+  "name": "KPP Sampit",
+  "item_number": 147
+ },
+ "721": {
+  "name": "KPP Balikpapan",
+  "item_number": 148
+ },
+ "722": {
+  "name": "KPP Samarinda",
+  "item_number": 149
+ },
+ "724": {
+  "name": "KPP Bontang",
+  "item_number": 150
+ },
+ "723": {
+  "name": "KPP Tarakan",
+  "item_number": 151
+ },
+ "731": {
+  "name": "KPP Banjarmasin",
+  "item_number": 152
+ },
+ "732": {
+  "name": "KPP Banjarbaru",
+  "item_number": 153
+ },
+ "801": {
+  "name": "KPP Makassar Utara",
+  "item_number": 154
+ },
+ "805": {
+  "name": "KPP Makassar Selatan",
+  "item_number": 155
+ },
+ "802": {
+  "name": "KPP Parepare",
+  "item_number": 156
+ },
+ "803": {
+  "name": "KPP Palopo",
+  "item_number": 157
+ },
+ "811": {
+  "name": "KPP Kendari",
+  "item_number": 158
+ },
+ "821": {
+  "name": "KPP Manado",
+  "item_number": 159
+ },
+ "822": {
+  "name": "KPP Gorontalo",
+  "item_number": 160
+ },
+ "831": {
+  "name": "KPP Palu",
+  "item_number": 161
+ },
+ "832": {
+  "name": "KPP Luwuk",
+  "item_number": 162
+ },
+ "901": {
+  "name": "KPP Denpasar Barat",
+  "item_number": 163
+ },
+ "903": {
+  "name": "KPP Denpasar Timur",
+  "item_number": 164
+ },
+ "902": {
+  "name": "KPP Singaraja",
+  "item_number": 165
+ },
+ "911": {
+  "name": "KPP Mataram",
+  "item_number": 166
+ },
+ "912": {
+  "name": "KPP Raba Bima",
+  "item_number": 167
+ },
+ "921": {
+  "name": "KPP Maumere",
+  "item_number": 168
+ },
+ "922": {
+  "name": "KPP Kupang",
+  "item_number": 169
+ },
+ "941": {
+  "name": "KPP Ambon",
+  "item_number": 170
+ },
+ "942": {
+  "name": "KPP Ternate",
+  "item_number": 171
+ },
+ "951": {
+  "name": "KPP Sorong",
+  "item_number": 172
+ },
+ "952": {
+  "name": "KPP Jayapura",
+  "item_number": 173
+ }
+}
