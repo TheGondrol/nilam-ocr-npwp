@@ -39,11 +39,12 @@ baris di transaksi yang sama dengan tabel job-nya sendiri (double write), hanya 
 |---|---|---|---|---|---|
 | selesai (scoring) | `GET_OCR_RESULT` | 200 | `COMPLETED` | `SCORING` | kosong |
 | gagal di satu tahap | `GET_OCR_RESULT` | 422 | `FAILED` | `EXTRACTION`, `STRUCTURING`, atau `SCORING` | `OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED` |
+| ditolak aturan structuring | `GET_OCR_RESULT` | 400 | `FAILED` | `STRUCTURING` | `DOWNSTREAM_VALIDATION_ERROR` |
 
 `result_data` mengikuti bentuk baris polling orkestrasi sendiri: `{result, status, document_type,
 error_code, error_message, created_at, updated_at}`. `result` berisi data kontrak `extract-ocr`
-(`nomor_npwp`, `nama`, `flag`, `flag_reason`) plus `document_type` dan `guardrails`, dan kosong
-kalau gagal. Tabel ini tidak punya kunci unik per `request_id`, jadi request yang dijalankan ulang
+(`nomor_npwp`, `nama`) plus `document_type` dan `guardrails`, dan kosong kalau gagal atau ditolak.
+Untuk penolakan, `error_message` adalah alasan dari aturan ML (bahasa Indonesia). Tabel ini tidak punya kunci unik per `request_id`, jadi request yang dijalankan ulang
 mendapat baris baru; **baris terbaru per `request_id` adalah keadaannya**. Kalau tabel ini gagal
 ditulis, penulisan job ikut dibatalkan. DDL tiruannya ada di
 [external/orchestration_api_events.sql](external/orchestration_api_events.sql).
