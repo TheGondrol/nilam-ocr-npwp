@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
+from ocr_common.pipeline.callbacks import stage_callback_body
 from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 if TYPE_CHECKING:
@@ -61,17 +62,14 @@ def callback_message(
     *,
     result: dict[str, Any] | None = None,
     error_message: str | None = None,
+    error_code: str | None = None,
 ) -> OutboxMessage:
     """The callback body for `(stage, status)` of `request_id`, as a message."""
     return OutboxMessage(
         KIND_CALLBACK,
-        {
-            "request_id": request_id,
-            "stage": stage,
-            "status": status,
-            "result": result,
-            "error_message": error_message,
-        },
+        stage_callback_body(
+            request_id, stage, status, result=result, error_message=error_message, error_code=error_code
+        ),
     )
 
 
@@ -126,9 +124,11 @@ class OutboxRelay:
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         stale_after_seconds: float = DEFAULT_STALE_AFTER_SECONDS,
         watch_interval_seconds: float = WATCH_INTERVAL_SECONDS,
+        metrics_stage: str | None = None,
     ):
         self._outbox = outbox
         self._stage = stage
+        self._metrics_stage = metrics_stage or stage
         self._callback = callback
         self._next_stage = next_stage
         self._callbacks = callbacks
@@ -213,7 +213,7 @@ class OutboxRelay:
             return None
         from ocr_common.pipeline import metrics
 
-        metrics.observe_outbox(stats)
+        metrics.observe_outbox(stats, self._metrics_stage)
         stale = stats.oldest_pending_seconds is not None and stats.oldest_pending_seconds > self._stale_after
         if stale or stats.dead_letters:
             logger.warning(
@@ -239,15 +239,15 @@ class OutboxRelay:
             except ServiceError as exc:
                 if exc.status_code >= 500 and self._age(row) < self._max_age:
                     await self._outbox.retry_later(row.id, self._backoff(row.attempts), exc.message)
-                    metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "retry").inc()
+                    metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "retry").inc()
                     continue
                 await self._give_up(row, exc.message)
-                metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "dead").inc()
+                metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "dead").inc()
                 continue
             finally:
                 reset_request_id(token)
             await self._outbox.done(row.id)
-            metrics.OUTBOX_DELIVERIES.labels(self._stage, row.kind, "delivered").inc()
+            metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "delivered").inc()
             delivered += 1
         return delivered
 

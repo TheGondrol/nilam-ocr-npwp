@@ -1,12 +1,12 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
-and the tests. `orchestration_outcome_table` describes a table the orchestrator owns.
+and the tests. `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the
+orchestrator owns.
 """
 
 from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
-    Double,
     ForeignKey,
     Index,
     Integer,
@@ -16,8 +16,10 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ENUM
 
-from ocr_common.pipeline.database import JSON_TYPE, Base
+from ocr_common.pipeline.database import JSON_TYPE
+from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
 
@@ -51,29 +53,11 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
     return jobs, results
 
 
-OCR_NPWP_REQUESTS = Table(
-    "ocr_npwp_requests",
-    Base.metadata,
-    Column("request_id", Text, primary_key=True),
-    Column("status", Text, nullable=False),
-    Column("result", JSON_TYPE, nullable=True),
-    Column("guardrails", Double, nullable=True),
-    Column("error_message", Text, nullable=True),
-    Column("file_name", Text, nullable=True),
-    Column("file_size_bytes", Integer, nullable=True),
-    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column("ds", Text, nullable=False),
-    Index("idx_ocr_npwp_requests_status", "status"),
-    Index("idx_ocr_npwp_requests_created_at", "created_at"),
-    Index("idx_ocr_npwp_requests_ds", "ds"),
-)
-
-
-def outbox_table(metadata: MetaData) -> Table:
-    """The `pipeline_outbox` table shared by the three stages."""
+def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
+    """The `pipeline_outbox` table shared by the three stages (`testing_pipeline_outbox` with the testing prefix)."""
+    name = f"{table_prefix}pipeline_outbox"
     return Table(
-        "pipeline_outbox",
+        name,
         metadata,
         Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
         Column("request_id", Text, nullable=False),
@@ -88,7 +72,7 @@ def outbox_table(metadata: MetaData) -> Table:
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
         Index(
-            "idx_pipeline_outbox_due",
+            f"idx_{name}_due",
             "stage",
             "next_attempt_at",
             "id",
@@ -96,12 +80,12 @@ def outbox_table(metadata: MetaData) -> Table:
             sqlite_where=text("failed_at IS NULL"),
         ),
         Index(
-            "idx_pipeline_outbox_dead",
+            f"idx_{name}_dead",
             "stage",
             postgresql_where=text("failed_at IS NOT NULL"),
             sqlite_where=text("failed_at IS NOT NULL"),
         ),
-        Index("idx_pipeline_outbox_request_id", "request_id"),
+        Index(f"idx_{name}_request_id", "request_id"),
     )
 
 
@@ -124,11 +108,46 @@ def orchestration_outcome_table(name: str) -> Table:
     )
 
 
+# Labels of the orchestrator's enum types (schema `ocr` in the dev database), as they stand.
+API_EVENT_ENDPOINTS = ("EXTRACT_OCR", "GET_OCR_RESULT")
+API_EVENT_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
+API_EVENT_STAGES = ("GUARDRAILS", "EXTRACTION", "SCORING", "STRUCTURING")
+
+
+def orchestration_api_events_table(name: str) -> Table:
+    """The orchestrator's API event log (`ORCHESTRATION_API_EVENTS_TABLE`, `schema.table` or `table`) as
+    this code needs it; owned by them. Append-only: one row per event, no unique key on `request_id`.
+    The enum types live in the table's schema and are never created from here."""
+    schema, _, table_name = name.rpartition(".")
+    schema = schema or None
+
+    def enum(labels: tuple[str, ...], type_name: str) -> ENUM:
+        return ENUM(*labels, name=type_name, schema=schema, create_type=False)
+
+    return Table(
+        table_name,
+        MetaData(),
+        Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
+        Column("endpoint", enum(API_EVENT_ENDPOINTS, "endpoint"), nullable=False),
+        Column("request_id", Text, nullable=False),
+        Column("status_code", Integer, nullable=False),
+        Column("error_code", Text, nullable=True),
+        Column("result_data", JSON_TYPE, nullable=True),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("ds", Text, nullable=False),
+        Column("downstream_status", enum(API_EVENT_STATUSES, "downstream_status"), nullable=True),
+        Column("downstream_stage", enum(API_EVENT_STAGES, "downstream_stage"), nullable=True),
+        Column("document_type", Text, nullable=True),
+        schema=schema,
+    )
+
+
 def repo_metadata() -> MetaData:
-    """Every table this repository migrates, for Alembic's autogenerate and `alembic check`."""
+    """Every table this repository migrates, for Alembic's autogenerate and `alembic check`: the stage tables
+    and the outbox, again with the `testing_` prefix for the testing endpoints."""
     metadata = MetaData()
-    for table_prefix in PIPELINE_TABLE_PREFIXES:
-        pipeline_tables(table_prefix, metadata)
-    outbox_table(metadata)
-    OCR_NPWP_REQUESTS.to_metadata(metadata)
+    for lane_prefix in ("", TESTING_TABLE_PREFIX):
+        for table_prefix in PIPELINE_TABLE_PREFIXES:
+            pipeline_tables(f"{lane_prefix}{table_prefix}", metadata)
+        outbox_table(metadata, lane_prefix)
     return metadata

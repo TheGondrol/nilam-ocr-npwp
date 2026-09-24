@@ -51,12 +51,18 @@ class StructuredField(TypedDict):
 
 class StructuredDocument(TypedDict):
     """What a structurer (`app/ml/*` of structuring) returns: one `StructuredField` per name in
-    `npwp.NPWP_FIELDS`, plus the document-level review flag of the ML team's rules. The flag never
-    rejects the document: it lowers the trust model's confidence and tells a reviewer why."""
+    `npwp.NPWP_FIELDS`, the document-level flag of the ML team's rules, and the rejection it implies.
+
+    `flag` / `flag_reason` is raised by any of the rules' checks and is an input of the trust model.
+    `reject_reason` is set when one of the checks that reject the document fired (everything but a
+    single-word name and a letter in the number): the pipeline stops at structuring and the client
+    gets a 400 with that message. It is the first rejecting check in the rules' priority order, which
+    is not always `flag_reason` (a single-word name outranks the invalid-code checks there)."""
 
     fields: dict[str, StructuredField]
     flag: bool
     flag_reason: str | None
+    reject_reason: NotRequired[str | None]
 
 
 class StructuringResult(StructuredDocument):
@@ -105,9 +111,8 @@ class ContractField(TypedDict):
 
 
 class ContractData(TypedDict):
-    """`data` of the orchestrator's `extract-ocr` contract."""
+    """`data` of the orchestrator's `extract-ocr` contract. The rules' flag is internal (an input of the
+    trust model) and is not part of it."""
 
     nomor_npwp: ContractField
     nama: ContractField
-    flag: bool
-    flag_reason: str | None

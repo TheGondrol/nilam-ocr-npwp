@@ -75,6 +75,9 @@ class TrustModel:
 
     def __init__(self, model_path: str):
         import joblib
+
+        # Present since scikit-learn 1.3 (the lock pins 1.9); the stubs Pyrefly bundles do not list it yet.
+        # pyrefly: ignore[missing-module-attribute]
         from sklearn.exceptions import InconsistentVersionWarning
 
         path = Path(model_path)

@@ -31,10 +31,12 @@ class StaleJobReaper:
         stage: str,
         interval_seconds: float = 30.0,
         batch: int = 10,
+        metrics_stage: str | None = None,
     ):
         self._repository = repository
         self._resume = resume
         self._stage = stage
+        self._metrics_stage = metrics_stage or stage
         self._interval = interval_seconds
         self._batch = batch
         self._task: asyncio.Task[None] | None = None
@@ -77,7 +79,7 @@ class StaleJobReaper:
         if stale:
             from ocr_common.pipeline import metrics
 
-            metrics.STALE_JOBS_RECLAIMED.labels(self._stage).inc(len(stale))
+            metrics.STALE_JOBS_RECLAIMED.labels(self._metrics_stage).inc(len(stale))
         for job in stale:
             logger.warning(
                 "%s job %s was left PROCESSING past its lease (process died?); running it again",

@@ -38,8 +38,6 @@ _COMPLETED = extract_body(
     data={
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-        "flag": False,
-        "flag_reason": None,
     },
     guardrails=1,
     errors=None,
@@ -123,13 +121,19 @@ def _parse_params(raw: str | None) -> Any:
         "| Finished in time | 200 | `completed` | the fields | `1` | null |\n"
         "| Still running | 202 | `processing` | null | null | null |\n"
         f"| Rejected by the guardrails model | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
+        f"| Rejected by the structuring rules | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
         "| A stage failed in time | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
         "`SCORING_FAILED` |\n\n"
         "`data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer's name, or the "
         "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
         "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`. "
-        "`data.flag` / `data.flag_reason` is the review flag of the structuring rules (never a rejection). "
         "`params` is returned as sent.\n\n"
+        "**Rejected by the structuring rules**: the ML team's rules reject a document that is blurred or blank, "
+        "not in the standard NPWP format, another document or bundled with one, a screenshot of the online NPWP "
+        "lookup, longer than the page limit, or whose number carries an invalid birthdate, province, kecamatan "
+        "or KPP code. `message` is the rules' Indonesian reason, e.g. `Kode provinsi pada NPWP tidak valid, mohon "
+        "dicek kembali`. A single-word name or a letter in the number is tolerated: the fields are returned, and "
+        "the trust model's confidence already accounts for it.\n\n"
         "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
         "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
@@ -159,9 +163,9 @@ def _parse_params(raw: str | None) -> Any:
         400: {
             "model": ExtractOcrResponse,
             "description": (
-                f"Rejected by the guardrails model (`{REJECTED_CODE}`, `guardrails: 0`), unsupported "
-                "`document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages "
-                f"(`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
+                f"Rejected by the guardrails model or by the structuring rules (`{REJECTED_CODE}`, `guardrails: 0`), "
+                "unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
+                f"pages (`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
                 "`file_url` refused)"
             ),
             "content": {"application/json": {"example": _REJECTED}},

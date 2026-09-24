@@ -137,6 +137,7 @@ class SqlJobRepository:
         result: dict[str, Any],
         *,
         outcome_data: dict[str, Any] | None = None,
+        rejection: str | None = None,
         messages: Sequence[OutboxMessage] = (),
     ) -> None:
         """See `JobRepository.complete`."""
@@ -152,7 +153,10 @@ class SqlJobRepository:
                 update(jobs).where(jobs.c.request_id == request_id).values(status=STATUS_DONE, updated_at=now)
             )
             if self._outcome is not None:
-                await self._outcome.completed(conn, request_id, outcome_data)
+                if rejection:
+                    await self._outcome.rejected(conn, request_id, rejection)
+                else:
+                    await self._outcome.completed(conn, request_id, outcome_data)
             if self._outbox is not None:
                 await self._outbox.add(conn, request_id, self._stage, messages)
         self._wake(messages)

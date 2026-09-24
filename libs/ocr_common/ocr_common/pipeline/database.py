@@ -3,15 +3,8 @@
 from sqlalchemy import JSON, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
 JSON_TYPE = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
-
-
-class Base(DeclarativeBase):
-    """Declarative base of the ORM-mapped table (`ocr_npwp_requests`)."""
-
-    pass
 
 
 _engines: dict[str, AsyncEngine] = {}

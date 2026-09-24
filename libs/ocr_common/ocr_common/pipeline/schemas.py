@@ -149,15 +149,23 @@ class StructuringPayload(_Forwarded):
     flag: bool = Field(
         False,
         description=(
-            "Review flag of the ML team's rules: another document bundled in, CAPTCHA or lookup screenshot, "
-            "number or name not found, single-word name, letter in the number, invalid Kode Wilayah / birthdate / "
-            "KPP code, more than 2 pages. Never rejects: it is a feature of the trust model"
+            "Flag of the ML team's rules, a feature of the trust model: another document bundled in, CAPTCHA or "
+            "lookup screenshot, number or name not found, single-word name, letter in the number, invalid Kode "
+            "Wilayah / birthdate / KPP code, more than 2 pages"
         ),
         examples=[False],
     )
     flag_reason: str | None = Field(
         None,
-        description="Why `flag` is true, in Indonesian, for a reviewer; null when not flagged",
+        description="Why `flag` is true, in Indonesian; null when not flagged",
+        examples=[None],
+    )
+    reject_reason: str | None = Field(
+        None,
+        description=(
+            "Set when a check that rejects the document fired (all but a single-word name and a letter in the "
+            "number). A rejected document is never handed to scoring; the client gets a 400 with this message"
+        ),
         examples=[None],
     )
 
@@ -225,13 +233,14 @@ class FinalResult(BaseModel):
     flag: bool = Field(
         False,
         description=(
-            "Review flag of the structuring rules (see the structuring result). True never rejects the document: "
-            "the value is still returned, the trust model's confidence is lower, and `flag_reason` says why"
+            "Flag of the structuring rules (see the structuring result), an input of the trust model. Only a "
+            "tolerated flag (single-word name, letter in the number) reaches this result: any other rejects the "
+            "document at structuring"
         ),
         examples=[False],
     )
     flag_reason: str | None = Field(
-        None, description="Why `flag` is true, in Indonesian, for a reviewer; null when not flagged", examples=[None]
+        None, description="Why `flag` is true, in Indonesian; null when not flagged", examples=[None]
     )
 
 
@@ -261,6 +270,14 @@ class StageCallback(BaseModel):
         None, description="Always null for OCR and STRUCTURING; read the stage result from GET .../jobs/{request_id}"
     )
     error_message: str | None = Field(None, description="Why it failed; null when `status` is `DONE`", examples=[None])
+    error_code: str | None = Field(
+        None,
+        description=(
+            "Only on a rejection: `DOWNSTREAM_VALIDATION_ERROR` when the stage rejected the document (a rejecting "
+            "check of the structuring rules; `error_message` is the Indonesian reason). Absent when a stage broke"
+        ),
+        examples=[None],
+    )
 
 
 class ScoringStageCallback(StageCallback):

@@ -50,11 +50,18 @@ def test_pipeline_locally_needs_nothing():
 def test_pipeline_outside_local_requires_database_and_a_way_to_report_the_outcome():
     with pytest.raises(ValidationError, match="DATABASE_URL must be set when ENVIRONMENT=production"):
         pipeline(environment="production")
-    with pytest.raises(ValidationError, match="ORCHESTRATION_URL or ORCHESTRATION_OUTCOME_TABLE must be set"):
+    with pytest.raises(
+        ValidationError,
+        match="ORCHESTRATION_URL, ORCHESTRATION_OUTCOME_TABLE or ORCHESTRATION_API_EVENTS_TABLE must be set",
+    ):
         pipeline(environment="staging", database_url=DB)
     assert pipeline(environment="production", database_url=DB, orchestration_url=ORCH).callbacks_enabled is True
     table_only = pipeline(environment="production", database_url=DB, orchestration_outcome_table="orchestration_x")
     assert table_only.callbacks_enabled is False
+    events_only = pipeline(
+        environment="production", database_url=DB, orchestration_api_events_table="ocr.orchestration_api_events"
+    )
+    assert events_only.callbacks_enabled is False
 
 
 def test_empty_string_counts_as_missing():

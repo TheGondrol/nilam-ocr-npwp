@@ -22,9 +22,9 @@ class SqlOutbox:
     """The outbox table. `add` runs inside the caller's transaction and does not wake the relay:
     call `wake()` after that transaction committed, or the relay polls before the rows are visible."""
 
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, table_prefix: str = ""):
         self._url = database_url
-        self.table = outbox_table(MetaData())
+        self.table = outbox_table(MetaData(), table_prefix)
         self.pending = asyncio.Event()
 
     async def add(self, conn: AsyncConnection, request_id: str, stage: str, messages: Sequence[OutboxMessage]) -> None:

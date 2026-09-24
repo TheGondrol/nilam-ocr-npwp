@@ -84,17 +84,25 @@ class StructuredDocument(BaseModel):
     flag: bool = Field(
         ...,
         description=(
-            "Review flag of the ML team's rules. True when: another document is bundled in (KTP, KK, Akta), the "
-            "page is a CAPTCHA or a screenshot of the DJP lookup, the number or the name was not found, the name "
-            "is a single word, the number contains a letter, its province / kecamatan / birthdate / KPP code is "
-            "invalid, or the upload has more than 2 pages. It never rejects the document: the fields are still "
-            "returned, and the trust model uses the flag as a feature"
+            "Flag of the ML team's rules, a feature of the trust model. True when: another document is bundled "
+            "in (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup, the number or the name "
+            "was not found, the name is a single word, the number contains a letter, its province / kecamatan / "
+            "birthdate / KPP code is invalid, or the upload has more than 2 pages"
         ),
         examples=[False],
     )
     flag_reason: str | None = Field(
         None,
-        description="The first reason `flag` is true, in Indonesian, for a reviewer; null when not flagged",
+        description="The first reason `flag` is true, in Indonesian; null when not flagged",
+        examples=[None],
+    )
+    reject_reason: str | None = Field(
+        None,
+        description=(
+            "The first reason that rejects the document, in Indonesian; null when the document is accepted. Every "
+            "check rejects except a single-word name and a letter in the number, which only raise `flag`. In the "
+            "pipeline a rejected document stops here (no scoring) and the client gets a 400 with this message"
+        ),
         examples=[None],
     )
 

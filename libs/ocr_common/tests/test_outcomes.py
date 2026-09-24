@@ -83,6 +83,18 @@ async def test_failing_records_the_stage_that_failed(repository):
     assert (row["error_code"], row["error_message"]) == ("SCORING_FAILED", "No text lines to structure")
 
 
+async def test_a_rejection_marks_the_request_failed_with_400_and_the_reason(repository):
+    repo, _ = repository
+    reason = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+    await repo.claim(RID)
+    await repo.complete(RID, {"reject_reason": reason}, outcome_data=DATA, rejection=reason)
+
+    row = await _row(repository)
+    assert (row["status_code"], row["downstream_status"], row["downstream_stage"]) == (400, "failed", "SCORING")
+    assert (row["error_code"], row["error_message"]) == ("DOWNSTREAM_VALIDATION_ERROR", reason)
+    assert row["result_data"] is None
+
+
 async def test_a_second_run_of_the_same_request_id_overwrites_its_row(repository):
     repo, _ = repository
     await repo.claim(RID)
@@ -130,7 +142,7 @@ def test_the_outcome_row_is_off_until_the_table_is_configured():
 
     on = PipelineSettings(api_key="k", environment="local", orchestration_outcome_table=TABLE, _env_file=None)
     writer = build_stage_outcome(on, stage=STAGE_SCORING)
-    assert writer is not None
+    assert isinstance(writer, OrchestrationOutcome)
     assert writer.table.name == TABLE
 
 

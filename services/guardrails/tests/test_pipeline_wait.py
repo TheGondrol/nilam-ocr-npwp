@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.dependencies import get_guardrails_service
 from app.main import app
 from app.services.job_service import GuardrailsJobService
-from app.services.pipeline_waiter import PipelineWaiter, WaitOutcome
+from app.services.pipeline_waiter import STATUS_REJECTED, PipelineWaiter, WaitOutcome
 
 RID = "REQ_wait"
 
@@ -57,8 +57,6 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
     assert body["data"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-        "flag": False,
-        "flag_reason": None,
     }
     [(request_id, timeout)] = stub_waiter.calls
     assert request_id == RID
@@ -89,6 +87,18 @@ def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub
     body = response.json()
     assert (body["errors"], body["message"]) == ("OCR_FAILED", "ekstraksi OCR model is unavailable")
     assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 1)
+
+
+def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, auth, stub_waiter):
+    reason = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+    stub_waiter.outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, reason)
+
+    response = _submit(client, auth)
+
+    assert response.status_code == 400
+    body = response.json()
+    assert (body["errors"], body["message"]) == ("DOWNSTREAM_VALIDATION_ERROR", reason)
+    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 0)
 
 
 def test_rejected_document_answers_at_once_without_waiting(client, auth, stub_waiter):
@@ -166,6 +176,32 @@ async def test_waiter_stops_at_the_first_failed_stage():
         "No text lines to structure",
     )
     assert stages[2].calls == 0
+
+
+async def test_waiter_stops_at_a_rejection_of_the_structuring_rules():
+    reason = "dokumen blur / blank"
+    stages = [
+        FakeStage("OCR", _job("DONE", {"blocks": []})),
+        FakeStage("STRUCTURING", _job("DONE", {"fields": {}, "flag": True, "reject_reason": reason})),
+        FakeStage("SCORING", _job("DONE", {})),
+    ]
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).wait(RID, 5)
+
+    assert (outcome.stage, outcome.status, outcome.error_message) == ("STRUCTURING", STATUS_REJECTED, reason)
+    assert stages[2].calls == 0, "scoring never gets a rejected document, so it is not waited for"
+
+
+async def test_waiter_goes_on_past_a_tolerated_flag():
+    stages = [
+        FakeStage("OCR", _job("DONE", {})),
+        FakeStage("STRUCTURING", _job("DONE", {"fields": {}, "flag": True, "reject_reason": None})),
+        FakeStage("SCORING", _job("DONE", {"npwp_confidence": 0.7, "name_confidence": 0.9})),
+    ]
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).wait(RID, 5)
+
+    assert (outcome.stage, outcome.status) == ("SCORING", "DONE")
 
 
 async def test_waiter_gives_up_when_the_time_runs_out():

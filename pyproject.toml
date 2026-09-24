@@ -18,8 +18,21 @@ section-order = ["future", "standard-library", "third-party", "ocr-common", "fir
 "services/*/app/api/**" = ["B008", "B904"]
 "services/*/app/dependencies.py" = ["B008"]
 "libs/ocr_common/ocr_common/web/intake.py" = ["B008"]
+"tools/tracker/backend/*.py" = ["B008"]
 
 [tool.ty.environment]
 extra-paths = [
     "libs/ocr_common",
 ]
+
+# Pyrefly (language server di editor): cari import seperti ty di atas. Tiap service dan libs/ocr_common
+# punya [tool.pyrefly] sendiri, jadi paket `app` selalu milik service tempat file itu berada.
+[tool.pyrefly]
+search-path = ["libs/ocr_common", "tools/tracker/backend"]
+project-excludes = ["**/.venv/**", "**/node_modules/**", "**/__pycache__/**"]
+
+[tool.pyrefly.errors]
+# yaml / openpyxl ship no type stubs; the libraries work, only their types are unknown.
+untyped-import = false
+# str()/int() around data from JSON or FastAPI (Any at runtime) are deliberate.
+unnecessary-type-conversion = false

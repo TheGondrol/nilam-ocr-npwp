@@ -5,15 +5,9 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 set_test_env(EKSTRAKSI_BACKEND="mock", DATABASE_URL="", ORCHESTRATION_URL="", AUTH_DISABLED="false")
 
 from app.config import get_settings  # noqa: E402
-from app.dependencies import (  # noqa: E402
-    get_ekstraksi_service,
-    get_ocr_service,
-    get_request_repository,
-    get_stage_clients,
-)
+from app.dependencies import get_ekstraksi_service  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.ekstraksi_service import EkstraksiService  # noqa: E402
-from app.services.ocr_service import OcrService  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -35,16 +29,3 @@ def use_engine():
 
     yield _use
     app.dependency_overrides.pop(get_ekstraksi_service, None)
-
-
-@pytest.fixture
-def use_ocr_service():
-    """Serve the legacy contract with these stage clients and/or this request repository."""
-
-    def _use(*, repository=None, stages=None):
-        app.dependency_overrides[get_ocr_service] = lambda: OcrService(
-            repository or get_request_repository(), get_ekstraksi_service(), stages or get_stage_clients()
-        )
-
-    yield _use
-    app.dependency_overrides.pop(get_ocr_service, None)

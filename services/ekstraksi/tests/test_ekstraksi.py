@@ -1,7 +1,10 @@
+from typing import Any
+
 import httpx
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.testing import image_upload
+from ocr_common.types import OcrEngineResult
 
 from app.config import Settings
 from app.ml.mock import MockOcrEngine
@@ -50,7 +53,7 @@ PADDLE_RESPONSE = {
 class StubEngine:
     name = "stub"
 
-    async def extract(self, filename, content, content_type=None):
+    async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> OcrEngineResult:
         return {
             "blocks": [
                 {"text": "A", "confidence": 0.9, "bbox": None, "page": 0},
@@ -76,7 +79,7 @@ async def test_service_wraps_engine_output_with_metadata():
 
 
 async def test_paddle_engine_posts_multipart_and_maps_response():
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
@@ -120,7 +123,7 @@ async def test_paddle_engine_returns_no_blocks_for_undecodable_file():
 
 
 async def test_paddle_engine_defaults_filename_and_content_type():
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["body"] = request.read()

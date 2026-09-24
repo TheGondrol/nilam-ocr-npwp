@@ -9,6 +9,7 @@ import uuid
 from collections import Counter
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import httpx
 
@@ -50,7 +51,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"{}")
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -218,21 +219,6 @@ def guardrails_reject(client: httpx.Client) -> bool:
     return response.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR"
 
 
-def legacy_contract(client: httpx.Client) -> bool:
-    print("== kontrak lama (extract-ocr sinkron) ==")
-    base = URLS["ekstraksi"]
-    request_id = client.post(f"{base}/v1/generate-request-id", headers=HEADERS).json()["request_id"]
-    response = client.post(
-        f"{base}/v1/extract-ocr",
-        headers=HEADERS,
-        data={"request_id": request_id},
-        files={"file": ("npwp.jpg", _image(), "image/jpeg")},
-    )
-    body = response.json()
-    print("extract-ocr:", response.status_code, body.get("message"), "guardrails =", body.get("guardrails"))
-    return response.status_code == 200
-
-
 def main() -> int:
     if CALLBACK_PORT:
         server = ThreadingHTTPServer(("0.0.0.0", CALLBACK_PORT), _CallbackHandler)
@@ -242,7 +228,7 @@ def main() -> int:
     with httpx.Client(timeout=60.0) as client:
         for name, url in URLS.items():
             print(f"health {name}:", client.get(f"{url}/health").json()["backends"])
-        results = [async_pipeline(client), guardrails_reject(client), legacy_contract(client)]
+        results = [async_pipeline(client), guardrails_reject(client)]
         if LATENCY_RUNS:
             results.append(latency(client, LATENCY_RUNS))
     print("HASIL:", "OK" if all(results) else "GAGAL")

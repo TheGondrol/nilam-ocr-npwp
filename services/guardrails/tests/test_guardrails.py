@@ -165,8 +165,6 @@ def test_extract_ocr_follows_the_orchestrator_contract(client, auth):
         "data": {
             "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
             "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-            "flag": False,
-            "flag_reason": None,
         },
         "errors": None,
         "request_id": "OCR_1",

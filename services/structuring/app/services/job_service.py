@@ -14,6 +14,11 @@ from app.services.structuring_service import StructuringService
 Handoff = HandoffPayload
 
 
+def _rejection(structuring: Mapping[str, Any]) -> str | None:
+    """A rejecting check of the ML team's rules stops the pipeline here: no scoring, a 400 for the client."""
+    return structuring.get("reject_reason") or None
+
+
 class StructuringJobService:
     def __init__(
         self,
@@ -42,6 +47,7 @@ class StructuringJobService:
             work,
             handoff_payload=handoff,
             next_stage=STAGE_SCORING,
+            rejection=_rejection,
             input={"document_type": document_type, "guardrails": guardrails},
         )
 
@@ -52,7 +58,9 @@ class StructuringJobService:
         work, handoff = self._spec(
             request_id, input.get("document_type") or DOCUMENT_TYPE, input.get("guardrails"), None
         )
-        await self._pipeline.resume(request_id, work, handoff_payload=handoff, next_stage=STAGE_SCORING)
+        await self._pipeline.resume(
+            request_id, work, handoff_payload=handoff, next_stage=STAGE_SCORING, rejection=_rejection
+        )
 
     async def get(self, request_id: str) -> dict[str, Any]:
         return await self._pipeline.get(request_id)

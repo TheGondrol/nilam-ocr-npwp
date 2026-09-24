@@ -72,8 +72,9 @@ orchestrator. Guardrails menunggu pipeline sampai `PIPELINE_WAIT_SECONDS` (defau
       PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
       ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
                                          tidak ada yang jalan, tidak ada callback
-      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama, flag, flag_reason},
-                                         guardrails = 1
+      ditolak aturan structuring -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0,
+                                         message = alasan penolakan dari aturan ML; scoring tidak jalan
+      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 1
       lolos, gagal tepat waktu   -> 422  job_status = failed,
                                          errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
       lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
@@ -158,9 +159,7 @@ Selesai dalam waktu tunggu, **200**:
       "message": "OCR extraction completed successfully",
       "data": {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-        "flag": false,
-        "flag_reason": null
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1}
       },
       "errors": null,
       "request_id": "REQ_001",
@@ -173,13 +172,12 @@ Selesai dalam waktu tunggu, **200**:
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
 - `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
   `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
-- `flag` / `flag_reason` (baru, 23 Sep 2026) = tanda review dari aturan ekstraksi ML engineer, **bukan
-  penolakan**: nilainya tetap dikembalikan, confidence-nya lebih rendah, dan `flag_reason` (bahasa
-  Indonesia) menjelaskan kenapa, mis. `"Nama hanya terdiri dari 1 kata, mohon dicek kembali"`,
-  `"Dokumen lain terdeteksi: 'KARTU TANDA PENDUDUK' pada halaman 1"`, `"Kode provinsi pada NPWP tidak
-  valid, mohon dicek kembali"`, `"dokumen blur / blank"`. Kolom `result_data` di tabel Orkestrasi
-  membawa keduanya juga. Pencocokan nama fuzzy terhadap nama nasabah (`refno`) dilakukan di sisi
-  Orkestrasi, sesuai keputusan ML engineer; service ini tidak memakainya.
+- Flag dari aturan ekstraksi ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
+  input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
+  nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
+  menolak dokumen dengan 400 (lihat di bawah).
+- Pencocokan nama fuzzy terhadap nama nasabah (`refno`) dilakukan di sisi Orkestrasi, sesuai
+  keputusan ML engineer; service ini tidak memakainya.
 
 Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback SCORING, atau
 baca dengan `GET /v1/scoring/jobs/{request_id}`:
@@ -194,6 +192,22 @@ Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
      "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
      "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+
+Ditolak aturan structuring ML engineer (23 Sep 2026), juga **400** dengan bentuk yang sama;
+`message` adalah alasan penolakan pertama dari aturan itu (bukan alasan flag yang ditoleransi),
+dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan terjadi di tahap structuring, jadi scoring tidak jalan:
+
+    {"status_code": 400, "status_desc": "Bad Request",
+     "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+     "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
+     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+
+Alasan yang menolak: dokumen blur / blank, bukan format standar NPWP, dokumen lain terdeteksi,
+screenshot cek NPWP online, jumlah halaman melebihi batas, serta kode provinsi, kecamatan, tanggal
+lahir, atau KPP pada nomor yang tidak valid. Kalau dokumen punya beberapa alasan, yang dipakai
+adalah alasan penolakan pertama menurut urutan prioritas aturan ML. Kalau penolakan terjadi setelah
+jawaban 202, keadaan akhirnya adalah callback `STRUCTURING` `FAILED` dengan alasan itu sebagai
+`error_message`, dan baris 400 / `DOWNSTREAM_VALIDATION_ERROR` di tabel Orkestrasi.
 
 Tahap pipeline gagal dalam waktu tunggu, **422**; request berakhir di sini, sama seperti
 callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
@@ -284,6 +298,51 @@ dari tim ML. Contoh isi `result` sungguhan:
 Tahap ini yang terakhir, dan hanya callback-nya yang membawa hasil akhir.
 
 ## 7. Kontrak callback
+
+### Callback hasil (dipakai di dev sejak 24 Sep 2026)
+
+Endpoint dari tim Orkestrasi, satu POST per request saat request selesai
+(`ORCHESTRATION_CALLBACK_FORMAT=result`):
+
+    POST http://ocr-orchestration.ocr-dev.svc.cluster.local/v1/ocr-callback
+    X-Callback-Key: <ORCHESTRATION_CALLBACK_KEY>
+
+Selesai (dikirim oleh scoring):
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "completed",
+      "result": {
+        "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 0.9829},
+        "nama":       {"value": "BUDI SANTOSO",         "confidence": 0.9512},
+        "nama_badan": {"value": "",                     "confidence": 0.0}
+      },
+      "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}
+    }
+
+`confidence` adalah probabilitas dari trust model bahwa nilainya benar, belum dibulatkan ke 0/1
+seperti di respons `extract-ocr`. Field yang tidak ditemukan: `value` kosong dan `confidence` 0.0.
+Probabilitas nama masuk ke `nama` atau `nama_badan`, mana pun yang berisi nama. `guardrails` adalah
+laporan model guardrails untuk dokumen itu.
+
+Gagal atau ditolak (dikirim oleh tahap yang berhenti):
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "failed",
+      "result": null,
+      "guardrails": {},
+      "error_code": "DOWNSTREAM_VALIDATION_ERROR",
+      "error_message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+    }
+
+`error_code` bernilai `DOWNSTREAM_VALIDATION_ERROR` kalau dokumen ditolak aturan structuring, atau
+`OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` kalau tahapnya gagal. Dokumen yang ditolak
+model guardrails tidak mendapat callback, karena sudah dijawab 400 langsung di `extract-ocr`.
+Jawaban 5xx dan timeout dikirim ulang (3 kali tanpa outbox, seperti di dev sekarang; sampai 24 jam
+dengan `PIPELINE_OUTBOX`), 4xx tidak dikirim ulang.
+
+### Callback per tahap (format lama, `ORCHESTRATION_CALLBACK_FORMAT=stage`)
 
 Tiap tahap mem-POST ke `<ORCHESTRATION_URL><CALLBACK_PATH>`, dengan default path
 `/v1/callbacks/stage`. Header `X-API-Key` ikut dikirim kalau kami diberi nilainya, dan header
@@ -399,20 +458,17 @@ penjelasan yang aman untuk di-log.
 Guardrails adalah pengecualian: dokumen ditolak tetap dijawab 200, penolakannya ada di
 `data.passed`.
 
-## 11. Kontrak lama (sinkron)
+## 11. Kontrak lama (sinkron): sudah dihapus
 
-Kalau kalian belum siap pindah ke alur asinkron, kontrak lama masih hidup di service
-ekstraksi dan akan kami pertahankan sampai kalian pindah:
+Sejak 24 September 2026, endpoint kontrak lama di service ekstraksi (port 8030) sudah
+dihapus:
 
-    POST /v1/generate-request-id          buat request_id
-    POST /v1/extract-ocr                  jalankan seluruh rantai sekaligus, sinkron
-    GET  /v1/get-ocr-result/{request_id}  ambil hasilnya
+    POST /v1/generate-request-id
+    POST /v1/extract-ocr                  (versi ekstraksi, port 8030)
+    GET  /v1/get-ocr-result/{request_id}
 
-Perbedaannya: seluruh rantai dijalankan dalam satu panggilan yang ditunggu sampai
-selesai, tanpa callback. Satu `request_id` hanya boleh dikirim sekali.
-
-Alur asinkron di bagian 3 yang kami sarankan, karena tidak menahan koneksi selama OCR
-berjalan.
+Pakai `POST /v1/extract-ocr` di service guardrails (port 8031, bagian 4). Status tiap
+tahap bisa dibaca di `GET /v1/<tahap>/jobs/{request_id}` (bagian 8).
 
 ## 12. Database
 
@@ -425,7 +481,6 @@ permintaan supaya seragam.
 | `ocr_jobs`, `ocr_results` | status dan hasil OCR mentah |
 | `structuring_jobs`, `structuring_results` | field hasil penataan |
 | `scoring_jobs`, `scoring_results` | confidence akhir |
-| `ocr_npwp_requests` | dipakai kontrak lama di bagian 11 |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
 di callback dan endpoint status. Kami cantumkan supaya jelas tabel mana milik kami, dan

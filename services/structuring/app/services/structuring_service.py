@@ -22,4 +22,5 @@ class StructuringService:
             "fields": document["fields"],
             "flag": document["flag"],
             "flag_reason": document["flag_reason"],
+            "reject_reason": document.get("reject_reason"),
         }

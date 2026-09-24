@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from ocr_common.types import BoundingBox, OcrBlock
+from ocr_common.types import BoundingBox, OcrBlock, StructuredField
 
 from app.dependencies import get_structurer
 from app.ml import npwp_rules
@@ -64,6 +65,17 @@ def fields(lines):
     return structure(lines)["fields"]
 
 
+def _signals(field: StructuredField) -> dict[str, Any]:
+    signals = field["signals"]
+    assert signals is not None
+    return signals
+
+
+def _text(value: str | None) -> str:
+    assert value is not None
+    return value
+
+
 def test_default_backend_is_npwp_rules():
     assert get_structurer().name == "npwp_rules"
 
@@ -84,13 +96,13 @@ def test_new_card_prefers_the_16_digit_number_over_the_legacy_15_digit_one():
     assert number["value"] == "4318085607040052"
     assert number["source"] == "NPWP16:4318 0856 07040052"
     assert number["confidence"] == 0.9762
-    assert number["signals"]["candidate_count"] == 2
+    assert _signals(number)["candidate_count"] == 2
 
 
 def test_old_card_keeps_the_dotted_15_digit_format_and_title_suffix_and_is_not_flagged():
     document = structure(OLD_CARD)
     assert document["fields"]["nomor_npwp"]["value"] == "48.903.841.4-722.000"
-    assert document["fields"]["nomor_npwp"]["signals"] == {"candidate_count": 1, **NO_NUMBER_SIGNAL}
+    assert _signals(document["fields"]["nomor_npwp"]) == {"candidate_count": 1, **NO_NUMBER_SIGNAL}
     assert document["fields"]["nama"]["value"] == "TOTOK WIJAYANTO, SSI."
     assert (document["flag"], document["flag_reason"]) == (False, None)
 
@@ -134,7 +146,7 @@ def test_homoglyph_is_dropped_not_corrected_and_flagged():
     document = structure(_card("63.48O.341.5-5O1.000"))
     number = document["fields"]["nomor_npwp"]
     assert number["value"] == "6348341551000", "the two O are dropped, not read as 0 (correction is off)"
-    assert number["signals"]["has_homoglyph"] is True
+    assert _signals(number)["has_homoglyph"] is True
     assert (document["flag"], document["flag_reason"]) == (True, npwp_rules.FLAG_HOMOGLYPH)
     assert document["fields"]["nama"]["value"] == "SRI WAHYUNI"
 
@@ -143,7 +155,7 @@ def test_an_unresolved_t_is_dropped_and_flagged_not_reported_as_a_valid_15_digit
     document = structure(_card("3329 1T30 1001 0006"))
     number = document["fields"]["nomor_npwp"]
     assert number["value"] == "332913010010006", "15 digits left, but not the printed 15-digit shape: no dots"
-    assert number["signals"]["has_homoglyph"] is True
+    assert _signals(number)["has_homoglyph"] is True
     assert document["flag_reason"] == npwp_rules.FLAG_HOMOGLYPH
 
 
@@ -152,18 +164,18 @@ def test_a_t_in_the_province_prefix_is_dropped_too_while_correction_is_off():
     # normalize_npwp, so the T is dropped like any other letter and the number is flagged.
     number = fields(_card("T701 0130 1001 0006"))["nomor_npwp"]
     assert number["value"] == "701013010010006"
-    assert number["signals"]["has_homoglyph"] is True
+    assert _signals(number)["has_homoglyph"] is True
 
 
 def test_invalid_province_code_is_flagged_for_a_16_digit_number():
     document = structure(_card("7729 0130 1001 0006"))
-    assert document["fields"]["nomor_npwp"]["signals"]["invalid_province_prefix"] is True
+    assert _signals(document["fields"]["nomor_npwp"])["invalid_province_prefix"] is True
     assert (document["flag"], document["flag_reason"]) == (True, npwp_rules.FLAG_INVALID_PROVINCE)
 
 
 def test_invalid_birthdate_is_flagged_for_a_16_digit_number():
     document = structure(_card("3329 0199 3001 0006"))
-    assert document["fields"]["nomor_npwp"]["signals"]["invalid_birthdate"] is True
+    assert _signals(document["fields"]["nomor_npwp"])["invalid_birthdate"] is True
     assert document["flag_reason"] == npwp_rules.FLAG_INVALID_BIRTHDATE
 
 
@@ -174,13 +186,13 @@ def test_birthdate_of_a_woman_adds_40_to_the_day():
 def test_kecamatan_check_needs_the_kode_wilayah_table(tmp_path, monkeypatch):
     number = "3329 0130 1001 0006"
     monkeypatch.setenv("WILAYAH_CODES_PATH", str(tmp_path / "tidak-ada.json"))
-    assert fields(_card(number))["nomor_npwp"]["signals"]["invalid_kecamatan_prefix"] is False, "no table: no signal"
+    assert _signals(fields(_card(number))["nomor_npwp"])["invalid_kecamatan_prefix"] is False, "no table: no signal"
 
     table = tmp_path / "kode_wilayah.json"
     table.write_text(json.dumps({"kecamatan": {"330101": "Contoh"}}), encoding="utf-8")
     monkeypatch.setenv("WILAYAH_CODES_PATH", str(table))
     document = structure(_card(number))
-    assert document["fields"]["nomor_npwp"]["signals"]["invalid_kecamatan_prefix"] is True
+    assert _signals(document["fields"]["nomor_npwp"])["invalid_kecamatan_prefix"] is True
     assert document["flag_reason"] == npwp_rules.FLAG_INVALID_KECAMATAN
     assert structure(_card("3301 0130 1001 0006"))["flag"] is False
 
@@ -188,13 +200,13 @@ def test_kecamatan_check_needs_the_kode_wilayah_table(tmp_path, monkeypatch):
 def test_kpp_check_needs_the_kpp_table(tmp_path, monkeypatch):
     number = "48.903.841.4-722.000"
     monkeypatch.setenv("KPP_CODES_PATH", str(tmp_path / "tidak-ada.json"))
-    assert fields(_card(number))["nomor_npwp"]["signals"]["invalid_kpp_prefix"] is False, "no table: no signal"
+    assert _signals(fields(_card(number))["nomor_npwp"])["invalid_kpp_prefix"] is False, "no table: no signal"
 
     table = tmp_path / "kpp_codes.json"
     table.write_text(json.dumps({"012": "KPP Pratama Contoh"}), encoding="utf-8")
     monkeypatch.setenv("KPP_CODES_PATH", str(table))
     document = structure(_card(number))
-    assert document["fields"]["nomor_npwp"]["signals"]["invalid_kpp_prefix"] is True
+    assert _signals(document["fields"]["nomor_npwp"])["invalid_kpp_prefix"] is True
     assert document["flag_reason"] == npwp_rules.FLAG_INVALID_KPP
     assert structure(_card("48.903.841.4-012.000"))["flag"] is False
 
@@ -227,7 +239,7 @@ def test_recognised_name_from_the_name_master_wins_the_tie_break(tmp_path, monke
         name_master._load_index.cache_clear()
 
 
-# --- nothing is rejected: the document is flagged for a reviewer -------------------------------
+# --- every check flags; all but two also reject (ML team, 23 Sep 2026) --------------------------
 
 
 @pytest.mark.parametrize(
@@ -241,19 +253,51 @@ def test_recognised_name_from_the_name_master_wins_the_tie_break(tmp_path, monke
         ([_line("Cek NPWP", 40), _line("Nama: (disamarkan)", 90)], npwp_rules.FLAG_WEB_LOOKUP),
         ([_line("npwp", 40, page=p) for p in range(3)], "Dokumen memiliki 3 halaman (lebih dari 2)"),
         ([_line("lorem ipsum 123", 40)], npwp_rules.FLAG_BLANK),
-        ([_line("12.345.678.9-012.345", 120), _line("SUKIRMAN", 200)], npwp_rules.FLAG_SINGLE_WORD_NAME),
+        (_card("7729 0130 1001 0006"), npwp_rules.FLAG_INVALID_PROVINCE),
+        (_card("3329 0199 3001 0006"), npwp_rules.FLAG_INVALID_BIRTHDATE),
+        (_card("3399 9930 1001 0006"), npwp_rules.FLAG_INVALID_KECAMATAN),
+        (_card("48.903.841.4-999.000"), npwp_rules.FLAG_INVALID_KPP),
     ],
 )
-def test_page_checks_flag_but_never_reject(lines, reason):
+def test_rejecting_checks_flag_and_reject(lines, reason):
     document = structure(lines)
     assert document["flag"] is True
-    assert reason in document["flag_reason"]
-    assert set(document["fields"]) == {"nomor_npwp", "nama", "nama_badan"}
+    assert reason in _text(document["flag_reason"])
+    assert reason in _text(document["reject_reason"])
+    assert set(document["fields"]) == {"nomor_npwp", "nama", "nama_badan"}, "the fields are still read"
+
+
+@pytest.mark.parametrize(
+    ("lines", "reason"),
+    [
+        ([_line("12.345.678.9-012.345", 120), _line("SUKIRMAN", 200)], npwp_rules.FLAG_SINGLE_WORD_NAME),
+        (_card("63.48O.341.5-5O1.000"), npwp_rules.FLAG_HOMOGLYPH),
+    ],
+)
+def test_single_word_name_and_letter_in_the_number_are_tolerated(lines, reason):
+    document = structure(lines)
+    assert (document["flag"], document["flag_reason"]) == (True, reason), "still an input of the trust model"
+    assert document["reject_reason"] is None
+
+
+def test_a_clean_card_is_neither_flagged_nor_rejected():
+    document = structure(_card("12.345.678.9-012.345", "BUDI SANTOSO"))
+    assert (document["flag"], document["flag_reason"], document["reject_reason"]) == (False, None, None)
+
+
+def test_a_tolerated_reason_that_outranks_a_rejecting_one_does_not_hide_it():
+    # flag_reason keeps the rules' priority (single-word name first), but the document is still rejected
+    # for its invalid province code, with that message.
+    document = structure(_card("7729 0130 1001 0006", "SUKIRMAN"))
+    assert document["flag_reason"] == npwp_rules.FLAG_SINGLE_WORD_NAME
+    assert document["reject_reason"] == npwp_rules.FLAG_INVALID_PROVINCE
 
 
 def test_the_first_reason_in_priority_order_is_reported():
     lines = [_line("KARTU KELUARGA", 40), *_card("63.48O.341.5-5O1.000", "SUKIRMAN")]
-    assert structure(lines)["flag_reason"].startswith("Dokumen lain terdeteksi")
+    document = structure(lines)
+    assert _text(document["flag_reason"]).startswith("Dokumen lain terdeteksi")
+    assert _text(document["reject_reason"]).startswith("Dokumen lain terdeteksi")
 
 
 def test_address_and_office_lines_never_become_the_name():
@@ -293,14 +337,16 @@ def test_http_structure_with_real_card(client, auth):
     data = response.json()["data"]
     assert data["fields"]["nomor_npwp"]["value"] == "4318085607040052"
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"
-    assert {"flag", "flag_reason"} <= set(data)
+    assert {"flag", "flag_reason", "reject_reason"} <= set(data)
 
 
-def test_http_bundled_document_is_200_with_a_flag(client, auth):
+def test_http_bundled_document_is_200_with_its_reject_reason(client, auth):
+    # The synchronous debugging endpoint reports the verdict; only the pipeline turns it into a 400.
     lines = [*NEW_CARD, _line("KARTU TANDA PENDUDUK", 1200)]
     response = client.post("/v1/structuring/structure", json={"lines": lines}, headers=auth)
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["flag"] is True
     assert "KARTU TANDA PENDUDUK" in data["flag_reason"]
+    assert "KARTU TANDA PENDUDUK" in data["reject_reason"]
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"

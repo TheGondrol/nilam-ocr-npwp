@@ -59,12 +59,8 @@ services:
     env_file: services/ekstraksi/.env
     environment:
       PORT: "8030"
-      GUARDRAILS_SERVICE_URL: http://guardrails:8031
       STRUCTURING_SERVICE_URL: http://structuring:8032
-      SCORING_SERVICE_URL: http://scoring:8033
     ports:
       - "127.0.0.1:8030:8030"
     depends_on:
-      - guardrails
       - structuring
-      - scoring

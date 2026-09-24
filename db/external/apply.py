@@ -10,8 +10,14 @@ DIRECTORY = Path(__file__).parent
 
 
 def statements(text: str) -> Iterator[str]:
+    """The statements of `text`, split on `;` except inside a `$$ ... $$` block (a DO block)."""
+    pending = ""
     for chunk in text.split(";"):
-        lines = [line for line in chunk.splitlines() if line.strip() and not line.strip().startswith("--")]
+        pending = f"{pending};{chunk}" if pending else chunk
+        if pending.count("$$") % 2:
+            continue
+        lines = [line for line in pending.splitlines() if line.strip() and not line.strip().startswith("--")]
+        pending = ""
         if lines:
             yield "\n".join(lines)
 

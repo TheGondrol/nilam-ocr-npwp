@@ -4,6 +4,7 @@ from urllib.parse import quote
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import InternalError, ServiceError
 from ocr_common.pipeline import STAGE_OCR, STAGE_SCORING, STAGE_STRUCTURING
+from ocr_common.testing_endpoints import testing_path
 
 from app.config import Settings
 
@@ -30,7 +31,13 @@ class StageStatusClient:
         await self._client.aclose()
 
 
-def build_stage_status_clients(settings: Settings) -> tuple[StageStatusClient, ...]:
+def build_stage_status_clients(settings: Settings, *, testing: bool = False) -> tuple[StageStatusClient, ...]:
+    """The clients the pipeline waiter polls, one per stage; `testing=True` reads their `-test` jobs
+    (TESTING_ENDPOINTS)."""
+
+    def jobs_path(path: str) -> str:
+        return testing_path(path) if testing else path
+
     def remote(base_url: str, api_key: str | None, timeout: float, name: str) -> RemoteModelClient:
         return RemoteModelClient(
             base_url,
@@ -49,7 +56,7 @@ def build_stage_status_clients(settings: Settings) -> tuple[StageStatusClient, .
                 settings.ekstraksi_timeout_seconds,
                 "ekstraksi service",
             ),
-            "/v1/ekstraksi/jobs",
+            jobs_path("/v1/ekstraksi/jobs"),
         ),
         StageStatusClient(
             STAGE_STRUCTURING,
@@ -59,7 +66,7 @@ def build_stage_status_clients(settings: Settings) -> tuple[StageStatusClient, .
                 settings.structuring_timeout_seconds,
                 "structuring service",
             ),
-            "/v1/structuring/jobs",
+            jobs_path("/v1/structuring/jobs"),
         ),
         StageStatusClient(
             STAGE_SCORING,
@@ -69,6 +76,6 @@ def build_stage_status_clients(settings: Settings) -> tuple[StageStatusClient, .
                 settings.scoring_timeout_seconds,
                 "scoring service",
             ),
-            "/v1/scoring/jobs",
+            jobs_path("/v1/scoring/jobs"),
         ),
     )

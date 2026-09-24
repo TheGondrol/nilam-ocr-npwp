@@ -407,6 +407,117 @@ function Tile({ k, v, s, cls }) {
   )
 }
 
+// Default MAX_UPLOAD_BYTES service (ocr_common/config.py); file lebih besar akan dijawab 413.
+const SERVICE_UPLOAD_LIMIT = 2.5 * 1024 * 1024
+
+function fmtBytes(n) {
+  if (n == null) return ''
+  return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function TestFiles({ config, selected, setSelected, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const input = useRef(null)
+  const files = config?.image_files ?? []
+
+  async function upload(list) {
+    if (!list?.length) return
+    setBusy(true)
+    setError(null)
+    const form = new FormData()
+    for (const f of list) form.append('files', f)
+    try {
+      const r = await fetch('/api/loadtest/images', { method: 'POST', body: form })
+      const body = await r.json()
+      if (!r.ok) throw new Error(body.detail ?? r.statusText)
+      await onChanged()
+      setSelected((prev) => [...prev.filter((n) => body.images.includes(n)), ...body.saved])
+    } catch (err) {
+      setError(String(err.message ?? err))
+    } finally {
+      setBusy(false)
+      if (input.current) input.current.value = ''
+    }
+  }
+
+  async function remove(name) {
+    if (!window.confirm(`Hapus ${name} dari folder images?`)) return
+    setError(null)
+    const r = await fetch(`/api/loadtest/images/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      setError(body.detail ?? r.statusText)
+      return
+    }
+    setSelected((prev) => prev.filter((n) => n !== name))
+    onChanged()
+  }
+
+  function drop(e) {
+    e.preventDefault()
+    setDragging(false)
+    if (!busy) upload(e.dataTransfer.files)
+  }
+
+  const allSelected = files.length > 0 && files.every((f) => selected.includes(f.name))
+  return (
+    <div className="testfiles">
+      <div className="testfiles-head">
+        <span>file uji ({selected.length}/{files.length} dipakai)</span>
+        {files.length > 1 && (
+          <button type="button" className="link" onClick={() => setSelected(allSelected ? [] : files.map((f) => f.name))}>
+            {allSelected ? 'kosongkan' : 'pilih semua'}
+          </button>
+        )}
+      </div>
+      <ul className="images">
+        {files.map(({ name, size }) => (
+          <li key={name}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selected.includes(name)}
+                onChange={(e) => setSelected(e.target.checked ? [...selected, name] : selected.filter((n) => n !== name))}
+              />
+              <span className="fname" title={name}>
+                {name}
+              </span>
+            </label>
+            <span className={size > SERVICE_UPLOAD_LIMIT ? 'fsize over' : 'fsize'} title={size > SERVICE_UPLOAD_LIMIT ? 'di atas batas 2,5 MB service: akan dijawab 413' : ''}>
+              {fmtBytes(size)}
+            </span>
+            <a href={`/api/loadtest/images/${encodeURIComponent(name)}`} target="_blank" rel="noreferrer">
+              lihat
+            </a>
+            <button type="button" className="link danger" onClick={() => remove(name)}>
+              hapus
+            </button>
+          </li>
+        ))}
+      </ul>
+      {config && files.length === 0 && <div className="hint small">Belum ada file uji. Unggah minimal satu.</div>}
+      <label
+        className={`dropzone ${dragging ? 'over' : ''} ${busy ? 'busy' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={drop}
+      >
+        <input ref={input} type="file" multiple accept=".jpg,.jpeg,.png,.pdf" disabled={busy} onChange={(e) => upload(e.target.files)} />
+        {busy ? 'Mengunggah…' : 'Unggah file uji: klik atau seret ke sini'}
+        <span className="hint small">
+          JPG, PNG, atau PDF, maks. {fmtBytes(config?.max_image_bytes)} per file. Disimpan ke {config?.load_tester_dir ?? 'load-tester'}/images.
+        </span>
+      </label>
+      {error && <div className="error">{error}</div>}
+    </div>
+  )
+}
+
 function LoadTest({ overview, nav }) {
   const [config, setConfig] = useState(null)
   const [runs, setRuns] = useState([])
@@ -425,14 +536,17 @@ function LoadTest({ overview, nav }) {
       .then(setRuns)
       .catch(() => {})
 
-  useEffect(() => {
+  const loadConfig = () =>
     fetch('/api/loadtest/config')
       .then((r) => r.json())
       .then((c) => {
         setConfig(c)
-        setImages(c.images)
+        return c
       })
-      .catch(() => {})
+      .catch(() => null)
+
+  useEffect(() => {
+    loadConfig().then((c) => c && setImages(c.images))
     loadRuns()
     const timer = setInterval(loadRuns, 2000)
     return () => clearInterval(timer)
@@ -524,19 +638,7 @@ function LoadTest({ overview, nav }) {
               <option value="ramp">naik bertahap</option>
             </select>
           </label>
-          <div className="images">
-            {(config?.images ?? []).map((name) => (
-              <label key={name}>
-                <input
-                  type="checkbox"
-                  checked={images.includes(name)}
-                  onChange={(e) => setImages(e.target.checked ? [...images, name] : images.filter((n) => n !== name))}
-                />
-                {name}
-              </label>
-            ))}
-            {config && config.images.length === 0 && <div className="error">Tidak ada gambar di {config.load_tester_dir}/images</div>}
-          </div>
+          <TestFiles config={config} selected={images} setSelected={setImages} onChanged={loadConfig} />
           <div className="hint small">
             k6 ({config?.k6_image ?? 'grafana/k6'}
             {config && !config.k6_image_ready ? ', image belum ada: docker pull dulu' : ''}) jalan di network <code>{config?.network}</code> dan

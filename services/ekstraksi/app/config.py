@@ -17,15 +17,9 @@ class Settings(PipelineSettings):
     # OCR model will serve several document types in production and take its parameters per call.
     ekstraksi_ocr_params: dict[str, Any] = {}
 
-    guardrails_service_url: str = "http://127.0.0.1:8031"
-    guardrails_api_key: str | None = None
-    guardrails_timeout_seconds: float = 10.0
     structuring_service_url: str = "http://127.0.0.1:8032"
     structuring_api_key: str | None = None
     structuring_timeout_seconds: float = 10.0
-    scoring_service_url: str = "http://127.0.0.1:8033"
-    scoring_api_key: str | None = None
-    scoring_timeout_seconds: float = 10.0
 
     @model_validator(mode="after")
     def _guard_ekstraksi(self) -> Self:

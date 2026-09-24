@@ -4,9 +4,15 @@ from fastapi import FastAPI
 
 from ocr_common.web.app import create_app
 
-from app.api import guardrails
+from app.api import guardrails, testing
 from app.config import get_settings
-from app.dependencies import get_ekstraksi_client, get_page_classifier, get_stage_status_clients
+from app.dependencies import (
+    get_ekstraksi_client,
+    get_page_classifier,
+    get_stage_status_clients,
+    get_testing_ekstraksi_client,
+    get_testing_stage_status_clients,
+)
 
 settings = get_settings()
 
@@ -22,6 +28,13 @@ async def lifespan(app: FastAPI):
         for stage in get_stage_status_clients():
             await stage.aclose()
         get_stage_status_clients.cache_clear()
+    if get_testing_ekstraksi_client.cache_info().currsize:
+        await get_testing_ekstraksi_client().aclose()
+        get_testing_ekstraksi_client.cache_clear()
+    if get_testing_stage_status_clients.cache_info().currsize:
+        for stage in get_testing_stage_status_clients():
+            await stage.aclose()
+        get_testing_stage_status_clients.cache_clear()
     close = getattr(classifier, "aclose", None)  # only the HTTP-backed models hold a connection
     if close is not None:
         await close()
@@ -44,7 +57,7 @@ app = create_app(
     tags=[
         {"name": "Guardrails", "description": "Single entry point: guardrails check, then the OCR stage"},
     ],
-    routers=[guardrails.router],
+    routers=[guardrails.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={"guardrails": settings.guardrails_backend},
     readiness={},
     backends_example={"guardrails": "efficientnet"},

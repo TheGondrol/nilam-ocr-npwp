@@ -5,9 +5,18 @@ from fastapi import FastAPI
 from ocr_common.pipeline.schemas import ScoringStageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import jobs, scoring
+from app.api import jobs, scoring, testing
 from app.config import get_settings
-from app.dependencies import get_pipeline, get_reaper, get_relay, get_scorer, get_trust_model
+from app.dependencies import (
+    get_pipeline,
+    get_reaper,
+    get_relay,
+    get_scorer,
+    get_testing_pipeline,
+    get_testing_reaper,
+    get_testing_relay,
+    get_trust_model,
+)
 
 settings = get_settings()
 
@@ -27,10 +36,21 @@ async def lifespan(app: FastAPI):
     reaper = get_reaper()
     if reaper is not None:
         reaper.start()
+    testing_relay = testing_reaper = None
+    if settings.testing_endpoints:
+        testing_relay, testing_reaper = get_testing_relay(), get_testing_reaper()
+        if testing_relay is not None:
+            testing_relay.start()
+        if testing_reaper is not None:
+            testing_reaper.start()
     yield
     if reaper is not None:
         await reaper.stop()
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
+    if settings.testing_endpoints:
+        if testing_reaper is not None:
+            await testing_reaper.stop()
+        await get_testing_pipeline().aclose(settings.pipeline_drain_timeout_seconds, relay=testing_relay)
     if settings.database_url:
         from ocr_common.pipeline.database import dispose_engines
 
@@ -54,7 +74,7 @@ app = create_app(
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
         {"name": "Scoring", "description": "Document score & approve/review/reject decision, synchronous"},
     ],
-    routers=[jobs.router, scoring.router],
+    routers=[jobs.router, scoring.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "scoring": "trust_model",
         "legacy_score": settings.scoring_backend,

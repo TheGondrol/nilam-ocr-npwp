@@ -2,10 +2,12 @@ import pytest
 
 from ocr_common.pipeline import STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, RecordingNextStage, make_client, wait_for_job
+from ocr_common.types import OcrBlock, StructuredDocument
 
 from app.dependencies import get_job_service, get_structuring_service
 from app.main import app
 from app.services.job_service import StructuringJobService
+from app.services.structuring_service import StructuringService
 
 GUARDRAILS = {"passed": True, "reason": None}
 OCR = {
@@ -163,3 +165,44 @@ async def test_a_stale_job_is_run_again_from_what_the_database_holds():
     [payload] = next_stage.payloads
     assert (payload["guardrails"], payload["ocr"]) == (GUARDRAILS, OCR)
     assert [(c["stage"], c["status"]) for c in callback.calls] == [("STRUCTURING", "DONE")]
+
+
+class _RejectingStructurer:
+    """Stands in for the ML team's rules when a rejecting check fires (backend-independent)."""
+
+    name = "rejecting"
+
+    def structure(self, lines: list[OcrBlock]) -> StructuredDocument:
+        return {
+            "fields": {
+                name: {"value": None, "confidence": 0.0, "source": None, "signals": None}
+                for name in ("nomor_npwp", "nama", "nama_badan")
+            },
+            "flag": True,
+            "flag_reason": "Nama hanya terdiri dari 1 kata, mohon dicek kembali",
+            "reject_reason": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+        }
+
+
+async def test_a_rejected_document_stops_at_structuring_with_a_failed_callback():
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = StructuringJobService(pipeline, StructuringService(_RejectingStructurer()))
+
+    await service.submit("REQ_rejected", "npwp", GUARDRAILS, OCR)
+    await pipeline.runner.drain(5)
+
+    job = await pipeline.get("REQ_rejected")
+    assert job["status"] == "DONE", "the result stays readable for the waiter and for debugging"
+    assert job["result"]["reject_reason"] == "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+    assert next_stage.payloads == [], "a rejected document never reaches scoring"
+    assert [(c["stage"], c["status"], c["error_message"], c["error_code"]) for c in callback.calls] == [
+        (
+            "STRUCTURING",
+            "FAILED",
+            "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+            "DOWNSTREAM_VALIDATION_ERROR",
+        )
+    ]
