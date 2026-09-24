@@ -17,8 +17,6 @@ OPERATIONS: list[tuple[str, str, str, str]] = [
     ("ekstraksi", "get", "/v1/ekstraksi/jobs/{request_id}", "3. Reconciliation"),
     ("structuring", "get", "/v1/structuring/jobs/{request_id}", "3. Reconciliation"),
     ("scoring", "get", "/v1/scoring/jobs/{request_id}", "3. Reconciliation"),
-    ("ekstraksi", "post", "/v1/generate-request-id", "Legacy synchronous contract (deprecated)"),
-    ("ekstraksi", "get", "/v1/get-ocr-result/{request_id}", "Legacy synchronous contract (deprecated)"),
 ]
 CALLBACK_TAG = "2. Callbacks (you implement this)"
 
@@ -38,13 +36,6 @@ TAGS = [
     {
         "name": "3. Reconciliation",
         "description": "Read a stage's status and result directly, e.g. after a missed callback or a timeout.",
-    },
-    {
-        "name": "Legacy synchronous contract (deprecated)",
-        "description": (
-            "The old synchronous flow on the ekstraksi service. Its `POST /v1/extract-ocr` (port 8030) is left out "
-            "here: that path now belongs to the guardrails service above."
-        ),
     },
 ]
 

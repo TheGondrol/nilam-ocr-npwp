@@ -9,7 +9,7 @@ JSON_TYPE = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "post
 
 
 class Base(DeclarativeBase):
-    """Declarative base of the ORM-mapped table (`ocr_npwp_requests`)."""
+    """Declarative base holding `ocr_npwp_requests`, the unused table of the removed legacy contract."""
 
     pass
 

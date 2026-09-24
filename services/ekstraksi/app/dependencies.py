@@ -5,8 +5,6 @@ Every `get_*` here is what the routes take through `Depends(...)` and what tests
 
 from functools import lru_cache
 
-from fastapi import Depends
-
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.pipeline import (
     STAGE_OCR,
@@ -22,16 +20,13 @@ from ocr_common.pipeline import (
 from ocr_common.registry import Factory, build_backend
 from ocr_common.testing_endpoints import testing_path
 
-from app.clients.stages import StageClients, build_stage_clients
 from app.config import Settings, get_settings
 from app.ml.base import OcrEngine
 from app.ml.mock import MockOcrEngine
 from app.ml.paddle import PaddleOcrEngine
 from app.ml.remote import RemoteOcrEngine
-from app.repositories.request_repository import RequestRepository, build_request_repository
 from app.services.ekstraksi_service import EkstraksiService
 from app.services.job_service import EkstraksiJobService
-from app.services.ocr_service import OcrService
 
 DB_TABLE_PREFIX = "ocr"
 
@@ -73,19 +68,6 @@ OCR_BACKENDS: dict[str, Factory[OcrEngine]] = {
 def get_ocr_engine() -> OcrEngine:
     settings: Settings = get_settings()
     return build_backend(OCR_BACKENDS, settings.ekstraksi_backend, settings, "ekstraksi OCR")
-
-
-# --- storage and HTTP clients (one per process, closed in main.lifespan) -----------------------
-
-
-@lru_cache
-def get_request_repository() -> RequestRepository:
-    return build_request_repository(get_settings().database_url)
-
-
-@lru_cache
-def get_stage_clients() -> StageClients:
-    return build_stage_clients(get_settings())
 
 
 # --- pipeline -----------------------------------------------------------------------
@@ -173,14 +155,6 @@ def get_job_service() -> EkstraksiJobService:
 
 def get_testing_job_service() -> EkstraksiJobService:
     return _job_service(get_testing_pipeline())
-
-
-def get_ocr_service(
-    repository: RequestRepository = Depends(get_request_repository),
-    ekstraksi: EkstraksiService = Depends(get_ekstraksi_service),
-    stages: StageClients = Depends(get_stage_clients),
-) -> OcrService:
-    return OcrService(repository, ekstraksi, stages)
 
 
 @lru_cache

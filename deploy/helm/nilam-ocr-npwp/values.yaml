@@ -110,7 +110,7 @@ services:
     port: 8030
     entrypoint: true
     pipeline: true
-    upstreams: [guardrails, structuring, scoring]
+    upstreams: [structuring]
     replicaCount: 1
     startupFailureThreshold: 15
     env:

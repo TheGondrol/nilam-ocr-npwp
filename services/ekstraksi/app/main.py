@@ -6,7 +6,7 @@ from ocr_common.pipeline.database import check_connection, dispose_engines
 from ocr_common.pipeline.schemas import StageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import ekstraksi, jobs, ocr, testing
+from app.api import ekstraksi, jobs, testing
 from app.config import get_settings
 from app.dependencies import (
     get_next_stage,
@@ -14,7 +14,6 @@ from app.dependencies import (
     get_pipeline,
     get_reaper,
     get_relay,
-    get_stage_clients,
     get_testing_next_stage,
     get_testing_pipeline,
     get_testing_reaper,
@@ -29,7 +28,6 @@ async def lifespan(app: FastAPI):
     if settings.database_url:
         await check_connection(settings.database_url)
     ocr_engine = get_ocr_engine()
-    stages = get_stage_clients()
     pipeline = get_pipeline()
     next_stage = get_next_stage()
     relay = get_relay()
@@ -58,7 +56,6 @@ async def lifespan(app: FastAPI):
     close = getattr(ocr_engine, "aclose", None)  # only the HTTP-backed models hold a connection
     if close is not None:
         await close()
-    await stages.aclose()
     await dispose_engines()
 
 
@@ -71,21 +68,15 @@ app = create_app(
         "**Async pipeline:** the guardrails service POSTs /v1/ekstraksi/jobs once a document passed and gets 202; "
         "this service runs OCR in the background, stores the result, POSTs a stage callback to the "
         "orchestrator, and hands the job to the structuring service. "
-        "**Legacy contract:** generate-request-id -> extract-ocr -> get-ocr-result runs the whole chain "
-        "synchronously and stays until the orchestrator has moved to the async flow. "
         "The raw OCR step is also exposed as /v1/ekstraksi/extract. "
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
         {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback, hand-off"},
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
-        {
-            "name": "NPWP OCR",
-            "description": "Legacy synchronous contract used by ocr-orchestration",
-        },
         {"name": "Ekstraksi", "description": "Raw OCR text, synchronous"},
     ],
-    routers=[jobs.router, ocr.router, ekstraksi.router, *([testing.router] if settings.testing_endpoints else [])],
+    routers=[jobs.router, ekstraksi.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "ekstraksi": settings.ekstraksi_backend,
         "storage": "postgres" if settings.database_url else "memory",

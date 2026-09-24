@@ -54,6 +54,8 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
     return jobs, results
 
 
+# Written only by ekstraksi's legacy synchronous contract, which has been removed; no service reads or
+# writes it any more. Kept so the migrations and the existing databases still match (see db/README.md).
 OCR_NPWP_REQUESTS = Table(
     "ocr_npwp_requests",
     Base.metadata,

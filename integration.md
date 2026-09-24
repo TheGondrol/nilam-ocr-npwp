@@ -458,20 +458,17 @@ penjelasan yang aman untuk di-log.
 Guardrails adalah pengecualian: dokumen ditolak tetap dijawab 200, penolakannya ada di
 `data.passed`.
 
-## 11. Kontrak lama (sinkron)
+## 11. Kontrak lama (sinkron): sudah dihapus
 
-Kalau kalian belum siap pindah ke alur asinkron, kontrak lama masih hidup di service
-ekstraksi dan akan kami pertahankan sampai kalian pindah:
+Sejak 24 September 2026, endpoint kontrak lama di service ekstraksi (port 8030) sudah
+dihapus:
 
-    POST /v1/generate-request-id          buat request_id
-    POST /v1/extract-ocr                  jalankan seluruh rantai sekaligus, sinkron
-    GET  /v1/get-ocr-result/{request_id}  ambil hasilnya
+    POST /v1/generate-request-id
+    POST /v1/extract-ocr                  (versi ekstraksi, port 8030)
+    GET  /v1/get-ocr-result/{request_id}
 
-Perbedaannya: seluruh rantai dijalankan dalam satu panggilan yang ditunggu sampai
-selesai, tanpa callback. Satu `request_id` hanya boleh dikirim sekali.
-
-Alur asinkron di bagian 3 yang kami sarankan, karena tidak menahan koneksi selama OCR
-berjalan.
+Pakai `POST /v1/extract-ocr` di service guardrails (port 8031, bagian 4). Status tiap
+tahap bisa dibaca di `GET /v1/<tahap>/jobs/{request_id}` (bagian 8).
 
 ## 12. Database
 
@@ -484,7 +481,7 @@ permintaan supaya seragam.
 | `ocr_jobs`, `ocr_results` | status dan hasil OCR mentah |
 | `structuring_jobs`, `structuring_results` | field hasil penataan |
 | `scoring_jobs`, `scoring_results` | confidence akhir |
-| `ocr_npwp_requests` | dipakai kontrak lama di bagian 11 |
+| `ocr_npwp_requests` | sisa kontrak lama di bagian 11; tidak ditulis lagi |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
 di callback dan endpoint status. Kami cantumkan supaya jelas tabel mana milik kami, dan
