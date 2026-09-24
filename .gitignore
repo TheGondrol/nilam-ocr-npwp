@@ -33,3 +33,6 @@ docs/
 tools/tracker/.port-forward.log
 tools/load-tester/out/*
 !tools/load-tester/out/.gitkeep
+
+# Unggahan dari tracker (load test): bisa dokumen nasabah asli, tidak pernah ikut repo.
+tools/load-tester/assets/

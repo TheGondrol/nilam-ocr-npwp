@@ -82,7 +82,7 @@ POLL_INTERVAL = float(os.environ.get("TRACKER_POLL_INTERVAL", "2"))
 POLL_TIMEOUT = float(os.environ.get("TRACKER_POLL_TIMEOUT", "300"))
 WAIT_SECONDS = float(os.environ.get("TRACKER_WAIT_SECONDS", "15"))  # = PIPELINE_WAIT_SECONDS guardrails, untuk label
 DB_URL = os.environ.get("TRACKER_DATABASE_URL") or (
-    f"postgresql://postgres:changeme@127.0.0.1:{os.environ.get('POSTGRES_HOST_PORT', '5434')}/bribrain_ocr_nilam"
+    f"postgresql://postgres:changeme@127.0.0.1:{os.environ.get('POSTGRES_HOST_PORT', '5433')}/bribrain_ocr_nilam"
     if TARGET == "local"
     else ""
 )

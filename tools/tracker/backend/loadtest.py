@@ -29,6 +29,10 @@ router = APIRouter(prefix="/api/loadtest")
 
 HERE = Path(__file__).resolve().parent
 LT_DIR = Path(os.environ.get("LOAD_TESTER_DIR") or HERE.parent.parent / "load-tester")
+# images/: contoh yang ikut repo. assets/: semua unggahan dari tracker, di-.gitignore (bisa dokumen nasabah
+# asli), dan dihapus otomatis begitu run yang memakainya berakhir.
+SAMPLES_DIR = LT_DIR / "images"
+ASSETS_DIR = LT_DIR / "assets"
 K6_IMAGE = os.environ.get("K6_IMAGE", "grafana/k6:latest")
 K6_NETWORK = os.environ.get("K6_NETWORK", "ocr_default")
 K6_TARGET = os.environ.get("K6_TARGET", "http://guardrails:8031")
@@ -57,17 +61,45 @@ def _container(run: str) -> str:
     return f"nilam-lt-{run}"
 
 
-def _image_paths() -> list[Path]:
-    folder = LT_DIR / "images"
+def _files(folder: Path) -> list[Path]:
     if not folder.is_dir():
         return []
-    return sorted(
-        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES), key=lambda p: p.name
-    )
+    return [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES]
+
+
+def _image_paths() -> list[Path]:
+    """File uji dari kedua folder: contoh yang ikut repo (images/) dan unggahan tracker (assets/)."""
+    return sorted([*_files(SAMPLES_DIR), *_files(ASSETS_DIR)], key=lambda p: p.name)
 
 
 def list_images() -> list[str]:
     return [p.name for p in _image_paths()]
+
+
+def list_uploads() -> list[str]:
+    return sorted(p.name for p in _files(ASSETS_DIR))
+
+
+def _k6_entry(name: str) -> str:
+    """Isi env IMAGES untuk satu file: unggahan lewat mount /assets, contoh cukup namanya (/images)."""
+    return f"/assets/{name}" if (ASSETS_DIR / name).is_file() else name
+
+
+def _delete_uploads(names: list[str]) -> list[str]:
+    """Hapus unggahan yang dipakai satu run; file contoh di images/ tidak pernah disentuh."""
+    deleted = []
+    for name in names:
+        path = ASSETS_DIR / Path(name).name
+        try:
+            path.unlink()
+            deleted.append(name)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("unggahan %s tidak bisa dihapus: %s", name, exc)
+    if deleted:
+        log.info("unggahan dihapus: %s", ", ".join(deleted))
+    return deleted
 
 
 def _safe_image_name(filename: str) -> str:
@@ -84,7 +116,8 @@ def _safe_image_name(filename: str) -> str:
 def _image_path(name: str) -> Path:
     if name not in list_images():
         raise HTTPException(status_code=404, detail=f"file {name} tidak ada")
-    return LT_DIR / "images" / name
+    upload = ASSETS_DIR / name
+    return upload if upload.is_file() else SAMPLES_DIR / name
 
 
 async def _docker(*args: str) -> tuple[int, str]:
@@ -110,6 +143,7 @@ async def _save_meta(meta: dict[str, Any]) -> None:
 async def _start_container(meta: dict[str, Any]) -> str:
     name = _container(meta["run_id"])
     await _docker("rm", "-f", name)
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     cmd = [
         "run",
         "-d",
@@ -122,7 +156,9 @@ async def _start_container(meta: dict[str, Any]) -> str:
         "-v",
         f"{LT_DIR / 'k6'}:/scripts:ro",
         "-v",
-        f"{LT_DIR / 'images'}:/images:ro",
+        f"{SAMPLES_DIR}:/images:ro",
+        "-v",
+        f"{ASSETS_DIR}:/assets:ro",
         "-v",
         f"{LT_DIR / 'out'}:/out",
         "-e",
@@ -138,7 +174,7 @@ async def _start_container(meta: dict[str, Any]) -> str:
         "-e",
         f"MODE={meta['mode']}",
         "-e",
-        f"IMAGES={','.join(meta['images'])}",
+        f"IMAGES={','.join(_k6_entry(n) for n in meta['images'])}",
         "-e",
         f"WAIT_SECONDS={ctx['wait_seconds']}",
         "-e",
@@ -169,6 +205,7 @@ async def _watch(run: str) -> None:
         exit_code=exit_code,
         finished_at=time.time(),
         log_tail=logs[-6000:],
+        uploads_deleted=_delete_uploads(meta.get("uploads", [])),
     )
     await _save_meta(meta)
     log.info("load test %s selesai (exit %s)", run, exit_code)
@@ -192,7 +229,10 @@ async def reconcile() -> None:
             _spawn_watcher(meta["run_id"])
         else:
             meta.update(
-                status="unknown", finished_at=time.time(), log_tail="container tidak ditemukan saat backend start"
+                status="unknown",
+                finished_at=time.time(),
+                log_tail="container tidak ditemukan saat backend start",
+                uploads_deleted=_delete_uploads(meta.get("uploads", [])),
             )
             await _save_meta(meta)
 
@@ -315,7 +355,11 @@ async def config() -> dict[str, Any]:
     code, out = await _docker("image", "inspect", "--format", "{{.Id}}", K6_IMAGE)
     return {
         "images": list_images(),
-        "image_files": [{"name": p.name, "size": p.stat().st_size} for p in _image_paths()],
+        "uploads": list_uploads(),
+        "image_files": [
+            {"name": p.name, "size": p.stat().st_size, "upload": p.parent == ASSETS_DIR} for p in _image_paths()
+        ],
+        "assets_dir": str(ASSETS_DIR),
         "max_image_bytes": MAX_IMAGE_BYTES,
         "k6_image": K6_IMAGE,
         "k6_image_ready": code == 0,
@@ -331,9 +375,12 @@ async def config() -> dict[str, Any]:
 
 @router.post("/images")
 async def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
-    """Simpan file uji ke LT_DIR/images. Nama yang sudah ada tidak ditimpa: diberi akhiran -1, -2, ..."""
-    folder = LT_DIR / "images"
+    """Simpan file uji ke LT_DIR/assets (di-.gitignore). Nama yang sudah ada, di assets/ maupun di contoh
+    images/, tidak ditimpa: diberi akhiran -1, -2, ... File ini dihapus otomatis saat run yang memakainya
+    berakhir, atau lewat DELETE /api/loadtest/assets."""
+    folder = ASSETS_DIR
     folder.mkdir(parents=True, exist_ok=True)
+    taken = set(list_images())
     checked: list[tuple[str, bytes]] = []
     for upload in files:
         name = _safe_image_name(upload.filename or "")
@@ -349,10 +396,11 @@ async def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
     for name, content in checked:
         stem, suffix = os.path.splitext(name)
         path, n = folder / name, 0
-        while path.exists():
+        while path.name in taken:
             n += 1
             path = folder / f"{stem}-{n}{suffix}"
         path.write_bytes(content)
+        taken.add(path.name)
         saved.append(path.name)
     log.info("file uji diunggah: %s", ", ".join(saved))
     return {"saved": saved, "images": list_images()}
@@ -373,6 +421,17 @@ async def delete_image(name: str) -> dict[str, Any]:
     path.unlink(missing_ok=True)
     log.info("file uji dihapus: %s", name)
     return {"images": list_images()}
+
+
+@router.delete("/assets")
+async def purge_assets() -> dict[str, Any]:
+    """Hapus semua unggahan di assets/ yang tertinggal (mis. backend mati di tengah run); contoh di images/
+    tidak disentuh. Ditolak selama ada run yang berjalan, karena k6 bisa membuka file lagi di tengah run."""
+    runs = [json.loads(v) for v in (await ctx["redis"].hgetall("ocr:loadtests")).values()]
+    if any(m.get("status") == "running" for m in runs):
+        raise HTTPException(status_code=409, detail="masih ada run yang berjalan; hentikan dulu")
+    deleted = _delete_uploads(list_uploads())
+    return {"deleted": deleted, "images": list_images()}
 
 
 @router.get("")
@@ -407,7 +466,8 @@ async def start(request: Request) -> dict[str, Any]:
     available = list_images()
     images = [name for name in (body.get("images") or available) if name in available]
     if not images:
-        raise HTTPException(status_code=422, detail=f"tidak ada gambar contoh di {LT_DIR / 'images'}")
+        raise HTTPException(status_code=422, detail=f"tidak ada file uji di {SAMPLES_DIR} maupun {ASSETS_DIR}")
+    uploads = set(list_uploads())
     if any(m.get("status") == "running" for m in await list_runs()):
         raise HTTPException(status_code=409, detail="masih ada run yang berjalan; hentikan dulu")
 
@@ -417,6 +477,8 @@ async def start(request: Request) -> dict[str, Any]:
         "duration_seconds": duration,
         "mode": mode,
         "images": images,
+        # Unggahan yang dipakai run ini; dihapus begitu run berakhir (selesai, gagal, atau dihentikan).
+        "uploads": [name for name in images if name in uploads],
         "target": K6_TARGET,
         "started_at": time.time(),
         "status": "running",

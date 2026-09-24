@@ -58,7 +58,7 @@ Yang berubah otomatis mengikuti saklar itu:
 | service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service, chart 0.2.0) di 9030-9033; release chart lama satu pod: set `GKE_WORKLOAD=deploy/nilam-ocr-npwp` | container di 127.0.0.1:803x |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
-| baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5434}` |
+| baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5433}` |
 | simulasi lambat | tidak (pod bukan `ENVIRONMENT=local`) | ya |
 | Redis | lokal | lokal |
 
@@ -106,7 +106,9 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
 | `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject"}` |
 | `GET /api/outbox` | backlog tiap service dari `GET /v1/<tahap>/outbox` |
-| `GET /api/loadtest/config` | gambar contoh yang tersedia, image/network/target k6, batas laju & durasi |
+| `GET /api/loadtest/config` | file uji yang tersedia (contoh `images/` dan unggahan `assets/`), image/network/target k6, batas laju & durasi |
+| `POST /api/loadtest/images`, `DELETE /api/loadtest/images/{nama}` | unggah file uji ke `assets/` (di-.gitignore, dihapus otomatis saat run yang memakainya berakhir); hapus satu file |
+| `DELETE /api/loadtest/assets` | hapus semua unggahan yang tertinggal di `assets/`; 409 selama ada run berjalan |
 | `GET` / `POST /api/loadtest` | daftar run; mulai run `{"rate", "duration_seconds", "mode": "constant" \| "ramp", "images"}` |
 | `POST /api/loadtest/{run}/samples` | dipanggil k6 tiap request: status, job_status, elapsed_ms |
 | `GET /api/loadtest/{run}` | statistik run: campuran 200/202/4xx/5xx/timeout, p50/p95, end-to-end, ringkasan k6 |

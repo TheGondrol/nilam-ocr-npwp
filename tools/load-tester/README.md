@@ -22,14 +22,23 @@ memanggil `http://guardrails:8031` langsung, dan melapor ke tracker lewat
 `http://host.docker.internal:<PORT>`. Container diberi nama `nilam-lt-<run>` dan dihapus setelah
 selesai. Env backend tracker yang terkait: `K6_IMAGE`, `K6_NETWORK`, `K6_TARGET`, `K6_TRACKER`.
 
-File uji diambil dari `images/` (tidak ikut repo) dan dipakai bergiliran. Isi folder itu bisa
-dikelola dari sidebar menu **Load testing**: unggah (klik atau seret, JPG/PNG/PDF, maks. 20 MB per
-file), lihat, hapus, dan centang file mana yang dipakai run berikutnya. Nama file dirapikan
-(karakter selain huruf, angka, `._-` jadi `_`) dan tidak pernah menimpa file yang sudah ada
+File uji dipakai bergiliran dan berasal dari dua folder:
+
+- `images/`: contoh yang ikut repo (`npwp1.jpg`, `npwp2.jpg`). Tidak pernah dihapus otomatis.
+- `assets/`: semua unggahan dari tracker. Folder ini di-`.gitignore` karena isinya bisa dokumen
+  nasabah asli, dan **dihapus otomatis begitu run yang memakainya berakhir**, baik selesai, gagal,
+  maupun dihentikan. File yang diunggah tapi belum dipakai run tetap ada sampai dihapus.
+
+Unggahan dikelola dari sidebar menu **Load testing**: unggah (klik atau seret, JPG/PNG/PDF, maks.
+20 MB per file), lihat, hapus, dan centang file mana yang dipakai run berikutnya. Karena dihapus
+setelah run, file yang sama perlu diunggah ulang untuk run berikutnya. Nama file dirapikan
+(karakter selain huruf, angka, `._-` jadi `_`) dan tidak pernah menimpa file di kedua folder
 (diberi akhiran `-1`, `-2`, ...). File yang dipakai run yang sedang berjalan tidak bisa dihapus.
 File di atas 2,5 MB (default `MAX_UPLOAD_BYTES` service) ditandai karena akan dijawab 413; itu
 sengaja dibiarkan bisa diunggah untuk menguji jalur penolakan. Endpoint-nya:
-`POST /api/loadtest/images` (multipart, field `files`), `GET` dan `DELETE /api/loadtest/images/{nama}`.
+`POST /api/loadtest/images` (multipart, field `files`), `GET` dan `DELETE /api/loadtest/images/{nama}`,
+dan `DELETE /api/loadtest/assets` untuk menghapus semua unggahan yang tertinggal (mis. setelah backend
+mati di tengah run; ditolak 409 selama ada run berjalan).
 Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
 
 ## Menjalankan manual
@@ -42,7 +51,21 @@ Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
       grafana/k6 run /scripts/extract-ocr.js
 
 Env skrip: `RUN_ID`, `TARGET`, `TRACKER` (kosong = tanpa lapor), `RATE`, `DURATION`, `MODE`
-(`constant` | `ramp`), `IMAGES`, `WAIT_SECONDS`, `API_KEY`.
+(`constant` | `ramp`), `IMAGES`, `WAIT_SECONDS`, `API_KEY`, `ENDPOINT` (default `/v1/extract-ocr`).
+
+Load test ke **dev** (GKE) tanpa mengotori data Orkestrasi: port-forward guardrails lalu tembak kembaran
+`-test`-nya, yang menulis ke tabel `testing_*` dan tidak mengirim callback (lihat README utama,
+"Endpoint Testing"):
+
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-guardrails 8031:8031
+    docker run --rm --add-host host.docker.internal:host-gateway \
+      -v "$PWD/tools/load-tester/k6:/scripts:ro" -v "$PWD/tools/load-tester/images:/images:ro" \
+      -e ENDPOINT=/v1/extract-ocr-test -e TARGET=http://host.docker.internal:8031 -e API_KEY="$API_KEY" \
+      -e RUN_ID=burst1 -e RATE=5 -e DURATION=60s -e IMAGES=npwp1.jpg \
+      grafana/k6 run /scripts/extract-ocr.js
+
+Di endpoint `-test`, `request_id` dibuat guardrails (`TEST_<RUN_ID>_<uuid>`) dari field `run_id` yang dikirim
+skrip; `LT_...` dari skrip diabaikan. Semua request satu run: `request_id LIKE 'TEST_burst1_%'`.
 
 ## Membaca hasilnya
 

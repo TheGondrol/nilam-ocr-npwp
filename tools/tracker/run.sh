@@ -19,7 +19,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BACKEND_PORT="${PORT:-8090}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5434}"
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mperingatan:\033[0m %s\n' "$*"; }
