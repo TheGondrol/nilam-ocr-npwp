@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
     reaper = get_reaper()
     if reaper is not None:
         reaper.start()
+    testing_relay = testing_reaper = None
     if settings.testing_endpoints:
         testing_relay, testing_reaper = get_testing_relay(), get_testing_reaper()
         if testing_relay is not None:

@@ -10,3 +10,24 @@ extra-paths = [".", "../../libs/ocr_common"]
 
 [tool.ty.src]
 exclude = ["app/vendor"]
+
+[tool.pyrefly]
+search-path = [".", "../../libs/ocr_common"]
+
+[tool.pyrefly.errors]
+# Pydantic models narrow a field in a subclass (`stage: Literal["OCR"]` over `stage: str`); that is the
+# intended schema, not an unsafe override.
+bad-override-mutable-attribute = false
+# yaml / openpyxl ship no type stubs; the libraries work, only their types are unknown.
+untyped-import = false
+# str()/int() around data from JSON or FastAPI (Any at runtime) are deliberate.
+unnecessary-type-conversion = false
+
+# app/vendor: the ML team's rules copied as delivered (see app/vendor/npwp_rules/README.md); not edited here.
+[[tool.pyrefly.sub-config]]
+matches = "app/vendor/**"
+
+[tool.pyrefly.sub-config.errors]
+unsupported-operation = false
+bad-return = false
+no-matching-overload = false

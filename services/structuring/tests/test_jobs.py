@@ -2,6 +2,7 @@ import pytest
 
 from ocr_common.pipeline import STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, RecordingNextStage, make_client, wait_for_job
+from ocr_common.types import OcrBlock, StructuredDocument
 
 from app.dependencies import get_job_service, get_structuring_service
 from app.main import app
@@ -171,7 +172,7 @@ class _RejectingStructurer:
 
     name = "rejecting"
 
-    def structure(self, lines):
+    def structure(self, lines: list[OcrBlock]) -> StructuredDocument:
         return {
             "fields": {
                 name: {"value": None, "confidence": 0.0, "source": None, "signals": None}

@@ -66,5 +66,6 @@ def _with_dependencies(endpoint: Callable[..., Any], dependencies: Mapping[str, 
     async def twin(*args: Any, **kwargs: Any) -> Any:
         return await endpoint(*args, **kwargs)
 
-    twin.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+    # FastAPI reads the parameters from __signature__; setattr because functools' wrapper type does not declare it.
+    setattr(twin, "__signature__", signature.replace(parameters=parameters))  # noqa: B010
     return twin

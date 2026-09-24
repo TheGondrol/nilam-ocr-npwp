@@ -8,8 +8,8 @@ class Structurer(Protocol):
 
     Returns `fields` with one entry per name in `ocr_common.npwp.NPWP_FIELDS`, each
     {value, confidence, source, signals} (`value` is None when the field was not found), plus the
-    document-level review `flag` / `flag_reason`. A structurer never rejects a document: what it cannot
-    read comes back as null values and a flag.
+    document-level `flag` / `flag_reason` and `reject_reason`. A structurer never raises for what it cannot
+    read: that comes back as null values and a flag; `reject_reason` tells the pipeline to stop here.
     """
 
     name: str

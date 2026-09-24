@@ -139,6 +139,7 @@ def build() -> dict[str, Any]:
     paths: dict[str, Any] = {}
     sent_when: list[str] = []
     callback_bodies: list[str] = []
+    shared_description: str | None = None
 
     for service in SERVICES:
         spec = specs[service]
@@ -173,6 +174,8 @@ def build() -> dict[str, Any]:
             callback_bodies.append(body["$ref"])
             shared_description = description
 
+    if shared_description is None:
+        raise SystemExit("no service spec publishes the stageCallback webhook: regenerate the service specs first")
     webhook_template = copy.deepcopy(specs["ekstraksi"]["webhooks"]["stageCallback"]["post"])
     webhook_template["tags"] = [CALLBACK_TAG]
     webhook_template["description"] = re.sub(

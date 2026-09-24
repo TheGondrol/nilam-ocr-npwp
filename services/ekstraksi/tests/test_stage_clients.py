@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -26,7 +27,7 @@ def _envelope(data, status=200):
 
 
 async def test_guardrails_client_posts_multipart_and_returns_data():
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["path"] = request.url.path
@@ -44,7 +45,7 @@ async def test_guardrails_client_posts_multipart_and_returns_data():
 
 
 async def test_structuring_client_posts_lines():
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["path"] = request.url.path
@@ -58,7 +59,7 @@ async def test_structuring_client_posts_lines():
 
 
 async def test_scoring_client_strips_source_from_fields():
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["json"] = json.loads(request.read())

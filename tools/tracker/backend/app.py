@@ -28,12 +28,12 @@ Bukan bagian dari deliverable: tanpa auth, tanpa retensi, satu proses.
 
 import asyncio
 import json
-from contextlib import asynccontextmanager
 import logging
 import os
 import time
 import uuid
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, cast
 
 import httpx
 import loadtest
@@ -90,6 +90,7 @@ DB_INTERVAL = float(os.environ.get("TRACKER_DB_INTERVAL", "0.25"))
 DB_WATCH_TIMEOUT = float(os.environ.get("TRACKER_DB_WATCH_TIMEOUT", "900"))
 
 CALLBACK_MODES = {"ok": 200, "down": 503, "reject": 422}
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -514,7 +515,8 @@ async def events(request_id: str, request: Request):
                     break
                 continue
             idle = 0
-            for _, items in entries:
+            # redis-py types XREAD's result loosely; it is [(stream, [(entry_id, fields), ...])].
+            for _, items in cast(list[tuple[str, list[tuple[str, dict[str, str]]]]], entries):
                 for entry_id, fields in items:
                     last_id = entry_id
                     event = json.loads(fields["json"])

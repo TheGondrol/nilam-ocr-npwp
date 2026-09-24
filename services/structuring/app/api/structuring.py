@@ -1,5 +1,8 @@
+from typing import cast
+
 from fastapi import APIRouter, Depends, Request
 
+from ocr_common.types import OcrBlock
 from ocr_common.web.envelope import envelope
 from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, success_examples
@@ -86,5 +89,6 @@ async def structure(
     body: StructureRequest,
     service: StructuringService = Depends(get_structuring_service),
 ):
-    data = service.structure([line.model_dump() for line in body.lines])
+    lines = [cast(OcrBlock, line.model_dump()) for line in body.lines]
+    data = service.structure(lines)
     return envelope(200, "Success", data, get_request_id(request))

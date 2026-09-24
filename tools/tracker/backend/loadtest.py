@@ -455,7 +455,7 @@ async def start(request: Request) -> dict[str, Any]:
         rate = float(body.get("rate", 1))
         duration = int(body.get("duration_seconds", 60))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="rate dan duration_seconds harus angka")
+        raise HTTPException(status_code=422, detail="rate dan duration_seconds harus angka") from None
     mode = body.get("mode", "constant")
     if not 0 < rate <= MAX_RATE:
         raise HTTPException(status_code=422, detail=f"rate harus di antara 0 dan {MAX_RATE:g} rps")

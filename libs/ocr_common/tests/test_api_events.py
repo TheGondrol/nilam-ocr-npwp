@@ -123,7 +123,8 @@ async def test_a_rejection_appends_a_400_failed_row_with_the_reason(tmp_path):
         assert row["error_code"] == "DOWNSTREAM_VALIDATION_ERROR"
         assert (row["result_data"]["status"], row["result_data"]["error_message"]) == ("failed", REASON)
         assert row["result_data"]["result"] is None
-        assert (await repo.get(RID))["status"] == "DONE"
+        record = await repo.get(RID)
+        assert record is not None and record["status"] == "DONE"
     finally:
         await database.dispose_engines()
 

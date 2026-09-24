@@ -58,6 +58,8 @@ def test_pipeline_wait_defaults_to_15_seconds_and_can_be_changed():
         Settings(api_key="x", _env_file=None, environment="local", pipeline_wait_seconds=8).pipeline_wait_seconds == 8
     )
     with pytest.raises(ValidationError, match="pipeline_wait_seconds"):
+        # The invalid value is the point of this check.
+        # pyrefly: ignore[bad-argument-type]
         Settings(api_key="x", _env_file=None, environment="local", pipeline_wait_seconds=-1)
 
 

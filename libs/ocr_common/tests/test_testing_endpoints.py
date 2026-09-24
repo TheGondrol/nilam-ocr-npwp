@@ -37,13 +37,14 @@ def test_twin_runs_the_same_handler_with_the_swapped_dependency():
     twin = build_testing_router(
         live, {"/v1/demo/jobs/{request_id}": "/v1/demo/jobs-test/{request_id}"}, service=lambda: "testing"
     )
-    client = make_client(create_app(settings=_settings(), title="Demo", description="demo", routers=[live, twin]))
+    app = create_app(settings=_settings(), title="Demo", description="demo", routers=[live, twin])
+    client = make_client(app)
 
     assert client.get("/v1/demo/jobs/R1", headers=KEY).json() == {"request_id": "R1", "service": "live"}
     assert client.get("/v1/demo/jobs-test/R1", headers=KEY).json() == {"request_id": "R1", "service": "testing"}
     assert client.get("/v1/demo/jobs-test/R1").status_code == 401  # the live router's API-key check came along
 
-    operation = client.app.openapi()["paths"]["/v1/demo/jobs-test/{request_id}"]["get"]
+    operation = app.openapi()["paths"]["/v1/demo/jobs-test/{request_id}"]["get"]
     assert operation["operationId"] == "getDemoJobTest"
     assert operation["summary"] == "[Testing] Status of a job"
     assert operation["tags"] == ["Testing"]
@@ -134,5 +135,7 @@ async def test_testing_results_read_the_testing_tables(database_url):
         await conn.execute(results.insert().values(request_id="REQ_T2", result={"full_text": "T"}, ds="20260924"))
 
     settings = _settings(database_url=database_url, orchestration_url="http://orchestrator.test")
-    assert await build_stage_results(settings, testing=True).get("ocr", "REQ_T2") == {"full_text": "T"}
-    assert await build_stage_results(settings).get("ocr", "REQ_T2") is None
+    testing_results, live_results = build_stage_results(settings, testing=True), build_stage_results(settings)
+    assert testing_results is not None and live_results is not None
+    assert await testing_results.get("ocr", "REQ_T2") == {"full_text": "T"}
+    assert await live_results.get("ocr", "REQ_T2") is None

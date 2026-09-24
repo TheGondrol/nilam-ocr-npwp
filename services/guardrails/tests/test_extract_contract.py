@@ -1,10 +1,12 @@
 import io
 import json
+from typing import cast
 
 import pytest
 from PIL import Image
 
 from ocr_common.npwp import contract_fields
+from ocr_common.types import FinalResult
 
 from app.config import get_settings
 from app.main import app
@@ -27,15 +29,19 @@ def _submit(client, auth, **form):
     )
 
 
-def _result(nomor, nama, nama_badan, npwp_confidence, name_confidence):
-    return {
-        "fields": {
-            "nomor_npwp": {"value": nomor, "confidence": 0.99},
-            "nama": {"value": nama, "confidence": 0.97},
-            "nama_badan": {"value": nama_badan, "confidence": 0.95},
+def _result(nomor, nama, nama_badan, npwp_confidence, name_confidence) -> FinalResult:
+    # Only the keys contract_fields reads.
+    return cast(
+        FinalResult,
+        {
+            "fields": {
+                "nomor_npwp": {"value": nomor, "confidence": 0.99},
+                "nama": {"value": nama, "confidence": 0.97},
+                "nama_badan": {"value": nama_badan, "confidence": 0.95},
+            },
+            "scoring": {"npwp_confidence": npwp_confidence, "name_confidence": name_confidence},
         },
-        "scoring": {"npwp_confidence": npwp_confidence, "name_confidence": name_confidence},
-    }
+    )
 
 
 def test_confidence_is_1_from_the_threshold_up():
