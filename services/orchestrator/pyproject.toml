@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ty.environment]
+root = ["."]
+extra-paths = [".", "../../libs/ocr_common"]
+
+[tool.pyrefly]
+search-path = [".", "../../libs/ocr_common"]
+
+[tool.pyrefly.errors]
+# Pydantic models narrow a field in a subclass (`stage: Literal["OCR"]` over `stage: str`); that is the
+# intended schema, not an unsafe override.
+bad-override-mutable-attribute = false
+# yaml / openpyxl ship no type stubs; the libraries work, only their types are unknown.
+untyped-import = false
+# str()/int() around data from JSON or FastAPI (Any at runtime) are deliberate.
+unnecessary-type-conversion = false

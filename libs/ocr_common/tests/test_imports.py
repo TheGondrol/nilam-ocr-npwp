@@ -1,5 +1,5 @@
-"""Guardrails runs without SQLAlchemy (no `db` extra): everything a service imports from ocr_common must
-load without it. Each case runs in a fresh interpreter where importing sqlalchemy raises."""
+"""The orchestrator and guardrails run without SQLAlchemy (no `db` extra): everything a service imports from
+ocr_common must load without it. Each case runs in a fresh interpreter where importing sqlalchemy raises."""
 
 import subprocess
 import sys

@@ -87,8 +87,8 @@ async def submit_job(body: StructuringJobRequest, service: StructuringJobService
     operation_id="getStructuringJob",
     summary="Status and result of the structuring stage",
     description=(
-        "Status of this stage only, and its structured fields once `DONE`. The orchestrator normally learns the "
-        "status from the callback; use this to reconcile after a missed callback, or to debug."
+        "Status of this stage only, and its structured fields once `DONE`. Internal: the orchestrator NPWP reads "
+        "it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`), and it helps to debug."
     ),
     responses={
         200: success_examples(

@@ -57,13 +57,15 @@ status. On success `errors` is null; on error `data` is null.
 field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
 dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
 
-**request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has no
-request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+**request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint has
+no request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
 without it the service generates one.
 
-**Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
-background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
-read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
+**Asynchronous stages** (internal: only the orchestrator NPWP and the previous stage call them). `POST
+.../jobs` answers `202` immediately and does the work in the background. The outcome is reported by a
+callback to the central orchestrator (see *Webhooks*), and can be read at any time with
+`GET .../jobs/{request_id}`, which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}` combines
+over the three stages. Submitting the same request_id again is idempotent:
 `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has been
 `PROCESSING` for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the
 process running it died). A job still running when the service shuts down is reported `FAILED`. Because
@@ -86,30 +88,22 @@ def create_app(
     backends_example: dict[str, str] | None = None,
     readiness_example: dict[str, str] | None = None,
     lifespan: Lifespan | None = None,
+    entrypoint: bool = False,
 ) -> FastAPI:
-    """Build the app of a service with everything every service has in common; see the module docstring."""
+    """Build the app of a service with everything every service has in common; see the module docstring.
+
+    `entrypoint=True` marks the one service reachable from other namespaces (the orchestrator NPWP): its
+    OpenAPI `servers` then start with the release's entry Service, the address the central orchestrator
+    uses."""
     configure_logging(fmt=settings.effective_log_format, level=settings.log_level, service=service_name)
 
     servers: list[dict[str, Any]] = [{"url": "/", "description": "This host (where this page is served)"}]
     if settings.service_base_url:
         servers.append({"url": settings.service_base_url, "description": "Configured base URL"})
     if service_name:
+        servers += _cluster_servers(service_name, settings.port, entrypoint=entrypoint)
         servers += [
-            {
-                "url": f"http://{service_name}.nilam-ocr-{{environment}}.svc.cluster.local:{settings.port}",
-                "description": "GKE, from another namespace (e.g. the orchestrator / gateway)",
-                "variables": {
-                    "environment": {
-                        "default": "dev",
-                        "enum": ["dev", "staging", "production"],
-                        "description": "One namespace per environment: nilam-ocr-<environment>",
-                    }
-                },
-            },
-            {
-                "url": f"http://{service_name}:{settings.port}",
-                "description": "GKE from the same namespace, or the Docker Compose network",
-            },
+            {"url": f"http://{service_name}:{settings.port}", "description": "The Docker Compose network"},
             {"url": f"http://127.0.0.1:{settings.port}", "description": "Local development"},
         ]
     app = FastAPI(
@@ -137,6 +131,35 @@ def create_app(
     return app
 
 
+# The Helm chart's names (deploy/helm): the release and its namespace are both `nilam-ocr-npwp`, each
+# service is `<release>-<service>`, and `<release>` alone is the entry Service in front of the entry point.
+RELEASE = "nilam-ocr-npwp"
+_NAMESPACE = {
+    "namespace": {
+        "default": RELEASE,
+        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)",
+    }
+}
+
+
+def _cluster_servers(service_name: str, port: int, *, entrypoint: bool) -> list[dict[str, Any]]:
+    same_namespace = {
+        "url": f"http://{RELEASE}-{service_name}.{{namespace}}.svc.cluster.local:{port}",
+        "description": "GKE, from inside the release's namespace (the other services of this pipeline)",
+        "variables": _NAMESPACE,
+    }
+    if not entrypoint:
+        return [same_namespace]
+    return [
+        {
+            "url": f"http://{RELEASE}.{{namespace}}.svc.cluster.local:{port}",
+            "description": "GKE, from another namespace: the entry Service (the central orchestrator / gateway)",
+            "variables": _NAMESPACE,
+        },
+        same_namespace,
+    ]
+
+
 def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> None:
     """Document (as an OpenAPI webhook) the callback this service sends to the orchestrator."""
 
@@ -153,7 +176,8 @@ def add_stage_callback_webhook(app: FastAPI, *, body_model: type, sent: str) -> 
             "**Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are "
             "retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A "
             "callback that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the "
-            "orchestrator can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own. "
+            "orchestrator can reconcile with the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}` and "
+            "should time a request out on its own. "
             "With `PIPELINE_OUTBOX` the callback is instead queued in the same transaction as the result and "
             "retried with back-off (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS` (24 h by "
             "default); a `4xx`, or that age, makes it a dead letter that stays in the table and is counted by "

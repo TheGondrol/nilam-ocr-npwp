@@ -96,6 +96,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - service: orchestrator
+            port: 8034
+            env: ""
           - service: guardrails
             port: 8031
             env: -e GUARDRAILS_BACKEND=mock

@@ -51,8 +51,8 @@ class GuardrailsResult(_Forwarded):
     model_config = ConfigDict(
         json_schema_extra={
             "description": (
-                "The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded "
-                "unchanged down the pipeline."
+                "The guardrails report (`data` of the guardrails service's POST /v1/guardrails/check, sent on by "
+                "the orchestrator), forwarded unchanged down the pipeline."
             )
         }
     )

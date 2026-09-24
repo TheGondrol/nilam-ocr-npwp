@@ -10,7 +10,7 @@ _DELAY = re.compile(r"delay(\d+)s", re.IGNORECASE)
 
 def simulated_delay_seconds(filename: str | None, *, enabled: bool) -> float:
     """`delay20s-npwp.jpg` makes the stage wait 20 s before its work, which is how the tracker shows
-    guardrails answering 202 (the pipeline outlives PIPELINE_WAIT_SECONDS) without a slow model."""
+    the orchestrator answering 202 (the pipeline outlives PIPELINE_WAIT_SECONDS) without a slow model."""
     if not enabled or not filename:
         return 0.0
     match = _DELAY.search(filename)

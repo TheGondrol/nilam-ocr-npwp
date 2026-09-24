@@ -3,8 +3,9 @@
 `RequestIdMiddleware` binds it for the duration of an HTTP request (from the `X-Request-ID` header, or
 a fresh one) and echoes it in the response. The pipeline binds it for the duration of a background job
 and of an outbox delivery. Log lines pick it up through `ocr_common.web.logging`, and
-`RemoteModelClient` forwards it as `X-Request-ID` to the next service, so one id follows a request
-through guardrails, OCR, structuring and scoring."""
+`RemoteModelClient` forwards it as `X-Request-ID` to the next service. The orchestrator binds the
+central orchestrator's request_id around its calls, so one id follows a request through the orchestrator,
+guardrails, OCR, structuring and scoring."""
 
 import contextvars
 import uuid

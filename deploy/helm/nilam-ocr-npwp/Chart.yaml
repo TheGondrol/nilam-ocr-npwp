@@ -1,6 +1,6 @@
 apiVersion: v2
 name: nilam-ocr-npwp
-description: OCR NPWP pipeline (guardrails, ekstraksi, structuring, scoring), one Deployment per service
+description: OCR NPWP pipeline (orchestrator, guardrails, ekstraksi, structuring, scoring), one Deployment per service
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "4d02eba"

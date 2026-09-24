@@ -65,9 +65,9 @@ app = create_app(
     service_name="ekstraksi",
     description=(
         "OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. "
-        "**Async pipeline:** the guardrails service POSTs /v1/ekstraksi/jobs once a document passed and gets 202; "
-        "this service runs OCR in the background, stores the result, POSTs a stage callback to the "
-        "orchestrator, and hands the job to the structuring service. "
+        "**Async pipeline:** the orchestrator NPWP POSTs /v1/ekstraksi/jobs once a document passed the guardrails "
+        "check and gets 202; this service runs OCR in the background, stores the result, reports to the central "
+        "orchestrator (callback / its tables), and hands the job to the structuring service. "
         "The raw OCR step is also exposed as /v1/ekstraksi/extract. "
         "All endpoints except /health require an X-API-Key header."
     ),

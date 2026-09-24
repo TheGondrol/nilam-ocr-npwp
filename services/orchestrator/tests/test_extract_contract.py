@@ -1,23 +1,16 @@
-import io
 import json
 from typing import cast
 
 import pytest
-from PIL import Image
 
 from ocr_common.npwp import contract_fields
 from ocr_common.types import FinalResult
 
 from app.config import get_settings
 from app.main import app
+from tests.conftest import JPEG
 
 RID = "REQ_contract"
-
-
-def _jpeg() -> bytes:
-    buffer = io.BytesIO()
-    Image.new("RGB", (200, 100), "white").save(buffer, format="JPEG")
-    return buffer.getvalue()
 
 
 def _submit(client, auth, **form):
@@ -25,7 +18,7 @@ def _submit(client, auth, **form):
         "/v1/extract-ocr",
         headers=auth,
         data={"request_id": RID, **form},
-        files={"file": ("npwp.jpg", _jpeg(), "image/jpeg")},
+        files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
     )
 
 
@@ -76,7 +69,7 @@ def test_params_are_returned_unchanged(client, auth, params):
 
 
 @pytest.mark.parametrize("params", ["{not json", "[1, 2]", "42"])
-def test_invalid_params_are_422_before_anything_runs(client, auth, stub_ekstraksi, params):
+def test_invalid_params_are_422_before_anything_runs(client, auth, stub_guardrails, stub_ekstraksi, params):
     response = _submit(client, auth, params=params)
     assert response.status_code == 422
     body = response.json()
@@ -85,10 +78,10 @@ def test_invalid_params_are_422_before_anything_runs(client, auth, stub_ekstraks
         "params must be valid JSON: an object, or a quoted string",
     )
     assert body["job_status"] is None
-    assert stub_ekstraksi.submitted == []
+    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
 
 
-def test_unsupported_document_type_is_400_before_anything_runs(client, auth, stub_ekstraksi):
+def test_unsupported_document_type_is_400_before_anything_runs(client, auth, stub_guardrails, stub_ekstraksi):
     response = _submit(client, auth, document_type="ktp")
     assert response.status_code == 400
     body = response.json()
@@ -97,7 +90,7 @@ def test_unsupported_document_type_is_400_before_anything_runs(client, auth, stu
         "Unsupported document_type: ktp. Supported: npwp",
     )
     assert body["document_type"] == "ktp"
-    assert stub_ekstraksi.submitted == []
+    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
 
 
 def test_confidence_threshold_can_be_changed(client, auth):

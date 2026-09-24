@@ -16,6 +16,8 @@ class StageStatusClient:
         self._jobs_path = jobs_path
 
     async def get(self, request_id: str) -> dict[str, Any] | None:
+        """The stage's job (`status`, `result`, `error_message`, ...), or None when the stage has no job
+        for this request_id yet (404)."""
         try:
             body = await self._client.get_json(f"{self._jobs_path}/{quote(request_id, safe='')}")
         except ServiceError as exc:
@@ -39,12 +41,14 @@ def build_stage_status_clients(settings: Settings, *, testing: bool = False) -> 
         return testing_path(path) if testing else path
 
     def remote(base_url: str, api_key: str | None, timeout: float, name: str) -> RemoteModelClient:
+        # Only 404 ("no job yet") is an answer; any other 4xx (a wrong key, say) is our own fault and must
+        # not reach the central orchestrator as if it were theirs, so it becomes 500.
         return RemoteModelClient(
             base_url,
             timeout,
             name=name,
             headers={"X-API-Key": api_key or settings.api_key},
-            passthrough_client_errors=True,
+            passthrough_statuses=(404,),
         )
 
     return (

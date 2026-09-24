@@ -209,7 +209,7 @@ def test_http_model_unreachable_returns_503_envelope(client, auth, use_classifie
 
     use_classifier(_model(refuse))
     response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_R2"}, files=image_upload("npwp.jpg", JPEG), headers=auth
+        "/v1/guardrails/check", data={"request_id": "OCR_R2"}, files=image_upload("npwp.jpg", JPEG), headers=auth
     )
     assert response.status_code == 503
     assert response.json()["message"] == "guardrails model is unavailable"

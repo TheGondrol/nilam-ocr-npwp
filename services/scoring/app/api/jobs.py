@@ -85,8 +85,8 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
     summary="Status and result of the scoring stage",
     description=(
         "Status of this stage only and, once `DONE`, the two confidences plus the exact payload that was scored. "
-        "The orchestrator normally receives the final result in the `SCORING` callback; use this to reconcile "
-        "after a missed callback, or to audit a score."
+        "Internal: the orchestrator NPWP reads it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`); "
+        "the central orchestrator receives the final result in the callback. Also useful to audit a score."
     ),
     responses={
         200: success_examples(

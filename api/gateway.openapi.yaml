@@ -2,45 +2,46 @@ openapi: 3.1.0
 info:
   title: 'NILAM OCR NPWP: gateway integration API'
   version: 1.0.0
-  description: "Everything the gateway / orchestrator needs to integrate the NPWP OCR pipeline, merged\
-    \ from the four\nservices' own specs. Each service also serves its full Swagger UI at `/docs`.\n\n\
-    ## The flow\n\n1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id`\
-    \ and the document\n   (`file` or `file_url`, optional `params`). This is the only call you make,\
-    \ and it answers in the\n   orchestrator's `extract-ocr` contract (`job_status`, `data`, `guardrails`,\
-    \ `params`):\n   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`,\
-    \ `guardrails: 0`;\n     nothing runs and no callback follows.\n   - passed -> the document goes on\
-    \ to the OCR stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS`\
-    \ (15 s by default, counted from the request's arrival). Finished in time ->\n     **200**, `job_status:\
-    \ completed`, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with\n     confidence 0/1;\
-    \ a stage failed -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still\n     running\
-    \ -> **202**, `job_status: processing`. Give this call an HTTP timeout well above the wait.\n2. **Receive\
-    \ callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or\n   `FAILED`,\
-    \ sent in every case after a hand-off. The `SCORING` / `DONE` callback carries the **final\n   result**\
-    \ (richer than `data`: OCR scores, trust probabilities, the guardrails report). A `FAILED`\n   callback\
-    \ of any stage ends the request.\n3. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}`\
-    \ on the stage's own service.\n\nTime a request out on your side: a stage that crashes mid-job cannot\
-    \ send its callback.\n\n## What the result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`,\
-    \ `nama_badan`. `scoring` holds `npwp_confidence` and\n`name_confidence`: the probability, from the\
-    \ ML team's trust model, that each extracted field is\ncorrect. There is **no document-level score\
-    \ and no approve / reject decision**; thresholds are yours.\n\n## Addresses\n\nEach operation lists\
-    \ the servers of the service that owns it. Inside GKE the four services share one\nService; from another\
-    \ namespace: `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:<port>` with\nguardrails `8031`,\
-    \ ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed outside\nthe cluster.\n\
-    \n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.** Every endpoint except\
-    \ `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing or wrong key answers\
-    \ `401`. The services are reachable only from inside the cluster.\n\n**Envelope.** Every JSON response,\
-    \ success or error, has the same shape:\n`{status_code, status_desc, message, data, errors, request_id}`.\
-    \ `status_code` always equals the HTTP\nstatus. On success `errors` is null; on error `data` is null.\n\
-    \n**Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text\
-    \ as\n`message`. `400` = the request or the document is unusable (do not retry unchanged). `401` =\
-    \ API key.\n`404` = unknown request_id. `409` = request_id already processed (legacy contract only).\
-    \ `422` = a\nfield is missing or has the wrong type. `500` = this service or its model failed. `503`\
-    \ = a\ndependency is unreachable, `504` = it did not answer in time (both are safe to retry).\n\n\
-    **request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has\
-    \ no\nrequest_id of its own, the `X-Request-ID` request header is used (and echoed in the response\
-    \ header);\nwithout it the service generates one.\n\n**Asynchronous stages.** `POST .../jobs` answers\
-    \ `202` immediately and does the work in the\nbackground. The outcome is reported by a callback to\
-    \ the orchestrator (see *Webhooks*), and can be\nread at any time with `GET .../jobs/{request_id}`.\
+  description: "Everything the central orchestrator / gateway needs to integrate the NPWP OCR pipeline,\
+    \ merged from the\nservices' own specs. Each service also serves its full Swagger UI at `/docs`.\n\
+    \n## The flow\n\n1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your\
+    \ `request_id` and the\n   document (`file` or `file_url`, optional `params`). It answers in the central\
+    \ orchestrator's\n   `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):\n   -\
+    \ rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails:\
+    \ 0`;\n     nothing runs and no callback follows.\n   - passed -> the document goes on to the OCR\
+    \ stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS` (15 s by default,\
+    \ counted from the request's arrival). Finished in time ->\n     **200**, `job_status: completed`,\
+    \ `data` = `nomor_npwp` and `nama` as `{value, confidence}` with\n     confidence 0/1; a stage failed\
+    \ -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still\n     running -> **202**,\
+    \ `job_status: processing`. Give this call an HTTP timeout well above the wait.\n2. **Receive callbacks**\
+    \ (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The\n   `SCORING` / `DONE`\
+    \ callback carries the **final result** (richer than `data`: OCR scores, trust\n   probabilities,\
+    \ the guardrails report). A `FAILED` callback of any stage ends the request.\n3. **Read the status\
+    \ when needed** with `GET /v1/extract-ocr/{request_id}` on the same service: the same\n   contract,\
+    \ without waiting.\n\nTime a request out on your side: a stage that crashes mid-job cannot send its\
+    \ callback.\n\n## What the result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`, `nama_badan`.\
+    \ `scoring` holds `npwp_confidence` and\n`name_confidence`: the probability, from the ML team's trust\
+    \ model, that each extracted field is\ncorrect. There is **no document-level score and no approve\
+    \ / reject decision**; thresholds are yours.\n\n## Addresses\n\nThe orchestrator is the only service\
+    \ you call. From another namespace in GKE:\n`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034`\
+    \ (the release's entry Service). The\nguardrails and pipeline stage services are internal. Nothing\
+    \ is exposed outside the cluster.\n\n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.**\
+    \ Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing\
+    \ or wrong key answers `401`. The services are reachable only from inside the cluster.\n\n**Envelope.**\
+    \ Every JSON response, success or error, has the same shape:\n`{status_code, status_desc, message,\
+    \ data, errors, request_id}`. `status_code` always equals the HTTP\nstatus. On success `errors` is\
+    \ null; on error `data` is null.\n\n**Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for\
+    \ `422`, otherwise the same text as\n`message`. `400` = the request or the document is unusable (do\
+    \ not retry unchanged). `401` = API key.\n`404` = unknown request_id. `409` = request_id already processed\
+    \ (legacy contract only). `422` = a\nfield is missing or has the wrong type. `500` = this service\
+    \ or its model failed. `503` = a\ndependency is unreachable, `504` = it did not answer in time (both\
+    \ are safe to retry).\n\n**request_id.** Minted by the central orchestrator and carried through every\
+    \ stage. Where an endpoint has\nno request_id of its own, the `X-Request-ID` request header is used\
+    \ (and echoed in the response header);\nwithout it the service generates one.\n\n**Asynchronous stages**\
+    \ (internal: only the orchestrator NPWP and the previous stage call them). `POST\n.../jobs` answers\
+    \ `202` immediately and does the work in the background. The outcome is reported by a\ncallback to\
+    \ the central orchestrator (see *Webhooks*), and can be read at any time with\n`GET .../jobs/{request_id}`,\
+    \ which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}` combines\nover the three stages.\
     \ Submitting the same request_id again is idempotent:\n`202` with `duplicate: true`, the work is not\
     \ repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING` for longer than the job\
     \ lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess running it died). A job\
@@ -49,31 +50,33 @@ info:
     \ type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
 tags:
 - name: 1. Start the pipeline
-  description: 'The only call you make: guardrails check, then OCR -> structuring -> scoring, waited on
-    for up to PIPELINE_WAIT_SECONDS; answers in the orchestrator''s extract-ocr contract. 200: `completed`
+  description: 'The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for
+    up to PIPELINE_WAIT_SECONDS; answers in the central orchestrator''s extract-ocr contract. 200: `completed`
     with the fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage
     failed.'
 - name: 2. Callbacks (you implement this)
   description: 'Listed under **Webhooks**: the request each stage sends to you when it finishes.'
-- name: 3. Reconciliation
-  description: Read a stage's status and result directly, e.g. after a missed callback or a timeout.
+- name: 3. Status
+  description: 'Where a request is now, in the same contract, without waiting: e.g. after a 202 whose
+    callback did not arrive.'
 paths:
   /v1/extract-ocr:
     post:
       tags:
       - 1. Start the pipeline
       summary: Judge a document, run the pipeline, answer with the OCR result or 202
-      description: '**The only call the orchestrator makes.** Judges the document with the guardrails
-        model, hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring
+      description: '**The call the central orchestrator makes.** Checks the file, has the guardrails service
+        judge it, hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring
         for up to `PIPELINE_WAIT_SECONDS` (15 s by default), counted from when this request arrived. The
-        response follows the orchestrator''s `extract-ocr` contract:
+        response follows the central orchestrator''s `extract-ocr` contract ("Finished" meaning finished
+        within the wait):
 
 
         | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
 
         |---|---|---|---|---|---|
 
-        | Finished in time | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `1` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
@@ -83,8 +86,8 @@ paths:
         | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
-        | A stage failed in time | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or
-        `SCORING_FAILED` |
+        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        |
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
@@ -106,20 +109,21 @@ paths:
         answers `400`, both with an Indonesian `message` the client can show as is.
 
 
-        After a hand-off the `OCR`, `STRUCTURING` and `SCORING` callbacks are sent in every case; on 202
-        the result arrives in the SCORING callback. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS`
+        On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
+        /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS`
         (e.g. +15 s) to cover a slow guardrails check or hand-off.
 
 
-        Send `request_id` plus the document as `file`, or as `file_url` (downloaded here once, then forwarded
-        as a file, so the URL only has to live for this call); exactly one of the two. The raw guardrails
-        report (per-page probabilities) is not part of this response: it travels down the pipeline, comes
-        back in the SCORING callback, and `POST /v1/guardrails/check` returns it on its own.
+        Send `request_id` plus the document as `file`, or as `file_url`; exactly one of the two. A `file_url`
+        is downloaded here for the guardrails check, and the URL itself (not the bytes) is handed to the
+        OCR stage, which downloads it again, also when it re-runs a job left behind by a dead process:
+        the URL must stay valid for longer than the job lease. The raw guardrails report (per-page probabilities)
+        is not part of this response: it travels down the pipeline and comes back in the SCORING callback.
 
 
         **Idempotency.** The same request_id again re-runs the guardrails check, but the pipeline does
-        not run twice unless the earlier attempt `FAILED` or outlived the job lease (`PIPELINE_JOB_LEASE_SECONDS`);
-        a request_id that already finished answers 200 with its stored result.'
+        not run twice unless the earlier OCR attempt `FAILED` or outlived the job lease (`PIPELINE_JOB_LEASE_SECONDS`);
+        a request_id that already finished answers again with its stored outcome.'
       operationId: extractOcr
       requestBody:
         content:
@@ -150,13 +154,13 @@ paths:
                         confidence: 1
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
+                    job_status: completed
                     guardrails: 1
                     params:
                       nik: '3123456711950001'
                       refno: PK19039Y8U
         '202':
-          description: 'Accepted, but still running when the wait ran out: the result follows in the SCORING
-            callback'
+          description: 'Accepted, but still running when the wait ran out: the result follows by callback'
           content:
             application/json:
               schema:
@@ -238,8 +242,7 @@ paths:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
         '500':
-          description: The guardrails model or the ekstraksi service failed or answered in an unexpected
-            shape
+          description: The guardrails or ekstraksi service failed, or answered in an unexpected shape
           content:
             application/json:
               schema:
@@ -247,10 +250,10 @@ paths:
               example:
                 status_code: 500
                 status_desc: Internal Server Error
-                message: guardrails model returned an unexpected response
-                errors: guardrails model returned an unexpected response
+                message: guardrails service returned an unexpected response
+                errors: guardrails service returned an unexpected response
         '503':
-          description: The ekstraksi service (or the remote guardrails model) is unreachable; nothing
+          description: The guardrails service, its model, or the ekstraksi service is unreachable; nothing
             was started
           content:
             application/json:
@@ -262,7 +265,7 @@ paths:
                 message: ekstraksi service is unavailable
                 errors: ekstraksi service is unavailable
         '504':
-          description: The ekstraksi service (or the remote guardrails model) did not answer in time
+          description: The guardrails service, its model, or the ekstraksi service did not answer in time
           content:
             application/json:
               schema:
@@ -274,31 +277,65 @@ paths:
                 errors: ekstraksi service timed out after 10.0s
       security:
       - APIKeyHeader: []
-      servers:
-      - url: http://guardrails.nilam-ocr-{environment}.svc.cluster.local:8031
-        description: GKE, from another namespace (e.g. the orchestrator / gateway)
+      servers: &id001
+      - url: http://nilam-ocr-npwp.{namespace}.svc.cluster.local:8034
+        description: 'GKE, from another namespace: the entry Service (the central orchestrator / gateway)'
         variables:
-          environment:
-            enum:
-            - dev
-            - staging
-            - production
-            default: dev
-            description: 'One namespace per environment: nilam-ocr-<environment>'
-      - url: http://guardrails:8031
-        description: GKE from the same namespace, or the Docker Compose network
-      - url: http://127.0.0.1:8031
+          namespace:
+            default: nilam-ocr-npwp
+            description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
+      - url: http://nilam-ocr-npwp-orchestrator.{namespace}.svc.cluster.local:8034
+        description: GKE, from inside the release's namespace (the other services of this pipeline)
+        variables:
+          namespace:
+            default: nilam-ocr-npwp
+            description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
+      - url: http://orchestrator:8034
+        description: The Docker Compose network
+      - url: http://127.0.0.1:8034
         description: Local development
-  /v1/ekstraksi/jobs/{request_id}:
+  /v1/extract-ocr/{request_id}:
     get:
       tags:
-      - 3. Reconciliation
-      summary: Status and result of the OCR stage
-      description: Status of this stage only, and its raw OCR result once `DONE`. The orchestrator normally
-        learns the status from the callback; use this to reconcile after a missed callback, or to debug.
-        The later stages have the same endpoint on their own service (`/v1/structuring/jobs/{request_id}`,
-        `/v1/scoring/jobs/{request_id}`).
-      operationId: getOcrJob
+      - 3. Status
+      summary: 'Where a request is now: the extract-ocr answer, without waiting'
+      description: 'Reads the OCR, structuring and scoring jobs of `request_id` once each, in pipeline
+        order, and answers in the same contract as `POST /v1/extract-ocr` ("Finished" meaning finished
+        by now):
+
+
+        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
+
+        |---|---|---|---|---|---|
+
+        | Finished | 200 | `completed` | the fields | `1` | null |
+
+        | Still running | 202 | `processing` | null | null | null |
+
+        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        |
+
+
+        Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
+        always null here (it is not stored) and `document_type` is `npwp`.
+
+
+        **404** means no stage has a job for this request_id: it was refused or rejected by the guardrails
+        model (the `400` of the POST is its final answer), refused before the check, or its POST is still
+        being judged by guardrails.
+
+
+        **Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it
+        became a dead letter in the outbox) leaves the next stage without a job, so this endpoint keeps
+        answering `202` for it. The `FAILED` callback and the central orchestrator''s own tables carry
+        that final state; this endpoint only reads the stages'' jobs.'
+      operationId: getExtractOcr
       security:
       - APIKeyHeader: []
       parameters:
@@ -310,87 +347,61 @@ paths:
           title: Request Id
       responses:
         '200':
-          description: The job exists
+          description: Finished
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OcrJobStatusResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              examples:
+                completed:
+                  summary: The OCR result
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OCR extraction completed successfully
+                    data:
+                      nomor_npwp:
+                        value: 12.345.678.9-012.345
+                        confidence: 1
+                      nama:
+                        value: BUDI SANTOSO
+                        confidence: 1
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: completed
+                    guardrails: 1
+        '202':
+          description: Still running
+          content:
+            application/json:
               examples:
                 processing:
-                  summary: Still running
+                  summary: Still processing
                   value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: OCR
-                      created_at: '2026-09-18T04:00:00+00:00'
-                      status: PROCESSING
-                      updated_at: '2026-09-18T04:00:00+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                done:
-                  summary: Finished
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: OCR
-                      created_at: '2026-09-18T04:00:00+00:00'
-                      status: DONE
-                      result:
-                        engine: paddle
-                        model: PP-OCRv6_medium_det+PP-OCRv6_medium_rec
-                        elapsed_ms: 412.5
-                        full_text: 'DIREKTORAT JENDERAL PAJAK
-
-                          NPWP : 12.345.678.9-012.345
-
-                          BUDI SANTOSO'
-                        blocks:
-                        - text: DIREKTORAT JENDERAL PAJAK
-                          confidence: 0.9985
-                          bbox:
-                            x1: 175
-                            y1: 247
-                            x2: 887
-                            y2: 308
-                          page: 0
-                        - text: 'NPWP : 12.345.678.9-012.345'
-                          confidence: 0.9992
-                          bbox:
-                            x1: 35
-                            y1: 389
-                            x2: 637
-                            y2: 437
-                          page: 0
-                        - text: BUDI SANTOSO
-                          confidence: 0.9773
-                          bbox:
-                            x1: 33
-                            y1: 480
-                            x2: 483
-                            y2: 523
-                          page: 0
-                      updated_at: '2026-09-18T04:00:01+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                failed:
-                  summary: 'Failed: same `error_message` as the FAILED callback. Resubmitting the request_id
-                    runs it again'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: OCR
-                      created_at: '2026-09-18T04:00:00+00:00'
-                      status: FAILED
-                      error_message: ekstraksi OCR model is unavailable
-                      updated_at: '2026-09-18T04:00:03+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                    status_code: 202
+                    status_desc: Accepted
+                    message: OCR job accepted; still processing
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: processing
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '400':
+          description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
+            0`)'
+          content:
+            application/json:
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                errors: DOWNSTREAM_VALIDATION_ERROR
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 0
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -403,288 +414,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: No OCR job for this request_id
+          description: No stage has a job for this request_id (rejected by the guardrails model, or not
+            submitted yet)
           content:
             application/json:
               example:
                 status_code: 404
                 status_desc: Not Found
-                message: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                errors: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                message: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                errors: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation Error
+          description: A pipeline stage failed (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`)
           content:
             application/json:
               example:
                 status_code: 422
                 status_desc: Unprocessable Entity
-                message: 'path.request_id: Field required'
-                errors: VALIDATION_ERROR
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                message: No text lines to structure
+                errors: STRUCTURING_FAILED
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 1
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      servers:
-      - url: http://ekstraksi.nilam-ocr-{environment}.svc.cluster.local:8030
-        description: GKE, from another namespace (e.g. the orchestrator / gateway)
-        variables:
-          environment:
-            enum:
-            - dev
-            - staging
-            - production
-            default: dev
-            description: 'One namespace per environment: nilam-ocr-<environment>'
-      - url: http://ekstraksi:8030
-        description: GKE from the same namespace, or the Docker Compose network
-      - url: http://127.0.0.1:8030
-        description: Local development
-  /v1/structuring/jobs/{request_id}:
-    get:
-      tags:
-      - 3. Reconciliation
-      summary: Status and result of the structuring stage
-      description: Status of this stage only, and its structured fields once `DONE`. The orchestrator
-        normally learns the status from the callback; use this to reconcile after a missed callback, or
-        to debug.
-      operationId: getStructuringJob
-      security:
-      - APIKeyHeader: []
-      parameters:
-      - name: request_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Request Id
-      responses:
-        '200':
-          description: The job exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StructuringJobStatusResponse'
-              examples:
-                done:
-                  summary: Finished
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: STRUCTURING
-                      created_at: '2026-09-18T04:00:01+00:00'
-                      status: DONE
-                      result:
-                        document_type: npwp
-                        fields:
-                          nomor_npwp:
-                            value: 12.345.678.9-012.345
-                            confidence: 0.9992
-                            source: 'NPWP : 12.345.678.9-012.345'
-                            signals:
-                              candidate_count: 1
-                              has_homoglyph: false
-                              invalid_province_prefix: false
-                              invalid_kecamatan_prefix: false
-                              invalid_birthdate: false
-                              invalid_kpp_prefix: false
-                          nama:
-                            value: BUDI SANTOSO
-                            confidence: 0.9773
-                            source: BUDI SANTOSO
-                            signals:
-                              name_base: BUDI SANTOSO
-                              corrected: false
-                          nama_badan:
-                            confidence: 0.0
-                        flag: false
-                      updated_at: '2026-09-18T04:00:01+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                failed:
-                  summary: 'Failed: the upload was not a lone NPWP card'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: STRUCTURING
-                      created_at: '2026-09-18T04:00:01+00:00'
-                      status: FAILED
-                      error_message: Upload contains another document (KARTU TANDA PENDUDUK); send the
-                        NPWP card only
-                      updated_at: '2026-09-18T04:00:01+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '401':
-          description: Missing or invalid X-API-Key
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '500':
+          description: A stage answered in an unexpected shape, or refused this service (e.g. a wrong
+            API key)
           content:
             application/json:
               example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
+                status_code: 500
+                status_desc: Internal Server Error
+                message: 'structuring service error (401): Invalid or missing API key'
+                errors: 'structuring service error (401): Invalid or missing API key'
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: No structuring job for this request_id
+        '503':
+          description: A stage service is unreachable
           content:
             application/json:
               example:
-                status_code: 404
-                status_desc: Not Found
-                message: 'No STRUCTURING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                errors: 'No STRUCTURING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                status_code: 503
+                status_desc: Service Unavailable
+                message: structuring service is unavailable
+                errors: structuring service is unavailable
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
+        '504':
+          description: A stage service did not answer in time
           content:
             application/json:
               example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'path.request_id: Field required'
-                errors: VALIDATION_ERROR
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: structuring service timed out after 10.0s
+                errors: structuring service timed out after 10.0s
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-      servers:
-      - url: http://structuring.nilam-ocr-{environment}.svc.cluster.local:8032
-        description: GKE, from another namespace (e.g. the orchestrator / gateway)
-        variables:
-          environment:
-            enum:
-            - dev
-            - staging
-            - production
-            default: dev
-            description: 'One namespace per environment: nilam-ocr-<environment>'
-      - url: http://structuring:8032
-        description: GKE from the same namespace, or the Docker Compose network
-      - url: http://127.0.0.1:8032
-        description: Local development
-  /v1/scoring/jobs/{request_id}:
-    get:
-      tags:
-      - 3. Reconciliation
-      summary: Status and result of the scoring stage
-      description: Status of this stage only and, once `DONE`, the two confidences plus the exact payload
-        that was scored. The orchestrator normally receives the final result in the `SCORING` callback;
-        use this to reconcile after a missed callback, or to audit a score.
-      operationId: getScoringJob
-      security:
-      - APIKeyHeader: []
-      parameters:
-      - name: request_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Request Id
-      responses:
-        '200':
-          description: The job exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScoringJobStatusResponse'
-              examples:
-                done:
-                  summary: Finished
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: SCORING
-                      created_at: '2026-09-18T04:00:01+00:00'
-                      status: DONE
-                      result:
-                        npwp_confidence: 0.9806
-                        name_confidence: 0.9948
-                        payload:
-                          npwp: 12.345.678.9-012.000
-                          npwp_score: 0.98
-                          npwp_candidate_count: 1
-                          name_base: PT CONTOH INDONESIA
-                          name_score: 0.95
-                          avg_doc_score: 0.91
-                          min_doc_score: 0.62
-                          flag: false
-                          guardrail_probability: 0.98
-                      updated_at: '2026-09-18T04:00:01+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                failed:
-                  summary: Failed
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                      stage: SCORING
-                      created_at: '2026-09-18T04:00:01+00:00'
-                      status: FAILED
-                      error_message: 'Unsupported document_type: ktp. Supported: [''npwp'']'
-                      updated_at: '2026-09-18T04:00:01+00:00'
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: No scoring job for this request_id
-          content:
-            application/json:
-              example:
-                status_code: 404
-                status_desc: Not Found
-                message: 'No SCORING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                errors: 'No SCORING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'path.request_id: Field required'
-                errors: VALIDATION_ERROR
-                request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      servers:
-      - url: http://scoring.nilam-ocr-{environment}.svc.cluster.local:8033
-        description: GKE, from another namespace (e.g. the orchestrator / gateway)
-        variables:
-          environment:
-            enum:
-            - dev
-            - staging
-            - production
-            default: dev
-            description: 'One namespace per environment: nilam-ocr-<environment>'
-      - url: http://scoring:8033
-        description: GKE from the same namespace, or the Docker Compose network
-      - url: http://127.0.0.1:8033
-        description: Local development
+      servers: *id001
 webhooks:
   stageCallback:
     post:
@@ -725,10 +515,11 @@ webhooks:
         **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
         retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
         that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
-        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own. With `PIPELINE_OUTBOX`
-        the callback is instead queued in the same transaction as the result and retried with back-off
-        (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS` (24 h by default); a `4xx`,
-        or that age, makes it a dead letter that stays in the table and is counted by `GET .../outbox`.
+        can reconcile with the orchestrator NPWP''s `GET /v1/extract-ocr/{request_id}` and should time
+        a request out on its own. With `PIPELINE_OUTBOX` the callback is instead queued in the same transaction
+        as the result and retried with back-off (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS`
+        (24 h by default); a `4xx`, or that age, makes it a dead letter that stays in the table and is
+        counted by `GET .../outbox`.
 
 
         **What the receiver must tolerate.** The same callback may arrive more than once (treat it as
@@ -770,7 +561,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: request_id minted by the orchestrator
+          description: request_id minted by the central orchestrator
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
         document_type:
@@ -809,131 +600,6 @@ components:
       required:
       - request_id
       title: Body_extractOcr
-    BoundingBox:
-      properties:
-        x1:
-          type: integer
-          title: X1
-          description: Left
-          examples:
-          - 190
-        y1:
-          type: integer
-          title: Y1
-          description: Top
-          examples:
-          - 320
-        x2:
-          type: integer
-          title: X2
-          description: Right
-          examples:
-          - 760
-        y2:
-          type: integer
-          title: Y2
-          description: Bottom
-          examples:
-          - 366
-      type: object
-      required:
-      - x1
-      - y1
-      - x2
-      - y2
-      title: BoundingBox
-    ConfidenceRequest:
-      properties:
-        npwp:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Npwp
-          description: Extracted NPWP number, digits or printed form; null when not found
-          examples:
-          - 12.345.678.9-012.000
-        npwp_score:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Npwp Score
-          description: OCR score of the line the number came from
-          examples:
-          - 0.98
-        npwp_candidate_count:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: 'null'
-          title: Npwp Candidate Count
-          description: NPWP-shaped numbers found in the document (a card may print a 15- and a 16-digit
-            one)
-          examples:
-          - 1
-        name_base:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Name Base
-          description: The name as OCR read it, BEFORE any normalisation or correction (`signals.name_base`
-            of the structuring result); null when not found. The model measures the name's shape on this
-          examples:
-          - PT CONTOH INDONESIA
-        name_score:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Name Score
-          description: OCR score of the line the name came from
-          examples:
-          - 0.95
-        avg_doc_score:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Avg Doc Score
-          description: Mean OCR score over all lines
-          examples:
-          - 0.91
-        min_doc_score:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Min Doc Score
-          description: Lowest OCR score over all lines
-          examples:
-          - 0.62
-        flag:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Flag
-          description: Review flag of the structuring rules (`flag` of the structuring result); null counts
-            as false
-          examples:
-          - false
-        guardrail_probability:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Guardrail Probability
-          description: '`document.confidence` of the guardrails result when the document was accepted'
-          examples:
-          - 0.98
-      type: object
-      title: ConfidenceRequest
-      description: The ML team's scoring payload (nilamnpwp `scoring/schemas.py`, model retrained 21 Sep
-        2026).
     ContractField:
       properties:
         value:
@@ -1075,13 +741,15 @@ components:
             - 1
           - type: 'null'
           title: Guardrails
-          description: '1: the document passed the guardrails model; 0: it was rejected. Null on 202,
-            and when the request was refused before the check'
+          description: '1: the document passed the guardrails model (and the pipeline ran); 0: it was
+            rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
+            was refused before the check'
           examples:
           - 1
         params:
           title: Params
-          description: The `params` sent with this request, returned unchanged; null when not sent
+          description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not
+            sent. Not stored, so always null on `GET /v1/extract-ocr/{request_id}`
           examples:
           - nik: '3123456711950001'
             refno: PK19039Y8U
@@ -1333,8 +1001,8 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsResult
-      description: The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded
-        unchanged down the pipeline.
+      description: The guardrails report (`data` of the guardrails service's POST /v1/guardrails/check,
+        sent on by the orchestrator), forwarded unchanged down the pipeline.
     NpwpData:
       properties:
         nomor_npwp:
@@ -1350,289 +1018,6 @@ components:
       - nomor_npwp
       - nama
       title: NpwpData
-    OcrJobStatus:
-      properties:
-        request_id:
-          type: string
-          title: Request Id
-          description: request_id of the pipeline run
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        stage:
-          type: string
-          const: OCR
-          title: Stage
-          description: Always `OCR` on this service
-          default: OCR
-          examples:
-          - OCR
-        status:
-          type: string
-          enum:
-          - PROCESSING
-          - DONE
-          - FAILED
-          title: Status
-          description: '`PROCESSING` -> `DONE` | `FAILED`. A `FAILED` job may go back to `PROCESSING`
-            when resubmitted'
-          examples:
-          - DONE
-        error_message:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Error Message
-          description: Why the stage failed; null unless `status` is `FAILED`. Same text as the FAILED
-            callback
-          examples:
-          - null
-        created_at:
-          type: string
-          title: Created At
-          description: When the job was first accepted (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:00+00:00'
-        updated_at:
-          type: string
-          title: Updated At
-          description: Last status change (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:01+00:00'
-        result:
-          anyOf:
-          - $ref: '#/components/schemas/OcrResult'
-          - type: 'null'
-          description: Raw OCR result once `status` is `DONE`; null otherwise
-      type: object
-      required:
-      - request_id
-      - status
-      - created_at
-      - updated_at
-      title: OcrJobStatus
-    OcrJobStatusResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/OcrJobStatus'
-      type: object
-      required:
-      - data
-      title: OcrJobStatusResponse
-    OcrResult:
-      properties:
-        engine:
-          type: string
-          title: Engine
-          description: OCR backend that read the document (`EKSTRAKSI_BACKEND`)
-          examples:
-          - paddle
-        model:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Model
-          description: Model identity reported by the OCR model service; null when it does not report
-            one
-          examples:
-          - PP-OCRv6_medium_det+PP-OCRv6_medium_rec
-        elapsed_ms:
-          type: number
-          title: Elapsed Ms
-          description: Time spent in the OCR model, milliseconds
-          examples:
-          - 412.5
-        full_text:
-          type: string
-          title: Full Text
-          description: All blocks joined by newline, in reading order
-          examples:
-          - 'DIREKTORAT JENDERAL PAJAK
-
-            NPWP : 12.345.678.9-012.345
-
-            BUDI SANTOSO'
-        blocks:
-          items:
-            $ref: '#/components/schemas/TextBlock'
-          type: array
-          title: Blocks
-          description: Text lines in reading order (top to bottom)
-      type: object
-      required:
-      - engine
-      - elapsed_ms
-      - full_text
-      - blocks
-      title: OcrResult
-    ScoringJobResult:
-      properties:
-        npwp_confidence:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Npwp Confidence
-          description: P(the NPWP number is correct); null when no number was found
-          examples:
-          - 0.7296
-        name_confidence:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Name Confidence
-          description: P(the name is correct); null when no name was found
-          examples:
-          - 0.9471
-        payload:
-          $ref: '#/components/schemas/ConfidenceRequest'
-          description: 'Exactly what was scored, built from the chained results: an audit trail for the
-            two numbers'
-      type: object
-      required:
-      - npwp_confidence
-      - name_confidence
-      - payload
-      title: ScoringJobResult
-      description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
-    ScoringJobStatus:
-      properties:
-        request_id:
-          type: string
-          title: Request Id
-          description: request_id of the pipeline run
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        stage:
-          type: string
-          const: SCORING
-          title: Stage
-          description: Always `SCORING` on this service
-          default: SCORING
-          examples:
-          - SCORING
-        status:
-          type: string
-          enum:
-          - PROCESSING
-          - DONE
-          - FAILED
-          title: Status
-          description: '`PROCESSING` -> `DONE` | `FAILED`. A `FAILED` job may go back to `PROCESSING`
-            when resubmitted'
-          examples:
-          - DONE
-        error_message:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Error Message
-          description: Why the stage failed; null unless `status` is `FAILED`. Same text as the FAILED
-            callback
-          examples:
-          - null
-        created_at:
-          type: string
-          title: Created At
-          description: When the job was first accepted (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:00+00:00'
-        updated_at:
-          type: string
-          title: Updated At
-          description: Last status change (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:01+00:00'
-        result:
-          anyOf:
-          - $ref: '#/components/schemas/ScoringJobResult'
-          - type: 'null'
-          description: Confidences once `status` is `DONE`; null otherwise
-      type: object
-      required:
-      - request_id
-      - status
-      - created_at
-      - updated_at
-      title: ScoringJobStatus
-    ScoringJobStatusResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/ScoringJobStatus'
-      type: object
-      required:
-      - data
-      title: ScoringJobStatusResponse
     ScoringStageCallback:
       properties:
         request_id:
@@ -1745,259 +1130,6 @@ components:
       - status
       title: StageCallback
       description: Body of the callback a stage POSTs to the orchestrator when it finishes.
-    StructuredDocument:
-      properties:
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type the fields were read as
-          examples:
-          - npwp
-        fields:
-          additionalProperties:
-            $ref: '#/components/schemas/StructuredField'
-          type: object
-          title: Fields
-          description: 'Always `nomor_npwp`, `nama`, `nama_badan`; a field that was not found has `value:
-            null`. A person''s card fills `nama`, a company''s (PT, CV, ...) fills `nama_badan`. A 15-digit
-            number is formatted `XX.XXX.XXX.X-XXX.XXX`; a 16-digit NIK-based number is 16 plain digits,
-            and wins when a card prints both'
-          examples:
-          - nama:
-              confidence: 0.9773
-              signals:
-                corrected: false
-                name_base: BUDI SANTOSO
-              source: BUDI SANTOSO
-              value: BUDI SANTOSO
-            nama_badan:
-              confidence: 0.0
-            nomor_npwp:
-              confidence: 0.9992
-              signals:
-                candidate_count: 1
-                has_homoglyph: false
-              source: 'NPWP : 12.345.678.9-012.345'
-              value: 12.345.678.9-012.345
-        flag:
-          type: boolean
-          title: Flag
-          description: 'Flag of the ML team''s rules, a feature of the trust model. True when: another
-            document is bundled in (KTP, KK, Akta), the page is a CAPTCHA or a screenshot of the DJP lookup,
-            the number or the name was not found, the name is a single word, the number contains a letter,
-            its province / kecamatan / birthdate / KPP code is invalid, or the upload has more than 2
-            pages'
-          examples:
-          - false
-        flag_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Flag Reason
-          description: The first reason `flag` is true, in Indonesian; null when not flagged
-          examples:
-          - null
-        reject_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Reject Reason
-          description: The first reason that rejects the document, in Indonesian; null when the document
-            is accepted. Every check rejects except a single-word name and a letter in the number, which
-            only raise `flag`. In the pipeline a rejected document stops here (no scoring) and the client
-            gets a 400 with this message
-          examples:
-          - null
-      type: object
-      required:
-      - document_type
-      - fields
-      - flag
-      title: StructuredDocument
-    StructuredField:
-      properties:
-        value:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Value
-          description: null when the field was not found
-          examples:
-          - 12.345.678.9-012.345
-        confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Confidence
-          description: OCR score of the line the value came from; 0 when not found
-          examples:
-          - 0.9992
-        source:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Source
-          description: Raw OCR line the value came from
-          examples:
-          - 'NPWP : 12.345.678.9-012.345'
-        signals:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Signals
-          description: 'Inputs for the scoring model and review signals (backend `npwp_rules` only; null
-            otherwise). nomor_npwp: `candidate_count` (NPWP-shaped numbers found in the document), `has_homoglyph`
-            (OCR read a letter where a digit belongs; the letter is dropped, not corrected), `invalid_province_prefix`
-            / `invalid_kecamatan_prefix` / `invalid_birthdate` (a 16-digit NIK-based number fails the
-            Kode Wilayah or birthdate check), `invalid_kpp_prefix` (a 15-digit number''s KPP office code
-            is unknown). nama / nama_badan: `name_base` (the read before any normalisation; the trust
-            model measures the name on this), `corrected` (`value` differs from `name_base`)'
-          examples:
-          - candidate_count: 1
-            has_homoglyph: false
-      type: object
-      required:
-      - confidence
-      title: StructuredField
-    StructuringJobStatus:
-      properties:
-        request_id:
-          type: string
-          title: Request Id
-          description: request_id of the pipeline run
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        stage:
-          type: string
-          const: STRUCTURING
-          title: Stage
-          description: Always `STRUCTURING` on this service
-          default: STRUCTURING
-          examples:
-          - STRUCTURING
-        status:
-          type: string
-          enum:
-          - PROCESSING
-          - DONE
-          - FAILED
-          title: Status
-          description: '`PROCESSING` -> `DONE` | `FAILED`. A `FAILED` job may go back to `PROCESSING`
-            when resubmitted'
-          examples:
-          - DONE
-        error_message:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Error Message
-          description: Why the stage failed; null unless `status` is `FAILED`. Same text as the FAILED
-            callback
-          examples:
-          - null
-        created_at:
-          type: string
-          title: Created At
-          description: When the job was first accepted (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:00+00:00'
-        updated_at:
-          type: string
-          title: Updated At
-          description: Last status change (ISO 8601, UTC)
-          examples:
-          - '2026-09-18T04:00:01+00:00'
-        result:
-          anyOf:
-          - $ref: '#/components/schemas/StructuredDocument'
-          - type: 'null'
-          description: Structured fields once `status` is `DONE`; null otherwise
-      type: object
-      required:
-      - request_id
-      - status
-      - created_at
-      - updated_at
-      title: StructuringJobStatus
-    StructuringJobStatusResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/StructuringJobStatus'
-      type: object
-      required:
-      - data
-      title: StructuringJobStatusResponse
-    TextBlock:
-      properties:
-        text:
-          type: string
-          title: Text
-          description: One OCR text line, as read
-          examples:
-          - 'NPWP : 12.345.678.9-012.345'
-        confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Confidence
-          description: Recognition score of this line
-          examples:
-          - 0.9992
-        bbox:
-          anyOf:
-          - $ref: '#/components/schemas/BoundingBox'
-          - type: 'null'
-          description: Upright box around the line, in pixels of the ORIENTATION-CORRECTED image the OCR
-            model worked on. The model straightens and unwarps the card first, so these are NOT coordinates
-            in the uploaded photo
-        page:
-          type: integer
-          minimum: 0.0
-          title: Page
-          description: 0-based page number (multi-page PDF)
-          default: 0
-          examples:
-          - 0
-      type: object
-      required:
-      - text
-      - confidence
-      title: TextBlock
   securitySchemes:
     APIKeyHeader:
       type: apiKey

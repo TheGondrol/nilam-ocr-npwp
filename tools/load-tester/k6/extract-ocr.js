@@ -1,26 +1,26 @@
-// Skenario k6: kirim NPWP ke guardrails /v1/extract-ocr dengan laju kedatangan tetap
+// Skenario k6: kirim NPWP ke orchestrator /v1/extract-ocr dengan laju kedatangan tetap
 // (open model), catat status HTTP-nya, dan laporkan tiap sampel ke tracker supaya
 // jumlah 200/202/4xx/5xx dan waktu end-to-end (sampai callback SCORING) bisa dihitung.
 //
 // Env (diisi tracker, atau manual lewat `k6 run -e ...`):
 //   RUN_ID        id run, dipakai sebagai prefiks request_id: LT_<RUN_ID>_<vu>-<iter>. Endpoint -test
 //                 membuat request_id sendiri (TEST_<RUN_ID>_<uuid>) dari field run_id yang dikirim skrip ini
-//   TARGET        base URL guardrails, mis. http://guardrails:8031
+//   TARGET        base URL orchestrator, mis. http://orchestrator:8034
 //   TRACKER       base URL tracker, mis. http://host.docker.internal:8090 (kosong = tanpa lapor)
 //   RATE          request per detik (default 1)
 //   DURATION      lama pengiriman, format k6 (default 60s)
 //   MODE          constant | ramp (ramp: naik dari 0 ke RATE selama separuh DURATION)
 //   IMAGES        daftar file, dipisah koma; dipakai bergiliran. Nama biasa dibaca dari /images
 //                 (contoh yang ikut repo), path absolut (mis. /assets/scan.pdf, unggahan tracker) apa adanya
-//   WAIT_SECONDS  PIPELINE_WAIT_SECONDS guardrails (default 15), untuk timeout dan jumlah VU
-//   API_KEY       diisi kalau guardrails tidak memakai AUTH_DISABLED
+//   WAIT_SECONDS  PIPELINE_WAIT_SECONDS orchestrator (default 15), untuk timeout dan jumlah VU
+//   API_KEY       diisi kalau orchestrator tidak memakai AUTH_DISABLED
 //   ENDPOINT      path yang ditembak (default /v1/extract-ocr). Load test di dev: /v1/extract-ocr-test,
 //                 pipeline yang sama di tabel testing_* tanpa callback ke Orkestrasi (TESTING_ENDPOINTS)
 import http from 'k6/http'
 import { Counter, Trend } from 'k6/metrics'
 
 const RUN = __ENV.RUN_ID || `manual${Date.now().toString(36)}`
-const TARGET = (__ENV.TARGET || 'http://127.0.0.1:8031').replace(/\/$/, '')
+const TARGET = (__ENV.TARGET || 'http://127.0.0.1:8034').replace(/\/$/, '')
 const TRACKER = (__ENV.TRACKER || '').replace(/\/$/, '')
 const RATE = Number(__ENV.RATE || 1)
 const DURATION = __ENV.DURATION || '60s'
@@ -38,7 +38,7 @@ const images = names.map((entry) => ({
   data: open(entry.startsWith('/') ? entry : `/images/${entry}`, 'b'),
 }))
 
-// Koneksi ditahan guardrails sampai WAIT detik, jadi VU yang sibuk bersamaan ~ RATE x (WAIT + jeda).
+// Koneksi ditahan orchestrator sampai WAIT detik, jadi VU yang sibuk bersamaan ~ RATE x (WAIT + jeda).
 const durationSeconds = parseDuration(DURATION)
 const vus = Math.max(10, Math.ceil(RATE * (WAIT + 10)))
 

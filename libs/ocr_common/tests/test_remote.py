@@ -136,6 +136,25 @@ async def test_passthrough_still_maps_5xx_to_500():
     assert exc.value.message == "demo model error (503): structuring model is unavailable"
 
 
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [(400, "Jumlah halaman melebihi batas"), (503, "guardrails model is unavailable"), (504, "timed out")],
+)
+async def test_listed_statuses_are_passed_through_with_their_message(status, message):
+    handler = lambda request: httpx.Response(status, json={"message": message})  # noqa: E731
+    with pytest.raises(ServiceError) as exc:
+        await _client(handler, passthrough_statuses=(400, 503, 504)).get_json("/x")
+    assert (exc.value.status_code, exc.value.message) == (status, message)
+
+
+async def test_unlisted_statuses_still_map_to_500():
+    handler = lambda request: httpx.Response(401, json={"message": "Invalid or missing API key"})  # noqa: E731
+    with pytest.raises(ServiceError) as exc:
+        await _client(handler, passthrough_statuses=(400, 503)).get_json("/x")
+    assert exc.value.status_code == 500
+    assert exc.value.message == "demo model error (401): Invalid or missing API key"
+
+
 async def test_http_error_without_json_uses_text():
     handler = lambda request: httpx.Response(502, text="Bad Gateway from nginx")  # noqa: E731
     with pytest.raises(ServiceError) as exc:
