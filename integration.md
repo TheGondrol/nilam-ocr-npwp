@@ -299,6 +299,51 @@ Tahap ini yang terakhir, dan hanya callback-nya yang membawa hasil akhir.
 
 ## 7. Kontrak callback
 
+### Callback hasil (dipakai di dev sejak 24 Sep 2026)
+
+Endpoint dari tim Orkestrasi, satu POST per request saat request selesai
+(`ORCHESTRATION_CALLBACK_FORMAT=result`):
+
+    POST http://ocr-orchestration.ocr-dev.svc.cluster.local/v1/ocr-callback
+    X-Callback-Key: <ORCHESTRATION_CALLBACK_KEY>
+
+Selesai (dikirim oleh scoring):
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "completed",
+      "result": {
+        "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 0.9829},
+        "nama":       {"value": "BUDI SANTOSO",         "confidence": 0.9512},
+        "nama_badan": {"value": "",                     "confidence": 0.0}
+      },
+      "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}
+    }
+
+`confidence` adalah probabilitas dari trust model bahwa nilainya benar, belum dibulatkan ke 0/1
+seperti di respons `extract-ocr`. Field yang tidak ditemukan: `value` kosong dan `confidence` 0.0.
+Probabilitas nama masuk ke `nama` atau `nama_badan`, mana pun yang berisi nama. `guardrails` adalah
+laporan model guardrails untuk dokumen itu.
+
+Gagal atau ditolak (dikirim oleh tahap yang berhenti):
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "failed",
+      "result": null,
+      "guardrails": {},
+      "error_code": "DOWNSTREAM_VALIDATION_ERROR",
+      "error_message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+    }
+
+`error_code` bernilai `DOWNSTREAM_VALIDATION_ERROR` kalau dokumen ditolak aturan structuring, atau
+`OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` kalau tahapnya gagal. Dokumen yang ditolak
+model guardrails tidak mendapat callback, karena sudah dijawab 400 langsung di `extract-ocr`.
+Jawaban 5xx dan timeout dikirim ulang (3 kali tanpa outbox, seperti di dev sekarang; sampai 24 jam
+dengan `PIPELINE_OUTBOX`), 4xx tidak dikirim ulang.
+
+### Callback per tahap (format lama, `ORCHESTRATION_CALLBACK_FORMAT=stage`)
+
 Tiap tahap mem-POST ke `<ORCHESTRATION_URL><CALLBACK_PATH>`, dengan default path
 `/v1/callbacks/stage`. Header `X-API-Key` ikut dikirim kalau kami diberi nilainya, dan header
 `X-Request-ID` selalu berisi `request_id` request itu, sama dengan yang kami kirim ke service

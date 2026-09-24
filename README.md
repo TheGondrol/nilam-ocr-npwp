@@ -22,6 +22,7 @@ Kontrak, envelope, dan auth `X-API-Key` sama dengan service `ocr-*` di `nilam-oc
 - [Environment Variables](#environment-variables)
 - [Endpoint API](#endpoint-api)
 - [Skenario Testing via Nama File](#skenario-testing-via-nama-file)
+- [Endpoint Testing (load test tim ML)](#endpoint-testing-load-test-tim-ml)
 - [Observability](#observability)
 - [Database](#database)
 - [Mengganti Mock dengan Model Asli](#mengganti-mock-dengan-model-asli)
@@ -331,6 +332,7 @@ ekstraksi, structuring, scoring (`ocr_common.config.PipelineSettings`, pipeline 
 | `PIPELINE_STALE_JOBS` | Tidak | `true` | Tiap proses menjalankan pengambil job basi: job `PROCESSING` yang `updated_at`-nya lebih tua dari `PIPELINE_JOB_LEASE_SECONDS` (pemiliknya mati tanpa sempat mencatat) diklaim ulang (`attempts` bertambah, `FOR UPDATE SKIP LOCKED`) dan dijalankan lagi dari data di database: `input` yang disimpan saat klaim plus `*_results` tahap sebelumnya. Hanya aktif dengan `DATABASE_URL`; butuh migrasi `0004`. Job OCR hanya bisa diulang kalau request ke guardrails memakai `file_url` (guardrails meneruskan URL-nya, bukan byte-nya); upload inline hilang bersama prosesnya dan job itu langsung `FAILED` dengan pesan minta kirim ulang |
 | `PIPELINE_STALE_JOB_INTERVAL_SECONDS` / `PIPELINE_STALE_JOB_BATCH` | Tidak | `30.0` / `10` | Jeda antar pencarian job basi, dan berapa job yang diambil per putaran |
 | `PIPELINE_OUTBOX` | Tidak | `false` | `true` = callback dan handoff ditulis ke `pipeline_outbox` dalam transaksi job, lalu dikirim relay. Butuh `DATABASE_URL` dan migrasi `0003`. Menghilangkan kehilangan pesan saat pod mati dan kopling latensi ke callback, tapi urutan callback antar-tahap tidak lagi dijamin |
+| `TESTING_ENDPOINTS` | Tidak | `false` | `true` = keempat service membuka kembaran `-test` dari endpoint pipeline (`/v1/extract-ocr-test`, `/v1/<tahap>/jobs-test`): pipeline yang sama di tabel `testing_*`, tanpa callback dan tanpa menulis ke tabel Orkestrasi. Untuk load test tim ML di dev; butuh migrasi `0006`. `false` = route-nya tidak ada (404). Lihat [Endpoint Testing](#endpoint-testing-load-test-tim-ml) |
 | `PIPELINE_OUTBOX_INTERVAL_SECONDS` | Tidak | `1.0` | Jeda relay saat outbox kosong. Pesan baru langsung membangunkan relay di proses yang sama, jadi nilai ini hanya berlaku untuk pesan sisa milik replika lain |
 | `PIPELINE_OUTBOX_BATCH` | Tidak | `20` | Pesan per putaran relay |
 | `PIPELINE_OUTBOX_LEASE_SECONDS` | Tidak | `30.0` | Lama sebuah pesan "dipegang" satu relay sebelum relay lain boleh mencobanya lagi |
@@ -422,7 +424,7 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 
 `confidence` dokumen: kalau `accepted`, `proba_approve` halaman terlemah; kalau `reject`, `proba_reject` tertinggi di antara halaman yang ditolak. Saat ditolak: `"passed": false, "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"`. Modelnya biner, jadi alasan hanya bisa menyebut jumlah halaman dan keyakinannya, bukan "blur" atau "bukan NPWP".
 
-**Data `extract-ocr`** (sheet "OCR Nilam - Document Type"): `nomor_npwp`, `nama`, `nama_badan`, tiap field `{"value", "confidence"}`, yang tidak ditemukan `{"value": null, "confidence": 0}`. Pintu masuk guardrails (`/v1/extract-ocr`) dan `result_data` di tabel Orkestrasi menambah `flag` dan `flag_reason` dari aturan structuring: flag lunak untuk reviewer, nilainya tetap dikembalikan (dengan confidence yang lebih rendah dari trust model).
+**Data `extract-ocr`** (sheet "OCR Nilam - Document Type"): `nomor_npwp` dan `nama` (nama wajib pajak, atau nama badan pada kartu perusahaan), tiap field `{"value", "confidence"}` dengan `confidence` 1 atau 0; yang tidak ditemukan `{"value": null, "confidence": 0}`. `nama_badan` terpisah hanya ada di callback hasil ke Orkestrasi. Flag dari aturan structuring **tidak** ada di data ini: 9 dari 11 flag menolak dokumen (400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`, `message` = alasannya), 2 sisanya (nama satu kata, huruf di nomor NPWP) hanya menjadi input trust model.
 
 ## Skenario Testing via Nama File
 
@@ -436,6 +438,87 @@ Berlaku selama backend masih mock (guardrails: `GUARDRAILS_BACKEND=mock`; ekstra
 | lainnya | ketiga tahap `DONE`, data dummy deterministik dari isi file | 200, data yang sama | |
 
 Kontrak lama: `request_id` sama dua kali → 409; tidak dikenal → 400; tidak ada di `get-ocr-result` → 404. Pipeline async: `request_id` sama dua kali → 202 `duplicate: true`.
+
+## Endpoint Testing (load test tim ML)
+
+Supaya tim ML bisa menguji performa dengan burst request tanpa mengotori data Orkestrasi, setiap endpoint
+pipeline punya kembaran `-test`. Kembaran ini **menjalankan handler dan kode yang sama persis** (model
+guardrails, OCR, aturan structuring, trust model, waktu tunggu `PIPELINE_WAIT_SECONDS`, idempotensi, outbox),
+hanya tempat datanya yang berbeda. Aktif hanya dengan `TESTING_ENDPOINTS=true` (di Helm: hanya
+`values-ddb-dev.yaml`). Kalau setting ini mati, route-nya tidak ada dan menjawab 404.
+
+| Live | Testing | Dipanggil oleh |
+|---|---|---|
+| `POST /v1/extract-ocr` (guardrails) | `POST /v1/extract-ocr-test` | tim ML (k6 / curl) |
+| `POST`/`GET /v1/ekstraksi/jobs` | `POST`/`GET /v1/ekstraksi/jobs-test` | guardrails |
+| `POST`/`GET /v1/structuring/jobs` | `POST`/`GET /v1/structuring/jobs-test` | ekstraksi, guardrails |
+| `POST`/`GET /v1/scoring/jobs` | `POST`/`GET /v1/scoring/jobs-test` | structuring, guardrails |
+
+Yang berbeda dari jalur live:
+
+- **Tabel**: `testing_ocr_jobs`/`_results`, `testing_structuring_jobs`/`_results`,
+  `testing_scoring_jobs`/`_results`, `testing_pipeline_outbox` (migrasi `0006`). Tabel live tidak disentuh.
+- **Tidak ada efek ke Orkestrasi**: tanpa callback, tanpa `orchestration_extract_ocr`, tanpa
+  `ocr.orchestration_api_events`.
+- **Metrik** memakai label `stage="TESTING_OCR"` / `TESTING_STRUCTURING` / `TESTING_SCORING`, jadi angka load
+  test tidak tercampur dengan traffic Orkestrasi di `/metrics`.
+
+Kodenya: [ocr_common/testing_endpoints.py](libs/ocr_common/ocr_common/testing_endpoints.py) (nama tabel dan
+path), [ocr_common/web/testing_routes.py](libs/ocr_common/ocr_common/web/testing_routes.py) (mendaftarkan
+kembaran route), `get_testing_*` di `app/dependencies.py` tiap service, dan `app/api/testing.py`.
+
+### Cara pakai
+
+API key-nya sama dengan yang dipakai Orkestrasi (`API_KEY` di Secret `nilam-ocr-npwp-secrets`), di header
+`X-API-Key`. Akses lewat port-forward ke guardrails:
+
+```bash
+kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-guardrails 8031:8031
+
+curl -X POST http://127.0.0.1:8031/v1/extract-ocr-test \
+  -H "X-API-Key: $API_KEY" -F run_id=run1 -F file=@npwp.jpg
+```
+
+Jawabannya sama dengan `/v1/extract-ocr` (200 / 202 / 400 / 422). Bedanya, **`request_id` dibuat oleh
+guardrails**, tidak dikirim pemanggil: `TEST_<uuid>`, atau `TEST_<run_id>_<uuid>` kalau field opsional
+`run_id` diisi (huruf, angka, `-`, `_`, maks. 40 karakter). Field `request_id` di form diabaikan. Id baru per
+request berarti burst tidak pernah bentrok dengan idempotensi run sebelumnya. Cari request lewat `request_id` di
+jawaban, atau semua request satu run lewat prefiks `TEST_<run_id>_`. Untuk burst dengan k6, pakai
+[tools/load-tester](tools/load-tester) dengan `-e ENDPOINT=/v1/extract-ocr-test
+-e TARGET=http://host.docker.internal:8031 -e API_KEY=...`.
+
+Durasi per tahap langsung dari tabelnya (`created_at` = job diterima tahap itu, `updated_at` = selesai):
+
+```sql
+SELECT o.request_id,
+       o.updated_at - o.created_at AS ocr,
+       s.updated_at - s.created_at AS structuring,
+       c.updated_at - c.created_at AS scoring,
+       c.updated_at - o.created_at AS total,
+       o.status AS ocr_status, s.status AS structuring_status, c.status AS scoring_status
+FROM testing_ocr_jobs o
+LEFT JOIN testing_structuring_jobs s USING (request_id)
+LEFT JOIN testing_scoring_jobs c USING (request_id)
+WHERE o.request_id LIKE 'TEST_run1_%'
+ORDER BY o.created_at;
+```
+
+Setelah selesai, kosongkan tabelnya (isinya tidak dipakai apa pun):
+
+```sql
+TRUNCATE testing_ocr_results, testing_ocr_jobs, testing_structuring_results, testing_structuring_jobs,
+         testing_scoring_results, testing_scoring_jobs, testing_pipeline_outbox;
+```
+
+### Perhatikan
+
+- **Pod-nya sama dengan traffic Orkestrasi di dev.** Burst ikut memperlambat request mereka selama tes
+  berjalan, dan server model OCR Paddle juga dipakai bersama. Kabari tim Orkestrasi sebelum tes besar.
+- **Port-forward bukan jalur produksi.** Semua request lewat satu tunnel kubectl (lewat API server GKE), yang
+  menambah latensi dan bisa jadi batas throughput sendiri pada laju tinggi. Kalau angkanya janggal,
+  bandingkan dengan `pipeline_job_duration_seconds{stage="TESTING_..."}` di `/metrics`, yang diukur di dalam pod.
+- Karena ada di pod yang sama, `/metrics` dan log bercampur dengan live; bedakan lewat label `TESTING_*` dan
+  `request_id`.
 
 ## Observability
 

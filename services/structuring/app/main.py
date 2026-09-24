@@ -5,9 +5,19 @@ from fastapi import FastAPI
 from ocr_common.pipeline.schemas import StageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import jobs, structuring
+from app.api import jobs, structuring, testing
 from app.config import get_settings
-from app.dependencies import get_next_stage, get_pipeline, get_reaper, get_relay, get_structurer
+from app.dependencies import (
+    get_next_stage,
+    get_pipeline,
+    get_reaper,
+    get_relay,
+    get_structurer,
+    get_testing_next_stage,
+    get_testing_pipeline,
+    get_testing_reaper,
+    get_testing_relay,
+)
 
 settings = get_settings()
 
@@ -27,11 +37,22 @@ async def lifespan(app: FastAPI):
     reaper = get_reaper()
     if reaper is not None:
         reaper.start()
+    if settings.testing_endpoints:
+        testing_relay, testing_reaper = get_testing_relay(), get_testing_reaper()
+        if testing_relay is not None:
+            testing_relay.start()
+        if testing_reaper is not None:
+            testing_reaper.start()
     yield
     if reaper is not None:
         await reaper.stop()
     await pipeline.aclose(settings.pipeline_drain_timeout_seconds, relay=relay)
     await next_stage.aclose()
+    if settings.testing_endpoints:
+        if testing_reaper is not None:
+            await testing_reaper.stop()
+        await get_testing_pipeline().aclose(settings.pipeline_drain_timeout_seconds, relay=testing_relay)
+        await get_testing_next_stage().aclose()
     if settings.database_url:
         from ocr_common.pipeline.database import dispose_engines
 
@@ -55,7 +76,7 @@ app = create_app(
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
         {"name": "Structuring", "description": "Raw text -> named fields, synchronous"},
     ],
-    routers=[jobs.router, structuring.router],
+    routers=[jobs.router, structuring.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "structuring": settings.structuring_backend,
         "storage": "postgres" if settings.database_url else "memory",

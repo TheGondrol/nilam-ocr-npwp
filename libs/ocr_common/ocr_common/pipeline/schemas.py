@@ -270,6 +270,14 @@ class StageCallback(BaseModel):
         None, description="Always null for OCR and STRUCTURING; read the stage result from GET .../jobs/{request_id}"
     )
     error_message: str | None = Field(None, description="Why it failed; null when `status` is `DONE`", examples=[None])
+    error_code: str | None = Field(
+        None,
+        description=(
+            "Only on a rejection: `DOWNSTREAM_VALIDATION_ERROR` when the stage rejected the document (a rejecting "
+            "check of the structuring rules; `error_message` is the Indonesian reason). Absent when a stage broke"
+        ),
+        examples=[None],
+    )
 
 
 class ScoringStageCallback(StageCallback):

@@ -41,6 +41,10 @@ class BaseServiceSettings(BaseSettings):
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
     file_url_allowed_hosts: str = ""
     field_confidence_threshold: float = Field(0.5, ge=0, le=1)
+    # The `-test` endpoints (guardrails `/v1/extract-ocr-test`, `/v1/<stage>/jobs-test`): the same pipeline on
+    # the `testing_*` tables, without callbacks or writes to the orchestrator's tables. For the ML team's
+    # load tests on dev; off everywhere else, and then the routes do not exist.
+    testing_endpoints: bool = False
 
     @property
     def is_local(self) -> bool:
@@ -122,6 +126,11 @@ class PipelineSettings(BaseServiceSettings):
     orchestration_callback_path: str = "/v1/callbacks/stage"
     orchestration_api_key: str | None = None
     orchestration_timeout_seconds: float = 10.0
+    # "stage": a callback per stage (OCR, STRUCTURING, SCORING) with `X-API-Key`.
+    # "result": the orchestrator's single result callback when the request ends (completed by scoring,
+    # failed at any stage), authenticated with `X-Callback-Key: ORCHESTRATION_CALLBACK_KEY`.
+    orchestration_callback_format: Literal["stage", "result"] = "stage"
+    orchestration_callback_key: str | None = None
 
     pipeline_retry_attempts: int = 3
     pipeline_retry_delay_seconds: float = 0.5
@@ -161,6 +170,16 @@ class PipelineSettings(BaseServiceSettings):
                 "(set ENVIRONMENT=local for local development)"
             )
         self.reject_localhost_outside_local(orchestration_url=self.orchestration_url)
+        if (
+            self.orchestration_callback_format == "result"
+            and self.orchestration_url
+            and not self.is_local
+            and not self.orchestration_callback_key
+        ):
+            raise ValueError(
+                "ORCHESTRATION_CALLBACK_KEY must be set with ORCHESTRATION_CALLBACK_FORMAT=result: the orchestrator's "
+                "result callback is authenticated with X-Callback-Key"
+            )
         if self.pipeline_handoff_by_reference and not self.database_url:
             raise ValueError(
                 "PIPELINE_HANDOFF_BY_REFERENCE=true needs DATABASE_URL: the next stage reads this stage's "

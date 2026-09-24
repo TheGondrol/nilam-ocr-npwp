@@ -79,6 +79,12 @@ spec:
                   name: {{ $.Values.existingSecret }}
                   key: {{ $.Values.secretKeys.orchestrationApiKey }}
                   optional: true
+            - name: ORCHESTRATION_CALLBACK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ $.Values.secretKeys.callbackKey }}
+                  optional: true
             {{- end }}
             - name: HOME
               value: /tmp

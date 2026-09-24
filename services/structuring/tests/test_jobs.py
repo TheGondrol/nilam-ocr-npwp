@@ -197,6 +197,11 @@ async def test_a_rejected_document_stops_at_structuring_with_a_failed_callback()
     assert job["status"] == "DONE", "the result stays readable for the waiter and for debugging"
     assert job["result"]["reject_reason"] == "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
     assert next_stage.payloads == [], "a rejected document never reaches scoring"
-    assert [(c["stage"], c["status"], c["error_message"]) for c in callback.calls] == [
-        ("STRUCTURING", "FAILED", "Kode provinsi pada NPWP tidak valid, mohon dicek kembali")
+    assert [(c["stage"], c["status"], c["error_message"], c["error_code"]) for c in callback.calls] == [
+        (
+            "STRUCTURING",
+            "FAILED",
+            "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+            "DOWNSTREAM_VALIDATION_ERROR",
+        )
     ]

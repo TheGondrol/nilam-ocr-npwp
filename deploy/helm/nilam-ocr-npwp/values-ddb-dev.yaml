@@ -9,20 +9,29 @@ image:
 existingSecret: nilam-ocr-npwp-secrets
 
 orchestration:
-  # Mode uji coba dengan tools/tracker: tracker ada di laptop dan tidak bisa
-  # dipanggil balik dari pod, jadi ia menarik status tiap tahap sendiri
-  # (polling) dan callback cukup berhenti di service ini sendiri. Dipakai
-  # supaya request uji coba tidak menembak Orkestrasi milik tim lain.
-  url: http://nilam-ocr-npwp:8030
-  # Integrasi sungguhan: komentari baris di atas, aktifkan baris ini. Alamatnya
-  # hasil penelusuran namespace ocr-dev, belum dikonfirmasi tim Orkestrasi.
-  # url: http://ocr-orchestration.ocr-dev.svc.cluster.local
+  # Callback hasil ke Orkestrasi (endpoint dari tim Orkestrasi, 24 Sep 2026): satu POST per request
+  # saat selesai, dengan X-Callback-Key = ORCHESTRATION_CALLBACK_KEY di Secret nilam-ocr-npwp-secrets.
+  # Key itu WAJIB ada di Secret sebelum deploy: tanpa key, ekstraksi/structuring/scoring menolak start.
+  url: http://ocr-orchestration.ocr-dev.svc.cluster.local
+  callbackPath: /v1/ocr-callback
+  callbackFormat: result
+  # Mode uji coba lama (callback per tahap berhenti di service ini sendiri, untuk tools/tracker):
+  # url: http://nilam-ocr-npwp:8030
+  # callbackPath: /v1/callbacks/stage
+  # callbackFormat: stage
 
 commonEnv:
   # Double write: selain tabel job kita sendiri, keadaan akhir tiap request (COMPLETED dari scoring,
   # FAILED dari tahap mana pun) ditambahkan sebagai baris GET_OCR_RESULT di log API Orkestrasi,
   # karena Orkestrasi membaca hasil dari tabel itu, bukan dari GET /v1/scoring/jobs/{request_id}.
   ORCHESTRATION_API_EVENTS_TABLE: ocr.orchestration_api_events
+  # Outbox transaksional: hand-off dan callback ditulis ke pipeline_outbox bersama hasil job, lalu dikirim
+  # relay dengan backoff (sampai 5 menit sekali, selama 24 jam), jadi tidak hilang saat pod restart atau
+  # penerima down. Dinyalakan di cluster 24 Sep 2026.
+  PIPELINE_OUTBOX: "true"
+  # Load test tim ML lewat kubectl port-forward ke guardrails, /v1/extract-ocr-test. Butuh migrasi 0006
+  # (tabel testing_*). Lihat README, "Endpoint testing".
+  TESTING_ENDPOINTS: "true"
 
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa

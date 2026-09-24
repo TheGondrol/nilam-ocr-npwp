@@ -72,6 +72,27 @@ def get_pipeline_waiter() -> PipelineWaiter:
     return PipelineWaiter(get_stage_status_clients(), poll_interval=get_settings().pipeline_poll_interval_seconds)
 
 
+# The testing endpoint (TESTING_ENDPOINTS): the same check and wait, on the stages' `-test` endpoints
+# (see ocr_common.testing_endpoints).
+
+
+@lru_cache
+def get_testing_ekstraksi_client() -> EkstraksiJobClient:
+    return build_ekstraksi_client(get_settings(), testing=True)
+
+
+@lru_cache
+def get_testing_stage_status_clients() -> tuple[StageStatusClient, ...]:
+    return build_stage_status_clients(get_settings(), testing=True)
+
+
+@lru_cache
+def get_testing_pipeline_waiter() -> PipelineWaiter:
+    return PipelineWaiter(
+        get_testing_stage_status_clients(), poll_interval=get_settings().pipeline_poll_interval_seconds
+    )
+
+
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
@@ -83,6 +104,15 @@ def get_job_service(
     guardrails: GuardrailsService = Depends(get_guardrails_service),
     ekstraksi: EkstraksiJobClient = Depends(get_ekstraksi_client),
     waiter: PipelineWaiter = Depends(get_pipeline_waiter),
+    settings: Settings = Depends(get_settings),
+) -> GuardrailsJobService:
+    return GuardrailsJobService(guardrails, ekstraksi, waiter, wait_seconds=settings.pipeline_wait_seconds)
+
+
+def get_testing_job_service(
+    guardrails: GuardrailsService = Depends(get_guardrails_service),
+    ekstraksi: EkstraksiJobClient = Depends(get_testing_ekstraksi_client),
+    waiter: PipelineWaiter = Depends(get_testing_pipeline_waiter),
     settings: Settings = Depends(get_settings),
 ) -> GuardrailsJobService:
     return GuardrailsJobService(guardrails, ekstraksi, waiter, wait_seconds=settings.pipeline_wait_seconds)

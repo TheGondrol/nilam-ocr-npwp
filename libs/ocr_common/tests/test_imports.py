@@ -27,6 +27,8 @@ MODULES = [
     "ocr_common.npwp",
     "ocr_common.types",
     "ocr_common.simulation",
+    "ocr_common.testing_endpoints",
+    "ocr_common.web.testing_routes",
 ]
 
 

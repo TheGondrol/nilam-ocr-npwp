@@ -66,6 +66,25 @@ def get_results() -> StageResults | None:
     return build_stage_results(get_settings())
 
 
+# The testing endpoints (TESTING_ENDPOINTS): the same pipeline on the testing_* tables, without callbacks
+# (see ocr_common.testing_endpoints).
+
+
+@lru_cache
+def get_testing_pipeline() -> StagePipeline:
+    return build_stage_pipeline(get_settings(), stage=STAGE_SCORING, table_prefix=DB_TABLE_PREFIX, testing=True)
+
+
+@lru_cache
+def get_testing_relay() -> OutboxRelay | None:
+    return build_outbox_relay(get_settings(), get_testing_pipeline())
+
+
+@lru_cache
+def get_testing_results() -> StageResults | None:
+    return build_stage_results(get_settings(), testing=True)
+
+
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
@@ -86,6 +105,20 @@ def get_job_service() -> ScoringJobService:
     )
 
 
+def get_testing_job_service() -> ScoringJobService:
+    return ScoringJobService(
+        get_testing_pipeline(),
+        get_confidence_service(),
+        get_settings().field_confidence_threshold,
+        results=get_testing_results(),
+    )
+
+
 @lru_cache
 def get_reaper() -> StaleJobReaper | None:
     return build_stale_job_reaper(get_settings(), get_pipeline(), get_job_service().resume)
+
+
+@lru_cache
+def get_testing_reaper() -> StaleJobReaper | None:
+    return build_stale_job_reaper(get_settings(), get_testing_pipeline(), get_testing_job_service().resume)

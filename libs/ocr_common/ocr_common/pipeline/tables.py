@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ENUM
 
 from ocr_common.pipeline.database import JSON_TYPE, Base
+from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
 
@@ -72,10 +73,11 @@ OCR_NPWP_REQUESTS = Table(
 )
 
 
-def outbox_table(metadata: MetaData) -> Table:
-    """The `pipeline_outbox` table shared by the three stages."""
+def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
+    """The `pipeline_outbox` table shared by the three stages (`testing_pipeline_outbox` with the testing prefix)."""
+    name = f"{table_prefix}pipeline_outbox"
     return Table(
-        "pipeline_outbox",
+        name,
         metadata,
         Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
         Column("request_id", Text, nullable=False),
@@ -90,7 +92,7 @@ def outbox_table(metadata: MetaData) -> Table:
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
         Index(
-            "idx_pipeline_outbox_due",
+            f"idx_{name}_due",
             "stage",
             "next_attempt_at",
             "id",
@@ -98,12 +100,12 @@ def outbox_table(metadata: MetaData) -> Table:
             sqlite_where=text("failed_at IS NULL"),
         ),
         Index(
-            "idx_pipeline_outbox_dead",
+            f"idx_{name}_dead",
             "stage",
             postgresql_where=text("failed_at IS NOT NULL"),
             sqlite_where=text("failed_at IS NOT NULL"),
         ),
-        Index("idx_pipeline_outbox_request_id", "request_id"),
+        Index(f"idx_{name}_request_id", "request_id"),
     )
 
 
@@ -161,10 +163,12 @@ def orchestration_api_events_table(name: str) -> Table:
 
 
 def repo_metadata() -> MetaData:
-    """Every table this repository migrates, for Alembic's autogenerate and `alembic check`."""
+    """Every table this repository migrates, for Alembic's autogenerate and `alembic check`: the stage tables
+    and the outbox, again with the `testing_` prefix for the testing endpoints, and the legacy requests."""
     metadata = MetaData()
-    for table_prefix in PIPELINE_TABLE_PREFIXES:
-        pipeline_tables(table_prefix, metadata)
-    outbox_table(metadata)
+    for lane_prefix in ("", TESTING_TABLE_PREFIX):
+        for table_prefix in PIPELINE_TABLE_PREFIXES:
+            pipeline_tables(f"{lane_prefix}{table_prefix}", metadata)
+        outbox_table(metadata, lane_prefix)
     OCR_NPWP_REQUESTS.to_metadata(metadata)
     return metadata

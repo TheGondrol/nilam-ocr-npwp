@@ -11,13 +11,15 @@ from ocr_common.pipeline.tables import pipeline_tables
 class SqlStageResults:
     """`StageResults` on the shared database."""
 
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, table_prefix: str = ""):
+        """`table_prefix` is put before every stage's prefix: `testing_` reads `testing_ocr_results`, ..."""
         self._url = database_url
+        self._table_prefix = table_prefix
         self._tables: dict[str, Table] = {}
 
     def _results(self, stage_prefix: str) -> Table:
         if stage_prefix not in self._tables:
-            _, results = pipeline_tables(stage_prefix, MetaData())
+            _, results = pipeline_tables(f"{self._table_prefix}{stage_prefix}", MetaData())
             self._tables[stage_prefix] = results
         return self._tables[stage_prefix]
 

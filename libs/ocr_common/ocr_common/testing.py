@@ -9,6 +9,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from ocr_common.pipeline.callbacks import stage_callback_body
 from ocr_common.web.openapi import spec_text
 
 TEST_API_KEY = "test-key"
@@ -52,16 +53,12 @@ class RecordingCallback:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def notify(self, request_id, stage, status, *, result=None, error_message=None) -> bool:
-        """Record the callback."""
+    async def notify(self, request_id, stage, status, *, result=None, error_message=None, error_code=None) -> bool:
+        """Record the callback, in the body shape a stage sends (`error_code` only when set)."""
         self.calls.append(
-            {
-                "request_id": request_id,
-                "stage": stage,
-                "status": status,
-                "result": result,
-                "error_message": error_message,
-            }
+            stage_callback_body(
+                request_id, stage, status, result=result, error_message=error_message, error_code=error_code
+            )
         )
         return True
 

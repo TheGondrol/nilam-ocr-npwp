@@ -1949,6 +1949,16 @@ components:
           description: Why it failed; null when `status` is `DONE`
           examples:
           - null
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+          description: 'Only on a rejection: `DOWNSTREAM_VALIDATION_ERROR` when the stage rejected the
+            document (a rejecting check of the structuring rules; `error_message` is the Indonesian reason).
+            Absent when a stage broke'
+          examples:
+          - null
       type: object
       required:
       - request_id

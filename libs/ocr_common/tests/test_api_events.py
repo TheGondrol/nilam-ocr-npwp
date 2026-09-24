@@ -144,7 +144,9 @@ async def test_the_pipeline_records_a_rejection_instead_of_a_completion(tmp_path
 
         [row] = await _rows((repo, table))
         assert (row["status_code"], row["error_code"]) == (400, "DOWNSTREAM_VALIDATION_ERROR")
-        assert [(c["status"], c["error_message"]) for c in callback.calls] == [("FAILED", REASON)]
+        assert [(c["status"], c["error_message"], c["error_code"]) for c in callback.calls] == [
+            ("FAILED", REASON, "DOWNSTREAM_VALIDATION_ERROR")
+        ]
     finally:
         await database.dispose_engines()
 

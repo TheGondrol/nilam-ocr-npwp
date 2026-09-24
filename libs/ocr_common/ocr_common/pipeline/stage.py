@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from ocr_common.errors import InternalError, NotFound, ServiceError
+from ocr_common.npwp import REJECTED_CODE
 from ocr_common.pipeline import metrics
 from ocr_common.pipeline.callbacks import NextStage, StageCallback
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage, OutboxRelay, callback_message, handoff_message
@@ -48,11 +49,14 @@ class StagePipeline:
         outbox: Outbox | None = None,
         runner: BackgroundRunner | None = None,
         callbacks: bool = True,
+        metrics_stage: str | None = None,
     ):
         """`callbacks=False` when the orchestrator has no callback endpoint: no callback is sent or
         queued, and the outcome reaches the orchestrator through its table (ORCHESTRATION_OUTCOME_TABLE)
-        and GET .../jobs/{request_id}."""
+        and GET .../jobs/{request_id}. `metrics_stage` is the `stage` label of this pipeline's metrics,
+        `stage` by default; the testing pipeline uses its own so load tests stay out of the live numbers."""
         self.stage = stage
+        self.metrics_stage = metrics_stage or stage
         self.repository = repository
         self.callback = callback
         self.next_stage_client = next_stage_client
@@ -161,22 +165,22 @@ class StagePipeline:
                 rejection=reason,
                 messages=self._messages(request_id, final, payload, next_stage, reason),
             )
-            metrics.JOB_DURATION.labels(self.stage).observe(time.perf_counter() - started)
-            metrics.JOBS.labels(self.stage, metrics.OUTCOME_REJECTED if reason else metrics.OUTCOME_DONE).inc()
+            metrics.JOB_DURATION.labels(self.metrics_stage).observe(time.perf_counter() - started)
+            metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_REJECTED if reason else metrics.OUTCOME_DONE).inc()
         except asyncio.CancelledError:
             logger.warning("%s job %s interrupted by shutdown", self.stage, request_id)
-            metrics.JOBS.labels(self.stage, metrics.OUTCOME_INTERRUPTED).inc()
+            metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_INTERRUPTED).inc()
             await self._failed(
                 request_id, f"{self.stage} stage was interrupted by a service shutdown; submit the job again"
             )
             raise
         except ServiceError as exc:
-            metrics.JOBS.labels(self.stage, metrics.OUTCOME_FAILED).inc()
+            metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_FAILED).inc()
             await self._failed(request_id, exc.message)
             return
         except Exception:
             logger.exception("%s job %s crashed", self.stage, request_id)
-            metrics.JOBS.labels(self.stage, metrics.OUTCOME_CRASHED).inc()
+            metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_CRASHED).inc()
             await self._failed(request_id, f"Internal error in {self.stage} stage")
             return
 
@@ -185,7 +189,9 @@ class StagePipeline:
 
         try:
             if self.callbacks and reason is not None:
-                await self.callback.notify(request_id, self.stage, STATUS_FAILED, error_message=reason)
+                await self.callback.notify(
+                    request_id, self.stage, STATUS_FAILED, error_message=reason, error_code=REJECTED_CODE
+                )
             elif self.callbacks:
                 await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
             if payload is not None:
@@ -209,7 +215,9 @@ class StagePipeline:
             return []
         messages = []
         if self.callbacks and reason is not None:
-            messages.append(callback_message(request_id, self.stage, STATUS_FAILED, error_message=reason))
+            messages.append(
+                callback_message(request_id, self.stage, STATUS_FAILED, error_message=reason, error_code=REJECTED_CODE)
+            )
         elif self.callbacks:
             messages.append(callback_message(request_id, self.stage, STATUS_DONE, result=final))
         if payload is not None and next_stage is not None:

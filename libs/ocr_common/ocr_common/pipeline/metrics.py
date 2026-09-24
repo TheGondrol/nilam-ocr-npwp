@@ -37,9 +37,11 @@ OUTBOX_OLDEST_PENDING_SECONDS = Gauge(
 )
 
 
-def observe_outbox(stats: OutboxStats) -> None:
-    """Copies one reading of the backlog (taken by the relay while idle) into the gauges."""
-    OUTBOX_PENDING.labels(stats.stage).set(stats.pending)
-    OUTBOX_RETRYING.labels(stats.stage).set(stats.retrying)
-    OUTBOX_DEAD_LETTERS.labels(stats.stage).set(stats.dead_letters)
-    OUTBOX_OLDEST_PENDING_SECONDS.labels(stats.stage).set(stats.oldest_pending_seconds or 0.0)
+def observe_outbox(stats: OutboxStats, stage: str | None = None) -> None:
+    """Copies one reading of the backlog (taken by the relay while idle) into the gauges, labelled `stage`
+    (the relay's metrics label; `stats.stage` by default)."""
+    label = stage or stats.stage
+    OUTBOX_PENDING.labels(label).set(stats.pending)
+    OUTBOX_RETRYING.labels(label).set(stats.retrying)
+    OUTBOX_DEAD_LETTERS.labels(label).set(stats.dead_letters)
+    OUTBOX_OLDEST_PENDING_SECONDS.labels(label).set(stats.oldest_pending_seconds or 0.0)
