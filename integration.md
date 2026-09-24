@@ -481,7 +481,6 @@ permintaan supaya seragam.
 | `ocr_jobs`, `ocr_results` | status dan hasil OCR mentah |
 | `structuring_jobs`, `structuring_results` | field hasil penataan |
 | `scoring_jobs`, `scoring_results` | confidence akhir |
-| `ocr_npwp_requests` | sisa kontrak lama di bagian 11; tidak ditulis lagi |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
 di callback dan endpoint status. Kami cantumkan supaya jelas tabel mana milik kami, dan

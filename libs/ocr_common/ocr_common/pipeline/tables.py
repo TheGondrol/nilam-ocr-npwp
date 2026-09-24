@@ -7,7 +7,6 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
-    Double,
     ForeignKey,
     Index,
     Integer,
@@ -19,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ENUM
 
-from ocr_common.pipeline.database import JSON_TYPE, Base
+from ocr_common.pipeline.database import JSON_TYPE
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
@@ -52,27 +51,6 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
         Index(f"idx_{table_prefix}_results_ds", "ds"),
     )
     return jobs, results
-
-
-# Written only by ekstraksi's legacy synchronous contract, which has been removed; no service reads or
-# writes it any more. Kept so the migrations and the existing databases still match (see db/README.md).
-OCR_NPWP_REQUESTS = Table(
-    "ocr_npwp_requests",
-    Base.metadata,
-    Column("request_id", Text, primary_key=True),
-    Column("status", Text, nullable=False),
-    Column("result", JSON_TYPE, nullable=True),
-    Column("guardrails", Double, nullable=True),
-    Column("error_message", Text, nullable=True),
-    Column("file_name", Text, nullable=True),
-    Column("file_size_bytes", Integer, nullable=True),
-    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column("ds", Text, nullable=False),
-    Index("idx_ocr_npwp_requests_status", "status"),
-    Index("idx_ocr_npwp_requests_created_at", "created_at"),
-    Index("idx_ocr_npwp_requests_ds", "ds"),
-)
 
 
 def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
@@ -166,11 +144,10 @@ def orchestration_api_events_table(name: str) -> Table:
 
 def repo_metadata() -> MetaData:
     """Every table this repository migrates, for Alembic's autogenerate and `alembic check`: the stage tables
-    and the outbox, again with the `testing_` prefix for the testing endpoints, and the legacy requests."""
+    and the outbox, again with the `testing_` prefix for the testing endpoints."""
     metadata = MetaData()
     for lane_prefix in ("", TESTING_TABLE_PREFIX):
         for table_prefix in PIPELINE_TABLE_PREFIXES:
             pipeline_tables(f"{lane_prefix}{table_prefix}", metadata)
         outbox_table(metadata, lane_prefix)
-    OCR_NPWP_REQUESTS.to_metadata(metadata)
     return metadata
