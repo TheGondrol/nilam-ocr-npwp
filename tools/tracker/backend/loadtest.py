@@ -9,7 +9,7 @@ Kunci Redis:
   ocr:lt:<run>:cb               hash "<STAGE>:<STATUS>" -> jumlah callback yang tiba
   ocr:lt:<run>:done             hash request_id -> ts callback SCORING DONE diterima
   ocr:lt:<run>:failed           hash request_id -> "<STAGE>: <pesan>"
-  ocr:lt:<run>:rejected         hash request_id -> alasan penolakan (message jawaban 200 atau callback FAILED)
+  ocr:lt:<run>:rejected         hash request_id -> alasan penolakan (message jawaban 400 atau callback FAILED)
 """
 
 import asyncio
@@ -46,8 +46,8 @@ IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".pdf")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_RATE = 50.0
 MAX_DURATION = 1800
-# Ember jawaban pintu masuk. "rejected" = 200 dengan guardrails 1: dokumen ditolak model guardrails atau aturan
-# structuring, sebuah jawaban tetapi bukan hasil, jadi tidak dihitung bersama "200".
+# Ember jawaban pintu masuk. "rejected" = 400 DOWNSTREAM_VALIDATION_ERROR: dokumen ditolak model guardrails atau
+# aturan structuring, bukan request yang salah, jadi tidak dihitung bersama "4xx".
 BUCKETS = ("200", "rejected", "202", "4xx", "5xx", "timeout")
 # Callback FAILED dengan kode ini berarti aturan structuring menolak dokumen (ocr_common.npwp.REJECTED_CODE),
 # bukan tahap yang rusak.
@@ -262,7 +262,7 @@ async def record_callback(body: dict[str, Any], *, accepted: bool) -> None:
     if stage == "SCORING" and status == "DONE":
         await r.hset(_key(run, "done"), request_id, time.time())
     elif status == "FAILED" and body.get("error_code") == REJECTED_CODE:
-        # Penolakan yang datang setelah jawaban 202; kalau jawabannya sudah 200 ditolak, baris ini sama saja.
+        # Penolakan yang datang setelah jawaban 202; kalau jawabannya sudah 400 ditolak, baris ini sama saja.
         await r.hset(_key(run, "rejected"), request_id, body.get("error_message") or "-")
     elif status == "FAILED":
         await r.hset(_key(run, "failed"), request_id, f"{stage}: {body.get('error_message') or '-'}")
@@ -518,7 +518,7 @@ async def add_sample(run: str, request: Request) -> dict[str, Any]:
     sample = await request.json()
     r = ctx["redis"]
     status = int(sample.get("status") or 0)
-    rejected = status == 200 and sample.get("guardrails") == 1
+    rejected = status == 400 and sample.get("errors") == REJECTED_CODE
     bucket = (
         "rejected"
         if rejected

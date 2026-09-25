@@ -115,8 +115,8 @@ export default function () {
   } catch (_) {
     body = null
   }
-  // Dokumen yang ditolak (model guardrails atau aturan structuring) juga dijawab 200, dengan guardrails 1.
-  if (res.status === 200 && body && body.guardrails === 1) statusRejected.add(1)
+  // Dokumen yang ditolak (model guardrails atau aturan structuring): 400 DOWNSTREAM_VALIDATION_ERROR.
+  if (res.status === 400 && body && body.errors === 'DOWNSTREAM_VALIDATION_ERROR') statusRejected.add(1)
   else if (res.status === 200) status200.add(1)
   else if (res.status === 202) status202.add(1)
   else if (res.status === 0) statusTimeout.add(1)

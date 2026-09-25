@@ -12,7 +12,7 @@ Untuk satu request, dari kiri ke kanan di layar:
 
 1. **Jawaban orchestrator**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
    202 `processing` (batas tunggu habis, hasil menyusul lewat callback), 422 (tahap gagal),
-   200 `guardrails: 1` (ditolak guardrails atau aturan structuring), plus lamanya dibanding batas tunggu.
+   400 (ditolak guardrails), plus lamanya dibanding batas tunggu.
 2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `<tahap>_jobs` DONE,
    dibaca langsung dari PostgreSQL) dan *orkestrasi tahu* (callback diterima tracker, attempt ke-n).
    Selisih keduanya adalah tempat outbox bekerja.
@@ -118,9 +118,9 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 ## Load testing
 
 Menu **Load testing** menjalankan [../load-tester](../load-tester) (k6 di Docker) dan menghitung
-jawaban pintu masuk (200 selesai di dalam batas tunggu, 200 ditolak dengan `guardrails: 1`, 202 hasil
+jawaban pintu masuk (200 selesai di dalam batas tunggu, 400 ditolak `DOWNSTREAM_VALIDATION_ERROR`, 202 hasil
 menyusul, 4xx, 5xx, timeout) serta waktu end-to-end dari submit sampai callback SCORING DONE. Dokumen yang
-ditolak, baik lewat jawaban 200 maupun lewat callback FAILED `DOWNSTREAM_VALIDATION_ERROR` setelah 202,
+ditolak, baik lewat jawaban 400 maupun lewat callback FAILED `DOWNSTREAM_VALIDATION_ERROR` setelah 202,
 dihitung terpisah dari tuntas dan gagal, dengan daftar alasannya. Request uji berprefiks `LT_` dan
 tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NETWORK
 (ocr_default), K6_TARGET (http://orchestrator:8034), K6_TRACKER (http://host.docker.internal:PORT),

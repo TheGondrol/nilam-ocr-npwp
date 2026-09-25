@@ -13,7 +13,7 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 Redis Streams sebagai bus event: tiap request punya stream `ocr:events:<request_id>`.
 Setiap event punya `type`:
     client    upload diterima
-    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 422; ditolak = 200 guardrails 1) dan lamanya
+    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED), `source`: db | callback
     outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n dan jawaban tracker
@@ -316,20 +316,15 @@ def stop_watcher(request_id: str) -> None:
         task.cancel()
 
 
-def is_rejection(body: dict[str, Any]) -> bool:
-    """Dokumen ditolak (model guardrails atau aturan structuring): 200 dengan job_status failed dan guardrails 1."""
-    return body.get("job_status") == "failed" and body.get("guardrails") == 1
-
-
 async def rejected_by(request_id: str) -> str:
-    """Siapa yang menolak, dibaca dari GET status orchestrator: 404 = tidak ada tahap yang punya job (model
-    guardrails), 200 = tahap-tahap jalan lalu aturan structuring menolak."""
+    """Siapa yang menolak sebuah 400 DOWNSTREAM_VALIDATION_ERROR, dibaca dari GET status orchestrator:
+    404 = tidak ada tahap yang punya job (model guardrails), 400 = aturan structuring."""
     try:
         r = await http.get(f"{ORCHESTRATOR_URL}/v1/extract-ocr/{request_id}")
     except httpx.HTTPError as exc:
         log.warning("status %s: %s", request_id, exc)
         return "guardrails"
-    return "structuring" if r.status_code == 200 else "guardrails"
+    return "structuring" if r.status_code == 400 else "guardrails"
 
 
 async def poll_stages(request_id: str) -> None:
@@ -415,7 +410,7 @@ async def submit(
         raise HTTPException(status_code=503, detail="orchestrator service unavailable") from exc
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     rejector = None
-    if r.status_code == 200 and is_rejection(body):
+    if r.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR":
         rejector = await rejected_by(request_id)
     await emit(
         request_id,

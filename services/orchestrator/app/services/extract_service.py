@@ -1,4 +1,3 @@
-import logging
 import time
 from typing import Any
 
@@ -11,8 +10,6 @@ from app.clients.ekstraksi import EkstraksiJobClient
 from app.clients.guardrails import GuardrailsClient
 from app.config import Settings
 from app.services.pipeline_waiter import PipelineWait, WaitOutcome
-
-logger = logging.getLogger(__name__)
 
 
 class ExtractOcrService:
@@ -45,8 +42,6 @@ class ExtractOcrService:
         validate_image(content_type, content, self._settings)
         report = await self._guardrails.check(request_id, filename, content_type, content)
         if not report["passed"]:
-            # The response only says "guardrails rejected"; the model's reason stays in the log.
-            logger.info("answered 'guardrails rejected'; model reason: %s", report.get("reason"))
             return {**report, "job": None, "pipeline": None, "result": None}
 
         job = await self._ekstraksi.submit(
