@@ -258,7 +258,7 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
-                    guardrails: 1
+                    guardrails: 0
                     params:
                       nik: '3123456711950001'
                       refno: PK19039Y8U
@@ -283,7 +283,7 @@ paths:
                       refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
-            `guardrails: 0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            `guardrails: 1`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
             pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
             file / intake (empty, unsupported type, unreadable, `file_url` refused)'
           content:
@@ -298,7 +298,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 0
+                guardrails: 1
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -340,7 +340,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -455,7 +455,7 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
-                    guardrails: 1
+                    guardrails: 0
         '202':
           description: Still running
           content:
@@ -474,7 +474,7 @@ paths:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '400':
           description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`)'
+            1`)'
           content:
             application/json:
               example:
@@ -485,7 +485,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 0
+                guardrails: 1
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
@@ -523,7 +523,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
@@ -747,11 +747,11 @@ components:
             - 1
           - type: 'null'
           title: Guardrails
-          description: '1: the document passed the guardrails model (and the pipeline ran); 0: it was
+          description: '0: the document passed the guardrails model (and the pipeline ran); 1: it was
             rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
             was refused before the check'
           examples:
-          - 1
+          - 0
         params:
           title: Params
           description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not

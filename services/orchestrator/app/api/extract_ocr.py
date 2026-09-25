@@ -39,7 +39,7 @@ _COMPLETED = extract_body(
     COMPLETED_MESSAGE,
     data=_DATA,
     job_status="completed",
-    guardrails=1,
+    guardrails=0,
     errors=None,
     request_id=RID,
     document_type="npwp",
@@ -58,7 +58,7 @@ _REJECTED = extract_body(
     "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
     errors=REJECTED_CODE,
     job_status="failed",
-    guardrails=0,
+    guardrails=1,
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
@@ -68,7 +68,7 @@ _FAILED = extract_body(
     "No text lines to structure",
     errors="STRUCTURING_FAILED",
     job_status="failed",
-    guardrails=1,
+    guardrails=0,
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
@@ -153,7 +153,7 @@ def _parse_params(raw: str | None) -> Any:
         400: {
             "model": ExtractOcrResponse,
             "description": (
-                f"Rejected by the guardrails model or by the structuring rules (`{REJECTED_CODE}`, `guardrails: 0`), "
+                f"Rejected by the guardrails model or by the structuring rules (`{REJECTED_CODE}`, `guardrails: 1`), "
                 "unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
                 f"pages (`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
                 "`file_url` refused)"
@@ -288,7 +288,7 @@ async def extract_ocr(
         },
         400: {
             "model": ExtractOcrResponse,
-            "description": f"Rejected by the structuring rules (`{REJECTED_CODE}`, `guardrails: 0`)",
+            "description": f"Rejected by the structuring rules (`{REJECTED_CODE}`, `guardrails: 1`)",
             "content": {
                 "application/json": {
                     "example": {

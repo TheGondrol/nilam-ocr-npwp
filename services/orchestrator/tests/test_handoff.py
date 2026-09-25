@@ -94,7 +94,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["job_status"], body["guardrails"]) == (200, "completed", 1)
+    assert (body["status_code"], body["job_status"], body["guardrails"]) == (200, "completed", 0)
 
     [sent] = handler.requests
     assert sent.url.path == "/v1/ekstraksi/jobs"
@@ -119,7 +119,7 @@ def test_rejected_document_stops_here(client, auth, ekstraksi):
     assert (body["errors"], body["job_status"], body["guardrails"], body["data"]) == (
         "DOWNSTREAM_VALIDATION_ERROR",
         "failed",
-        0,
+        1,
         None,
     )
     assert body["message"].startswith("Document rejected by guardrails")
