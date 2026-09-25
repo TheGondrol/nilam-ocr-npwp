@@ -21,12 +21,17 @@ Build image service yang disebut, push ke Artifact Registry, lalu helm upgrade
 release $RELEASE dengan tag baru hanya untuk service tersebut. Tiap service adalah
 Deployment sendiri ($RELEASE-<service>), jadi hanya pod service itu yang diganti.
 
+Deploy (helm upgrade) hanya dari branch main yang sama persis dengan origin/main, tanpa
+perubahan yang belum di-commit. Branch lain hanya boleh --build-only atau --dry-run.
+
 Service: ${ALL_SERVICES[*]} (atau all)
 
 Opsi:
-  --tag TAG       pakai tag ini, bukan tag otomatis dari git (SHA pendek dari commit bersih)
+  --tag TAG       pakai tag ini, bukan tag otomatis dari git (SHA pendek dari commit bersih).
+                  Untuk deploy harus SHA commit di origin/main; commit selain HEAD hanya
+                  bersama --skip-build
   --allow-dirty   izinkan build dari working tree yang belum di-commit; tag menjadi
-                  <sha>-dirty-<waktu>. Hanya untuk uji coba di dev, bukan untuk produksi
+                  <sha>-dirty-<waktu>. Hanya bersama --build-only: image ini tidak bisa di-deploy
   --skip-build    tanpa build/push; tag harus sudah ada di registry
   --build-only    build + push saja, tanpa helm upgrade
   --dry-run       tampilkan diff manifest terhadap release yang berjalan, tanpa apply
@@ -88,10 +93,31 @@ fi
 
 cd "$ROOT"
 
+# Deploy hanya dari main: yang jalan di cluster selalu commit yang sudah ada di origin/main, bukan
+# branch fitur atau perubahan lokal. --build-only dan --dry-run tidak mengubah cluster, jadi boleh
+# dari branch mana pun. Hotfix pun di-commit dan di-push ke main dulu, baru di-deploy.
+if [[ $BUILD_ONLY -eq 0 && $DRY_RUN -eq 0 ]]; then
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  [[ "$BRANCH" == main ]] \
+    || die "deploy hanya boleh dari branch main (sekarang: $BRANCH). Merge dulu ke main, lalu: git checkout main && git pull --ff-only"
+  git fetch --quiet origin main || die "git fetch origin main gagal"
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+    || die "main lokal ($(git rev-parse --short HEAD)) tidak sama dengan origin/main ($(git rev-parse --short origin/main)): pull commit yang belum ada di lokal, push commit lokal yang belum ada di origin."
+  [[ -z "$(git status --porcelain -- libs services db deploy/helm)" ]] \
+    || die "ada perubahan yang belum di-commit di libs/, services/, db/, atau deploy/helm/: yang di-deploy harus persis isi origin/main (--allow-dirty hanya bersama --build-only)."
+  if [[ -n "$TAG" ]]; then
+    TAG_COMMIT="$(git rev-parse --verify --quiet "${TAG%%-*}^{commit}" || true)"
+    [[ "$TAG" != *-dirty* && -n "$TAG_COMMIT" ]] && git merge-base --is-ancestor "$TAG_COMMIT" origin/main \
+      || die "tag $TAG bukan SHA commit di origin/main; hanya image dari main yang boleh di-deploy."
+    [[ $SKIP_BUILD -eq 1 || "$TAG_COMMIT" == "$(git rev-parse HEAD)" ]] \
+      || die "build baru selalu dari HEAD ($(git rev-parse --short HEAD)); tag commit lain hanya bersama --skip-build."
+  fi
+fi
+
 if [[ -z "$TAG" ]]; then
   TAG="$(git rev-parse --short HEAD)"
   if [[ -n "$(git status --porcelain -- libs services db)" ]]; then
-    [[ $ALLOW_DIRTY -eq 1 ]] || die "ada perubahan di libs/, services/, atau db/ yang belum di-commit: tag image harus SHA dari commit bersih supaya bisa dilacak dan dibangun ulang. Commit dulu, atau pakai --allow-dirty untuk uji coba."
+    [[ $ALLOW_DIRTY -eq 1 ]] || die "ada perubahan di libs/, services/, atau db/ yang belum di-commit: tag image harus SHA dari commit bersih supaya bisa dilacak dan dibangun ulang. Commit dulu, atau pakai --allow-dirty --build-only untuk uji coba."
     TAG="$TAG-dirty-$(date +%Y%m%d%H%M%S)"
   fi
 fi

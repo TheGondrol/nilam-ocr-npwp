@@ -132,9 +132,16 @@ deploy/helm/deploy.sh ekstraksi structuring scoring
 deploy/helm/deploy.sh all
 ```
 
+**Deploy hanya dari `main`.** Script menolak `helm upgrade` kalau checkout bukan branch `main`,
+berbeda dengan `origin/main` (belum di-pull atau ada commit yang belum di-push), atau ada perubahan
+yang belum di-commit di `libs/`, `services/`, `db/`, atau `deploy/helm/`. Jadi yang jalan di cluster
+selalu commit yang sudah ada di `main`; hotfix pun di-commit dan di-push ke `main` dulu. `--tag` untuk
+deploy harus SHA commit di `origin/main` (commit selain HEAD hanya bersama `--skip-build`, misalnya
+kembali ke versi lama). Dari branch lain hanya `--build-only` dan `--dry-run` yang jalan.
+
 Script membangun image service yang disebut, mendorongnya ke Artifact Registry dengan tag
-`git rev-parse --short HEAD` (ditambah `-dirty-<waktu>` kalau `libs/` atau `services/` punya
-perubahan yang belum di-commit), lalu menjalankan `helm upgrade --reset-then-reuse-values
+`git rev-parse --short HEAD` (`--build-only --allow-dirty` dari working tree yang belum di-commit
+menambah `-dirty-<waktu>`; image seperti itu tidak bisa di-deploy), lalu menjalankan `helm upgrade --reset-then-reuse-values
 -f values-ddb-dev.yaml --set services.<nama>.image.tag=<tag>`. Service lain tetap di tag lamanya
 dan pod-nya tidak disentuh: hanya Deployment service yang disebut yang rolling update. Upgrade
 menunggu pod siap dan otomatis rollback kalau gagal.
