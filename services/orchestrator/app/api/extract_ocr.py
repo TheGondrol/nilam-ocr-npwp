@@ -28,6 +28,8 @@ router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
+SKIP_NOT_ALLOWED_CODE = "GUARDRAILS_SKIP_NOT_ALLOWED"
+SKIP_NOT_ALLOWED_MESSAGE = "skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off"
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -73,15 +75,22 @@ _FAILED = extract_body(
     document_type="npwp",
     params=_PARAMS,
 )
+_SKIP_NOT_ALLOWED = extract_body(
+    403,
+    SKIP_NOT_ALLOWED_MESSAGE,
+    errors=SKIP_NOT_ALLOWED_CODE,
+    request_id=RID,
+    document_type="npwp",
+)
 
 _CONTRACT_TABLE = (
     "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |\n"
     "|---|---|---|---|---|---|\n"
-    "| Finished | 200 | `completed` | the fields | `1` | null |\n"
+    "| Finished | 200 | `completed` | the fields | `0` | null |\n"
     "| Still running | 202 | `processing` | null | null | null |\n"
-    f"| Rejected by the guardrails model | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
-    f"| Rejected by the structuring rules | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
-    "| A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
+    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
+    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
+    "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` |\n\n"
 )
 
@@ -126,6 +135,11 @@ def _parse_params(raw: str | None) -> Any:
         "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
         "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
+        "**Skipping guardrails.** `skip_guardrails=true` leaves the guardrails model out for this one request, "
+        "when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise `403` "
+        f"`{SKIP_NOT_ALLOWED_CODE}` and nothing runs). The file checks above still run, and the structuring rules "
+        "still reject, so `guardrails: 1` can then only come from them. The trust model gets no guardrails "
+        "probability and works with that input missing.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
         "(e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -161,6 +175,14 @@ def _parse_params(raw: str | None) -> Any:
             "content": {"application/json": {"example": _REJECTED}},
         },
         401: UNAUTHORIZED,
+        403: {
+            "model": ExtractOcrResponse,
+            "description": (
+                f"`skip_guardrails=true` while `GUARDRAILS_SKIP_ALLOWED` is off (`{SKIP_NOT_ALLOWED_CODE}`); "
+                "nothing was started"
+            ),
+            "content": {"application/json": {"example": _SKIP_NOT_ALLOWED}},
+        },
         413: error(
             413,
             "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started",
@@ -208,6 +230,14 @@ async def extract_ocr(
     ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
+    skip_guardrails: bool = Form(
+        False,
+        description=(
+            "`true` leaves the guardrails model out for this request; only when this service allows it "
+            f"(`GUARDRAILS_SKIP_ALLOWED`), else `403` `{SKIP_NOT_ALLOWED_CODE}`. The file checks still run and the "
+            "structuring rules still reject"
+        ),
+    ),
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
 ):
@@ -232,6 +262,15 @@ async def extract_ocr(
             request_id=request_id,
             document_type=document_type,
         )
+    if skip_guardrails and not settings.guardrails_skip_allowed:
+        response.status_code = 403
+        return extract_body(
+            403,
+            SKIP_NOT_ALLOWED_MESSAGE,
+            errors=SKIP_NOT_ALLOWED_CODE,
+            request_id=request_id,
+            document_type=document_type,
+        )
 
     # The central orchestrator's request_id becomes the id of this request: in the envelope of an error raised
     # below (413, a bad file, an unreachable stage), in the X-Request-ID response header and outbound calls, and
@@ -240,7 +279,14 @@ async def extract_ocr(
     try:
         content, filename, content_type = await read_image(request, file, file_url)
         outcome = await service.submit(
-            request_id, document_type, filename, content_type, content, received_at=received_at, file_url=file_url
+            request_id,
+            document_type,
+            filename,
+            content_type,
+            content,
+            received_at=received_at,
+            file_url=file_url,
+            skip_guardrails=skip_guardrails,
         )
     finally:
         reset_request_id(token)

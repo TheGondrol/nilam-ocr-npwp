@@ -82,6 +82,24 @@ def test_testing_endpoint_refuses_a_run_id_that_would_garble_the_request_id(test
     assert response.json()["errors"] == "VALIDATION_ERROR"
 
 
+def test_testing_endpoint_takes_skip_guardrails_like_the_live_one(auth):
+    guardrails, ekstraksi, waiter = StubGuardrails(), StubEkstraksi(), StubWaiter()
+    app = create_app(settings=get_settings(), title="Orchestrator", description="testing", routers=testing.routers)
+    app.dependency_overrides[get_guardrails_client] = lambda: guardrails
+    app.dependency_overrides[get_testing_ekstraksi_client] = lambda: ekstraksi
+    app.dependency_overrides[get_testing_pipeline_waiter] = lambda: waiter
+    client = make_client(app)
+
+    refused = _submit(client, auth, "/v1/extract-ocr-test", skip_guardrails="true")
+    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
+    skipped = _submit(client, auth, "/v1/extract-ocr-test", skip_guardrails="true")
+
+    assert refused.status_code == 403
+    assert skipped.status_code == 200
+    assert guardrails.checked == []
+    assert [job["guardrails"] for job in ekstraksi.submitted] == [None]
+
+
 def test_live_endpoint_keeps_the_callers_request_id(client, auth):
     assert _submit(client, auth, "/v1/extract-ocr").json()["request_id"] == RID
 

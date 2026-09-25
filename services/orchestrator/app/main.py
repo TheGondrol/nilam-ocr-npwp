@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,6 +20,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.guardrails_skip_allowed:
+        logging.getLogger(__name__).warning(
+            "GUARDRAILS_SKIP_ALLOWED=true: a request with skip_guardrails=true enters the pipeline without the "
+            "guardrails model"
+        )
     yield
     # The clients are built on the first request that needs them; close only those that exist.
     for get_client in (get_guardrails_client, get_ekstraksi_client, get_testing_ekstraksi_client):

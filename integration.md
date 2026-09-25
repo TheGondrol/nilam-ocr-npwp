@@ -147,6 +147,21 @@ kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, d
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
+| `skip_guardrails` | tidak | boolean, default `false`. `true` = lewati model guardrails untuk request ini (lihat di bawah) |
+
+**Melewati guardrails.** Dengan `skip_guardrails=true`, dokumen tidak dinilai model guardrails dan
+langsung masuk pipeline. Ini hanya berlaku kalau service mengizinkannya (`GUARDRAILS_SKIP_ALLOWED`,
+nyala di dev). Kalau tidak diizinkan, jawabannya **403** `GUARDRAILS_SKIP_NOT_ALLOWED` dan tidak ada
+yang dijalankan. Yang tetap berlaku:
+
+- pengecekan file: tipe, 2,5 MB (413), dan 2 halaman (400);
+- aturan structuring: dokumen blur / blank, kode wilayah salah, dan seterusnya tetap dijawab 400
+  `DOWNSTREAM_VALIDATION_ERROR` dengan `guardrails: 1`. Nilai `guardrails: 1` dalam kasus ini hanya
+  bisa berasal dari aturan structuring.
+
+Model guardrails hanya bisa dilewati utuh: model itu hanya menilai diterima / ditolak, tanpa
+pengecekan terpisah seperti blur atau terpotong. Trust model bekerja tanpa probabilitas guardrails
+(input itu diisi seperti data yang hilang), jadi confidence bisa sedikit berbeda.
 
 `file_url` diunduh sekali di panggilan ini untuk penilaian guardrails, lalu **URL-nya** (bukan isi
 file) diteruskan ke tahap OCR, yang mengunduhnya lagi, juga saat menjalankan ulang job yang
@@ -228,7 +243,8 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
-| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
+| 403 | `GUARDRAILS_SKIP_NOT_ALLOWED` | `skip_guardrails=true`, tetapi service tidak mengizinkannya | tidak |
+| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, `skip_guardrails` bukan boolean, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
@@ -477,6 +493,7 @@ penjelasan yang aman untuk di-log.
 | 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
 | 413 | file lebih dari 2,5 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
+| 403 | `skip_guardrails=true` tanpa izin di service (`GUARDRAILS_SKIP_NOT_ALLOWED`) |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |

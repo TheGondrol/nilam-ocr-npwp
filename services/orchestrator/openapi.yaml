@@ -179,17 +179,17 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
 
@@ -210,6 +210,13 @@ paths:
         **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
         (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` (2) pages answers `400`,
         both with an Indonesian `message` the client can show as is.
+
+
+        **Skipping guardrails.** `skip_guardrails=true` leaves the guardrails model out for this one request,
+        when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise `403` `GUARDRAILS_SKIP_NOT_ALLOWED`
+        and nothing runs). The file checks above still run, and the structuring rules still reject, so
+        `guardrails: 1` can then only come from them. The trust model gets no guardrails probability and
+        works with that input missing.
 
 
         On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
@@ -313,6 +320,20 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
+        '403':
+          description: '`skip_guardrails=true` while `GUARDRAILS_SKIP_ALLOWED` is off (`GUARDRAILS_SKIP_NOT_ALLOWED`);
+            nothing was started'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              example:
+                status_code: 403
+                status_desc: Forbidden
+                message: 'skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off'
+                errors: GUARDRAILS_SKIP_NOT_ALLOWED
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
           content:
@@ -394,17 +415,17 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
 
@@ -602,6 +623,13 @@ components:
           description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
             Omit when uploading file. The host must be listed in the service's `FILE_URL_ALLOWED_HOSTS`,
             or resolve to a public address when that is empty; redirects are not followed.
+        skip_guardrails:
+          type: boolean
+          title: Skip Guardrails
+          description: '`true` leaves the guardrails model out for this request; only when this service
+            allows it (`GUARDRAILS_SKIP_ALLOWED`), else `403` `GUARDRAILS_SKIP_NOT_ALLOWED`. The file
+            checks still run and the structuring rules still reject'
+          default: false
       type: object
       required:
       - request_id

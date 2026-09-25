@@ -1,8 +1,11 @@
+import pytest
+
 from ocr_common.errors import ServiceError, UpstreamUnavailable
 from ocr_common.testing import image_upload
 
 from app.config import get_settings
 from app.main import app
+from app.services.pipeline_waiter import STATUS_REJECTED, WaitOutcome
 from tests.conftest import JPEG
 
 TOO_MANY_PAGES = "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
@@ -178,6 +181,93 @@ def test_guardrails_unreachable_is_503_and_nothing_starts(client, auth, stub_gua
 
     assert response.status_code == 503
     assert response.json()["message"] == "guardrails service is unavailable"
+    assert stub_ekstraksi.submitted == []
+
+
+@pytest.fixture
+def settings_override():
+    def install(**update):
+        app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update=update)
+
+    yield install
+    app.dependency_overrides.pop(get_settings, None)
+
+
+def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_ekstraksi):
+    response = _submit(client, auth, skip_guardrails="true")
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "status_code": 403,
+        "status_desc": "Forbidden",
+        "message": "skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off",
+        "data": None,
+        "errors": "GUARDRAILS_SKIP_NOT_ALLOWED",
+        "request_id": "OCR_1",
+        "document_type": "npwp",
+        "job_status": None,
+        "guardrails": None,
+        "params": None,
+    }
+    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
+
+
+def test_skip_guardrails_false_is_never_refused(client, auth, stub_guardrails):
+    response = _submit(client, auth, skip_guardrails="false")
+
+    assert response.status_code == 200
+    assert len(stub_guardrails.checked) == 1
+
+
+def test_skip_guardrails_must_be_a_boolean(client, auth, stub_guardrails):
+    response = _submit(client, auth, skip_guardrails="maybe")
+
+    assert response.status_code == 422
+    assert response.json()["errors"] == "VALIDATION_ERROR"
+    assert stub_guardrails.checked == []
+
+
+def test_skipped_guardrails_hand_the_document_on_without_a_report(
+    client, auth, settings_override, stub_guardrails, stub_ekstraksi
+):
+    settings_override(guardrails_skip_allowed=True)
+
+    # A file name the guardrails model rejects: with the check skipped it never gets to judge it.
+    response = _submit(client, auth, filename="notnpwp.jpg", skip_guardrails="true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert stub_guardrails.checked == []
+    [handed] = stub_ekstraksi.submitted
+    assert handed["guardrails"] is None
+
+
+def test_with_guardrails_skipped_the_structuring_rules_still_reject(client, auth, settings_override, stub_waiter):
+    settings_override(guardrails_skip_allowed=True)
+    stub_waiter.outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, "dokumen blur / blank")
+
+    response = _submit(client, auth, skip_guardrails="true")
+
+    assert response.status_code == 400
+    body = response.json()
+    assert (body["message"], body["errors"], body["guardrails"]) == (
+        "dokumen blur / blank",
+        "DOWNSTREAM_VALIDATION_ERROR",
+        1,
+    )
+
+
+def test_with_guardrails_skipped_the_file_checks_still_run(client, auth, settings_override, stub_ekstraksi):
+    settings_override(guardrails_skip_allowed=True)
+    pages = _submit(
+        client, auth, filename="scan.pdf", content=_pdf(3), content_type="application/pdf", skip_guardrails="true"
+    )
+    settings_override(guardrails_skip_allowed=True, max_upload_bytes=10)
+    size = _submit(client, auth, skip_guardrails="true")
+
+    assert (pages.status_code, pages.json()["message"]) == (400, TOO_MANY_PAGES)
+    assert size.status_code == 413
     assert stub_ekstraksi.submitted == []
 
 
