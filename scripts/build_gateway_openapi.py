@@ -51,7 +51,7 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your `request_id` and the
    document (`file` or `file_url`, optional `params`). It answers in the central orchestrator's
    `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
-   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`;
+   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 1`;
      nothing runs and no callback follows.
    - passed -> the document goes on to the OCR stage and the service waits for the pipeline for up to
      `PIPELINE_WAIT_SECONDS` (15 s by default, counted from the request's arrival). Finished in time ->

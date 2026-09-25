@@ -55,7 +55,7 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         "request_id": RID,
         "document_type": "npwp",
         "job_status": "completed",
-        "guardrails": 1,
+        "guardrails": 0,
         "params": None,
     }
     assert stub_waiter.snapshots == [RID]
@@ -94,7 +94,7 @@ def test_rejection_by_the_structuring_rules_is_400(client, auth, stub_waiter):
         400,
         "DOWNSTREAM_VALIDATION_ERROR",
         reason,
-        0,
+        1,
     )
 
 

@@ -138,7 +138,7 @@ class ApiEventOutcome:
         """A COMPLETED row with the `extract-ocr` data; nothing when `data` is None (not the last stage)."""
         if data is None:
             return
-        result = {"document_type": self._document_type, **data, "guardrails": 1}
+        result = {"document_type": self._document_type, **data, "guardrails": 0}
         await self._append(conn, request_id, 200, STATUS_COMPLETED, self._stage, result=result)
 
     async def failed(

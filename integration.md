@@ -71,11 +71,11 @@ kalian. Orchestrator memeriksa file, meminta guardrails menilainya, lalu menungg
     POST :8034/v1/extract-ocr
       file > 2,5 MB              -> 413  message "Ukuran dokumen melebihi batas 2,5 MB, ..." (sebelum model)
       PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
-      ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
+      ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 1
                                          tidak ada yang jalan, tidak ada callback
-      ditolak aturan structuring -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0,
+      ditolak aturan structuring -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 1,
                                          message = alasan penolakan dari aturan ML; scoring tidak jalan
-      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 1
+      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 0
       lolos, gagal tepat waktu   -> 422  job_status = failed,
                                          errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
       lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
@@ -168,7 +168,7 @@ Selesai dalam waktu tunggu, **200**:
       "request_id": "REQ_001",
       "document_type": "npwp",
       "job_status": "completed",
-      "guardrails": 1,
+      "guardrails": 0,
       "params": {"nik": "3123456711950001", "refno": "PK19039Y8U"}
     }
 
@@ -194,7 +194,7 @@ Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
     {"status_code": 400, "status_desc": "Bad Request",
      "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
 
 Ditolak aturan structuring ML engineer (23 Sep 2026), juga **400** dengan bentuk yang sama;
 `message` adalah alasan penolakan pertama dari aturan itu (bukan alasan flag yang ditoleransi),
@@ -203,7 +203,7 @@ dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan ter
     {"status_code": 400, "status_desc": "Bad Request",
      "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
 
 Alasan yang menolak: dokumen blur / blank, bukan format standar NPWP, dokumen lain terdeteksi,
 screenshot cek NPWP online, jumlah halaman melebihi batas, serta kode provinsi, kecamatan, tanggal
@@ -218,7 +218,7 @@ callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
     {"status_code": 422, "status_desc": "Unprocessable Entity",
      "message": "ekstraksi OCR model is unavailable",
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
+     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
 
 Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lain):
 
@@ -251,7 +251,7 @@ tidak datang.
 |---|---|---|---|
 | selesai | 200 | `completed` + `data` | null |
 | masih berjalan | 202 | `processing` | null |
-| ditolak aturan structuring | 400 | `failed`, `guardrails: 0` | `DOWNSTREAM_VALIDATION_ERROR` |
+| ditolak aturan structuring | 400 | `failed`, `guardrails: 1` | `DOWNSTREAM_VALIDATION_ERROR` |
 | satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
 | tidak dikenal | 404 | – | = `message` |
 

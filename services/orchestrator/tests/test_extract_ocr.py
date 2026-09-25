@@ -39,7 +39,7 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         "request_id": "OCR_1",
         "document_type": "npwp",
         "job_status": "completed",
-        "guardrails": 1,
+        "guardrails": 0,
         "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
@@ -60,7 +60,7 @@ def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth
         "request_id": "OCR_1",
         "document_type": "npwp",
         "job_status": "failed",
-        "guardrails": 0,
+        "guardrails": 1,
         "params": None,
     }
     assert stub_ekstraksi.submitted == [] and stub_waiter.calls == []
