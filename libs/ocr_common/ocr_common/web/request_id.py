@@ -33,6 +33,14 @@ def reset_request_id(token: contextvars.Token) -> None:
     _request_id.reset(token)
 
 
+def adopt_request_id(request: Request, request_id: str) -> contextvars.Token:
+    """Makes `request_id`, sent in the body (e.g. the form field of `extract-ocr`), the id of this request: the
+    error envelope of anything raised afterwards, the `X-Request-ID` response header, log lines and outbound
+    calls all carry it instead of the header's or a generated one. Pass the token to `reset_request_id`."""
+    request.state.request_id = request_id
+    return bind_request_id(request_id)
+
+
 def get_request_id(request: Request) -> str | None:
     """The request_id to put in a response envelope: the path parameter when the route has one, else
     the one the middleware bound (header or generated)."""
@@ -50,5 +58,6 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         finally:
             reset_request_id(token)
-        response.headers[REQUEST_ID_HEADER] = request_id
+        # The handler may have adopted the caller's own request_id (adopt_request_id); echo that one.
+        response.headers[REQUEST_ID_HEADER] = getattr(request.state, "request_id", None) or request_id
         return response

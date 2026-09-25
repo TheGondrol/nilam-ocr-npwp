@@ -1,12 +1,13 @@
 import pytest
-from fastapi import APIRouter, Depends, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from fastapi.testclient import TestClient
 
 from ocr_common.config import BaseServiceSettings
+from ocr_common.errors import BadRequest
 from ocr_common.web.app import create_app
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
-from ocr_common.web.request_id import get_request_id
+from ocr_common.web.request_id import REQUEST_ID_HEADER, adopt_request_id, get_request_id, reset_request_id
 from ocr_common.web.security import verify_api_key
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -152,3 +153,27 @@ def test_every_accepted_key_opens_the_door_during_a_rotation():
     for key in ("lama", "baru"):
         assert rotating_client.post("/v1/json", json={}, headers={"X-API-Key": key}).status_code == 200
     assert rotating_client.post("/v1/json", json={}, headers={"X-API-Key": "k"}).status_code == 401
+
+
+adopting = APIRouter()
+
+
+@adopting.post("/v1/adopt")
+async def adopt(request: Request, request_id: str = Form(...)):
+    token = adopt_request_id(request, request_id)
+    try:
+        raise BadRequest("Uploaded file is empty")
+    finally:
+        reset_request_id(token)
+
+
+def test_an_adopted_request_id_is_in_the_error_envelope_and_the_response_header():
+    """An id sent in the body, not in the header, replaces the middleware's once the handler adopts it."""
+    adopting_app = create_app(settings=settings, title="Demo", description="demo", routers=[adopting])
+    response = TestClient(adopting_app, raise_server_exceptions=False).post(
+        "/v1/adopt", data={"request_id": "OCR_from_form"}, headers={REQUEST_ID_HEADER: "REQ_from_header"}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["request_id"] == "OCR_from_form"
+    assert response.headers[REQUEST_ID_HEADER] == "OCR_from_form"
