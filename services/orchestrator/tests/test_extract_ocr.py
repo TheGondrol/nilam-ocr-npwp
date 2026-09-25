@@ -39,7 +39,7 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         "request_id": "OCR_1",
         "document_type": "npwp",
         "job_status": "completed",
-        "guardrails": 0,
+        "guardrails": 1,
         "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
@@ -47,27 +47,23 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
     assert handed["guardrails"]["passed"] is True
 
 
-def test_rejection_by_the_guardrails_model_is_200_with_guardrails_1(client, auth, stub_ekstraksi, stub_waiter, caplog):
-    """The central orchestrator's contract (25 Sep 2026): a rejected document is an answer, not an error."""
-    with caplog.at_level("INFO", logger="app.services.extract_service"):
-        response = _submit(client, auth, filename="notnpwp.jpg", params='{"refno": "PK1"}')
+def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth, stub_ekstraksi, stub_waiter):
+    response = _submit(client, auth, filename="notnpwp.jpg")
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert response.json() == {
-        "status_code": 200,
-        "status_desc": "OK",
-        "message": "guardrails rejected",
+        "status_code": 400,
+        "status_desc": "Bad Request",
+        "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
         "data": None,
-        "errors": None,
+        "errors": "DOWNSTREAM_VALIDATION_ERROR",
         "request_id": "OCR_1",
         "document_type": "npwp",
         "job_status": "failed",
-        "guardrails": 1,
-        "params": {"refno": "PK1"},
+        "guardrails": 0,
+        "params": None,
     }
     assert stub_ekstraksi.submitted == [] and stub_waiter.calls == []
-    # The model's reason is not in the response any more; it is in the log, under the request's id.
-    assert "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)" in caplog.text
 
 
 def test_request_id_is_required(client, auth):

@@ -235,9 +235,8 @@ def guardrails_reject(client: httpx.Client) -> bool:
     status = _status(client, request_id)
     print(f"  GET status -> {status.status_code} (tidak ada tahap yang jalan)")
     return (
-        response.status_code == 200
-        and body.get("guardrails") == 1
-        and body.get("message") == "guardrails rejected"
+        response.status_code == 400
+        and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR"
         and status.status_code == 404
     )
 

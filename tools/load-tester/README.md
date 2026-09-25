@@ -70,8 +70,8 @@ skrip; `LT_...` dari skrip diabaikan. Semua request satu run: `request_id LIKE '
 ## Membaca hasilnya
 
 - **200 / ditolak / 202 / 4xx / 5xx / timeout**: campuran jawaban pintu masuk. Bergesernya 200 ke 202
-  adalah tanda pertama jenuh; 5xx dan timeout tanda kedua. Dokumen yang ditolak juga dijawab 200, dengan
-  `guardrails: 1`, jadi dihitung sendiri sebagai **ditolak**. Banyak penolakan berarti file ujinya yang
+  adalah tanda pertama jenuh; 5xx dan timeout tanda kedua. Dokumen yang ditolak dijawab 400
+  `DOWNSTREAM_VALIDATION_ERROR`, dan dihitung sendiri sebagai **ditolak**, bukan 4xx. Banyak penolakan berarti file ujinya yang
   ditolak model atau aturan ML (lihat alasannya di tracker), bukan tanda beban.
 - **p50 / p95 extract-ocr**: lama koneksi ditahan orchestrator. Mendekati `PIPELINE_WAIT_SECONDS`
   berarti hampir semua jawaban 202.

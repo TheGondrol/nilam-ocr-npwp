@@ -26,7 +26,7 @@ mati). Yang ditulis: `processing` + tahapnya saat job diklaim, `completed` + `re
 oleh scoring, dan `failed` + `error_code` saat gagal. **Kontraknya adalah kolom `downstream_status`**:
 Orkestrasi hanya membaca kolom itu (`processing` | `completed` | `failed`) untuk menjawab polling
 client; kolom lain (`downstream_stage`, `status_code`, `error_code`, `error_message`, `result_data`)
-adalah data pendamping. Request yang ditolak model guardrails tidak pernah menulis kolom ini,
+adalah data pendamping. Request yang ditolak guardrails (400) tidak pernah menulis kolom ini,
 karena tidak ada tahap yang berjalan; Orkestrasi menjawab client dari respons sinkron itu. Tabel itu **milik orkestrasi**, jadi
 kolomnya mereka yang menambahkan; DDL yang dibutuhkan (termasuk `request_id` unik) ada di
 [external/orchestration_extract_ocr.sql](external/orchestration_extract_ocr.sql) dan bisa

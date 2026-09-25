@@ -46,7 +46,7 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 1, None)
     assert body["data"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
@@ -79,26 +79,26 @@ def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub
     assert response.status_code == 422
     body = response.json()
     assert (body["errors"], body["message"]) == ("OCR_FAILED", "ekstraksi OCR model is unavailable")
-    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 0)
+    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 1)
 
 
-def test_rejection_by_the_structuring_rules_is_200_with_their_reason(client, auth, stub_waiter):
+def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, auth, stub_waiter):
     reason = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
     stub_waiter.outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, reason)
 
     response = _submit(client, auth)
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     body = response.json()
-    assert (body["errors"], body["message"]) == (None, reason)
-    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 1)
+    assert (body["errors"], body["message"]) == ("DOWNSTREAM_VALIDATION_ERROR", reason)
+    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 0)
 
 
 def test_rejected_document_answers_at_once_without_waiting(client, auth, stub_waiter):
     response = _submit(client, auth, filename="notnpwp.jpg")
 
-    assert response.status_code == 200
-    assert (response.json()["guardrails"], response.json()["message"]) == (1, "guardrails rejected")
+    assert response.status_code == 400
+    assert response.json()["errors"] == "DOWNSTREAM_VALIDATION_ERROR"
     assert stub_waiter.calls == []
 
 
