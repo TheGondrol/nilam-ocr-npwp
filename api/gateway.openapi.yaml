@@ -7,23 +7,26 @@ info:
     \n## The flow\n\n1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your\
     \ `request_id` and the\n   document (`file` or `file_url`, optional `params`). It answers in the central\
     \ orchestrator's\n   `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):\n   -\
-    \ rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails:\
-    \ 0`;\n     nothing runs and no callback follows.\n   - passed -> the document goes on to the OCR\
-    \ stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS` (15 s by default,\
-    \ counted from the request's arrival). Finished in time ->\n     **200**, `job_status: completed`,\
-    \ `data` = `nomor_npwp` and `nama` as `{value, confidence}` with\n     confidence 0/1; a stage failed\
-    \ -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still\n     running -> **202**,\
-    \ `job_status: processing`. Give this call an HTTP timeout well above the wait.\n2. **Receive callbacks**\
-    \ (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The\n   `SCORING` / `DONE`\
-    \ callback carries the **final result** (richer than `data`: OCR scores, trust\n   probabilities,\
-    \ the guardrails report). A `FAILED` callback of any stage ends the request.\n3. **Read the status\
-    \ when needed** with `GET /v1/extract-ocr/{request_id}` on the same service: the same\n   contract,\
-    \ without waiting.\n\nTime a request out on your side: a stage that crashes mid-job cannot send its\
-    \ callback.\n\n## What the result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`, `nama_badan`.\
-    \ `scoring` holds `npwp_confidence` and\n`name_confidence`: the probability, from the ML team's trust\
-    \ model, that each extracted field is\ncorrect. There is **no document-level score and no approve\
-    \ / reject decision**; thresholds are yours.\n\n## Addresses\n\nThe orchestrator is the only service\
-    \ you call. From another namespace in GKE:\n`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034`\
+    \ rejected by the guardrails model -> **200**, `job_status: failed`, `guardrails: 1`, `message:\n\
+    \     guardrails rejected`, `errors: null`; nothing runs and no callback follows.\n   - passed ->\
+    \ the document goes on to the OCR stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS`\
+    \ (15 s by default, counted from the request's arrival). Finished in time ->\n     **200**, `job_status:\
+    \ completed`, `guardrails: 0`, `data` = `nomor_npwp` and `nama` as\n     `{value, confidence}` with\
+    \ confidence 0/1; rejected by the ML team's structuring rules -> **200**,\n     `job_status: failed`,\
+    \ `guardrails: 1`, `message` = the rules' Indonesian reason; a stage failed -> **422**\n     `OCR_FAILED`\
+    \ / `STRUCTURING_FAILED` / `SCORING_FAILED`; still running -> **202**, `job_status:\n     processing`.\
+    \ Give this call an HTTP timeout well above the wait.\n   - `guardrails` is `1` for a rejected document\
+    \ and `0` for one that passed: a rejection is a 200, so read\n     `guardrails` (or `job_status`),\
+    \ not the HTTP status.\n2. **Receive callbacks** (see *Webhooks*), sent by the pipeline stages themselves\
+    \ after a hand-off. The\n   `SCORING` / `DONE` callback carries the **final result** (richer than\
+    \ `data`: OCR scores, trust\n   probabilities, the guardrails report). A `FAILED` callback of any\
+    \ stage ends the request.\n3. **Read the status when needed** with `GET /v1/extract-ocr/{request_id}`\
+    \ on the same service: the same\n   contract, without waiting.\n\nTime a request out on your side:\
+    \ a stage that crashes mid-job cannot send its callback.\n\n## What the result is, and is not\n\n\
+    `fields` holds `nomor_npwp`, `nama`, `nama_badan`. `scoring` holds `npwp_confidence` and\n`name_confidence`:\
+    \ the probability, from the ML team's trust model, that each extracted field is\ncorrect. There is\
+    \ **no document-level score and no approve / reject decision**; thresholds are yours.\n\n## Addresses\n\
+    \nThe orchestrator is the only service you call. From another namespace in GKE:\n`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034`\
     \ (the release's entry Service). The\nguardrails and pipeline stage services are internal. Nothing\
     \ is exposed outside the cluster.\n\n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.**\
     \ Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing\
@@ -52,8 +55,8 @@ tags:
 - name: 1. Start the pipeline
   description: 'The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for
     up to PIPELINE_WAIT_SECONDS; answers in the central orchestrator''s extract-ocr contract. 200: `completed`
-    with the fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage
-    failed.'
+    with the fields (`guardrails: 0`), or rejected (`job_status: failed`, `guardrails: 1`). 202: still
+    `processing`, the result arrives by callback. 422: a stage failed.'
 - name: 2. Callbacks (you implement this)
   description: 'Listed under **Webhooks**: the request each stage sends to you when it finishes.'
 - name: 3. Status
@@ -76,18 +79,23 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 200 | `failed` | null | `1` | null (`message`: `guardrails
+        rejected`) |
+
+        | Rejected by the structuring rules | 200 | `failed` | null | `1` | null (`message`: the rules''
+        reason) |
+
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        `guardrails` is `1` when the document was rejected (by the guardrails model or by the structuring
+        rules) and `0` when it passed. A rejection is an answer, not an error: `200` with `job_status:
+        failed`; read `guardrails`, not the HTTP status, to tell it from a result.
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
@@ -133,7 +141,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Accepted and finished within the wait
+          description: 'Finished within the wait, or rejected (`guardrails: 1`)'
           content:
             application/json:
               schema:
@@ -155,6 +163,32 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
+                    guardrails: 0
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+                rejected_by_guardrails:
+                  summary: Rejected by the guardrails model
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: guardrails rejected
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
+                    guardrails: 1
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+                rejected_by_rules:
+                  summary: Rejected by the structuring rules
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
                     guardrails: 1
                     params:
                       nik: '3123456711950001'
@@ -179,10 +213,10 @@ paths:
                       nik: '3123456711950001'
                       refno: PK19039Y8U
         '400':
-          description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
-            `guardrails: 0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
-            pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
-            file / intake (empty, unsupported type, unreadable, `file_url` refused)'
+          description: 'The request cannot be processed: unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`),
+            more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages (`Jumlah halaman melebihi batas, pastikan
+            hanya mengunggah dokumen NPWP`, plain error envelope), or a bad file / intake (empty, unsupported
+            type, unreadable, `file_url` refused). A rejected document is a 200, not a 400'
           content:
             application/json:
               schema:
@@ -190,15 +224,10 @@ paths:
               example:
                 status_code: 400
                 status_desc: Bad Request
-                message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
-                errors: DOWNSTREAM_VALIDATION_ERROR
+                message: 'Unsupported document_type: ktp. Supported: npwp'
+                errors: UNSUPPORTED_DOCUMENT_TYPE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
+                document_type: ktp
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -237,7 +266,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -308,18 +337,23 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 200 | `failed` | null | `1` | null (`message`: `guardrails
+        rejected`) |
+
+        | Rejected by the structuring rules | 200 | `failed` | null | `1` | null (`message`: the rules''
+        reason) |
+
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        `guardrails` is `1` when the document was rejected (by the guardrails model or by the structuring
+        rules) and `0` when it passed. A rejection is an answer, not an error: `200` with `job_status:
+        failed`; read `guardrails`, not the HTTP status, to tell it from a result.
 
 
         Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
@@ -327,8 +361,8 @@ paths:
 
 
         **404** means no stage has a job for this request_id: it was refused or rejected by the guardrails
-        model (the `400` of the POST is its final answer), refused before the check, or its POST is still
-        being judged by guardrails.
+        model (the POST''s answer, `guardrails: 1`, is final: nothing is stored for it), refused before
+        the check, or its POST is still being judged by guardrails.
 
 
         **Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it
@@ -347,7 +381,7 @@ paths:
           title: Request Id
       responses:
         '200':
-          description: Finished
+          description: 'Finished, or rejected by the structuring rules (`guardrails: 1`)'
           content:
             application/json:
               schema:
@@ -369,6 +403,16 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
+                    guardrails: 0
+                rejected_by_rules:
+                  summary: Rejected by the structuring rules
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
                     guardrails: 1
         '202':
           description: Still running
@@ -384,22 +428,6 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: processing
-              schema:
-                $ref: '#/components/schemas/ExtractOcrResponse'
-        '400':
-          description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`)'
-          content:
-            application/json:
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
-                errors: DOWNSTREAM_VALIDATION_ERROR
-                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
@@ -437,7 +465,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
@@ -741,11 +769,11 @@ components:
             - 1
           - type: 'null'
           title: Guardrails
-          description: '1: the document passed the guardrails model (and the pipeline ran); 0: it was
-            rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
+          description: '1: the document was rejected, by the guardrails model or by the structuring rules
+            (answered 200 with `job_status: failed`); 0: it passed. Null on 202, and when the request
             was refused before the check'
           examples:
-          - 1
+          - 0
         params:
           title: Params
           description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not

@@ -55,7 +55,7 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         "request_id": RID,
         "document_type": "npwp",
         "job_status": "completed",
-        "guardrails": 1,
+        "guardrails": 0,
         "params": None,
     }
     assert stub_waiter.snapshots == [RID]
@@ -84,17 +84,20 @@ def test_failed_stage_is_422(client, auth, stub_waiter):
     )
 
 
-def test_rejection_by_the_structuring_rules_is_400(client, auth, stub_waiter):
+def test_rejection_by_the_structuring_rules_is_200_with_guardrails_1(client, auth, stub_waiter):
     reason = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
     stub_waiter.snapshot_outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, reason)
 
-    body = _get(client, auth).json()
+    response = _get(client, auth)
+    body = response.json()
 
-    assert (body["status_code"], body["errors"], body["message"], body["guardrails"]) == (
-        400,
-        "DOWNSTREAM_VALIDATION_ERROR",
+    assert response.status_code == 200
+    assert (body["status_code"], body["errors"], body["message"], body["job_status"], body["guardrails"]) == (
+        200,
+        None,
         reason,
-        0,
+        "failed",
+        1,
     )
 
 

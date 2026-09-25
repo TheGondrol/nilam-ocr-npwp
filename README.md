@@ -4,7 +4,7 @@ Service OCR untuk dokumen NPWP (kartu identitas pajak) Indonesia, dipecah menjad
 
 | Service | Port | Image | Peran |
 |---|---|---|---|
-| **orchestrator** | 8034 | `nilam-ocr-orchestrator` | Orkestrasi khusus NPWP, **pintu masuk tunggal**: Orkestrasi pusat hanya memanggil `POST /v1/extract-ocr` (dan `GET /v1/extract-ocr/{request_id}`) di sini. Memeriksa file (tipe, ukuran), minta guardrails menilai dokumen, menyerahkan dokumen yang lolos ke ekstraksi, lalu **menunggu pipeline** sampai `PIPELINE_WAIT_SECONDS`: 200 hasil akhir, 202 masih berjalan, 400 ditolak, 422 satu tahap gagal. Stateless: tanpa database, tanpa callback |
+| **orchestrator** | 8034 | `nilam-ocr-orchestrator` | Orkestrasi khusus NPWP, **pintu masuk tunggal**: Orkestrasi pusat hanya memanggil `POST /v1/extract-ocr` (dan `GET /v1/extract-ocr/{request_id}`) di sini. Memeriksa file (tipe, ukuran), minta guardrails menilai dokumen, menyerahkan dokumen yang lolos ke ekstraksi, lalu **menunggu pipeline** sampai `PIPELINE_WAIT_SECONDS`: 200 hasil akhir (`guardrails: 0`) atau ditolak (`guardrails: 1`, `job_status: failed`), 202 masih berjalan, 422 satu tahap gagal. Stateless: tanpa database, tanpa callback |
 | **guardrails** | 8031 | `nilam-ocr-guardrails` | "ServiceGuardrails", internal: `POST /v1/guardrails/check` dipanggil orchestrator untuk tiap dokumen. Klasifikasi tiap halaman `accepted`/`reject` dengan model EfficientNet-B0 (lokal, CPU) + vonis dokumen; batas halaman (400) dan ukuran (413) dicek sebelum model |
 | **ekstraksi** | 8030 | `nilam-ocr-ekstraksi` | "ServiceOCR": tahap pertama pipeline async (`/v1/ekstraksi/jobs` → 202, OCR di background, hasil ke tabel Orkestrasi, handoff ke structuring). Juga OCR mentah sinkron (`/v1/ekstraksi/extract`) |
 | **structuring** | 8032 | `nilam-ocr-structuring` | "ServiceStructuring": `/v1/structuring/jobs` → 202, baris teks → `nomor_npwp`, `nama`, `nama_badan` dengan confidence per field, handoff ke scoring |
@@ -136,16 +136,17 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 ─► guardrails:8031 POST /v1/guardrails/check (file + request_id), SINKRON
                      > GUARDRAILS_MAX_DOCUMENT_PAGES (2) ◄─ 400 "Jumlah halaman melebihi batas ..." (sebelum model)
                      model guardrails per halaman ◄─ 200 {passed, reason, document, pages}
-   passed=false ◄─ 400 {errors: DOWNSTREAM_VALIDATION_ERROR, job_status: failed, guardrails: 0, message, params}
-                ─► Orkestrasi pusat jawab client 400 dari respons sinkron ini. Tidak ada tahap yang jalan,
+   passed=false ◄─ 200 {message: "guardrails rejected", errors: null, job_status: failed, guardrails: 1, params}
+                ─► Orkestrasi pusat jawab client dari respons sinkron ini. Tidak ada tahap yang jalan,
                    jadi `downstream_status` untuk request yang ditolak guardrails TIDAK pernah ditulis pipeline.
    passed=true  ─► ekstraksi:8030 POST /v1/ekstraksi/jobs              202 segera
                      (request_id, document_type, guardrails, file | file_url yang sama)
                    orchestrator MENUNGGU maks. PIPELINE_WAIT_SECONDS (default 15 dtk, sejak request diterima):
                    GET /v1/{ekstraksi,structuring,scoring}/jobs/{request_id} berurutan,
                    tiap PIPELINE_POLL_INTERVAL_SECONDS (default 0,5 dtk)
-                ◄─ 200 {job_status: completed, data: {nomor_npwp, nama, flag, flag_reason}, guardrails: 1, params}
-                ◄─ 422 {job_status: failed, errors: <TAHAP>_FAILED, guardrails: 1, message, params} gagal
+                ◄─ 200 {job_status: completed, data: {nomor_npwp, nama}, guardrails: 0, params}
+                ◄─ 200 {job_status: failed, errors: null, guardrails: 1, message: alasan aturan ML, params}  ditolak aturan structuring
+                ◄─ 422 {job_status: failed, errors: <TAHAP>_FAILED, guardrails: 0, message, params} gagal
                 ◄─ 202 {job_status: processing, data: null, guardrails: null, params}            belum selesai
                 ─► Orkestrasi pusat: 200/422 → jawab client; 202 → jawab client 202, hasil menyusul di tabelnya
 
@@ -390,8 +391,8 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 | semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`). **Liveness**: hanya "proses hidup", tidak menyentuh dependensi |
 | semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk ekstraksi / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
 | semua | GET | `/metrics` | – (tanpa API key). Metrik Prometheus proses ini; lihat [Observability](#observability) |
-| orchestrator | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, kontrak `extract-ocr` Orkestrasi pusat.** form: `request_id`, `document_type` (default `npwp`), `params` (opsional, JSON; dikembalikan apa adanya di setiap jawaban) + tepat satu dari `file` / `file_url`. Dicek tipe/ukuran, lalu dinilai guardrails. Ditolak → 400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`. Lolos → diteruskan ke `ekstraksi/jobs`, lalu menunggu sampai `PIPELINE_WAIT_SECONDS`: 200 `job_status: completed` + `data` {`nomor_npwp`, `nama`} (`confidence` 0/1), 422 `<TAHAP>_FAILED`, atau 202 `processing` |
-| orchestrator | GET | `/v1/extract-ocr/{request_id}` | Kontrak yang sama, **tanpa menunggu**: status tiap tahap dibaca sekali, berurutan. 200 / 202 / 400 (ditolak aturan structuring) / 422, `params: null`; 404 kalau tidak ada tahap yang punya job (ditolak model guardrails, atau belum dikirim); 503/504 kalau sebuah tahap tidak terjangkau. Hand-off yang mati permanen (dead letter) tetap terbaca 202: keadaan finalnya ada di callback / tabel Orkestrasi |
+| orchestrator | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, kontrak `extract-ocr` Orkestrasi pusat.** form: `request_id`, `document_type` (default `npwp`), `params` (opsional, JSON; dikembalikan apa adanya di setiap jawaban) + tepat satu dari `file` / `file_url`. Dicek tipe/ukuran, lalu dinilai guardrails. Ditolak → 200 `job_status: failed`, `guardrails: 1`, `message: "guardrails rejected"`, `errors: null`. Lolos → diteruskan ke `ekstraksi/jobs`, lalu menunggu sampai `PIPELINE_WAIT_SECONDS`: 200 `job_status: completed` + `data` {`nomor_npwp`, `nama`} (`confidence` 0/1), 422 `<TAHAP>_FAILED`, atau 202 `processing` |
+| orchestrator | GET | `/v1/extract-ocr/{request_id}` | Kontrak yang sama, **tanpa menunggu**: status tiap tahap dibaca sekali, berurutan. 200 (selesai, atau ditolak aturan structuring dengan `guardrails: 1`) / 202 / 422, `params: null`; 404 kalau tidak ada tahap yang punya job (ditolak model guardrails, atau belum dikirim); 503/504 kalau sebuah tahap tidak terjangkau. Hand-off yang mati permanen (dead letter) tetap terbaca 202: keadaan finalnya ada di callback / tabel Orkestrasi |
 | guardrails | POST | `/v1/guardrails/check` | **Internal, dipanggil orchestrator untuk tiap dokumen; hanya menilai, selalu 200.** `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`. Tidak memulai apa pun; untuk debugging |
 | ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** Dipanggil orchestrator. form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
 | structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}`; `ocr` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `ocr_results`) |
@@ -425,7 +426,7 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 
 `confidence` dokumen: kalau `accepted`, `proba_approve` halaman terlemah; kalau `reject`, `proba_reject` tertinggi di antara halaman yang ditolak. Saat ditolak: `"passed": false, "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"`. Modelnya biner, jadi alasan hanya bisa menyebut jumlah halaman dan keyakinannya, bukan "blur" atau "bukan NPWP".
 
-**Data `extract-ocr`** (sheet "OCR Nilam - Document Type"): `nomor_npwp` dan `nama` (nama wajib pajak, atau nama badan pada kartu perusahaan), tiap field `{"value", "confidence"}` dengan `confidence` 1 atau 0; yang tidak ditemukan `{"value": null, "confidence": 0}`. `nama_badan` terpisah hanya ada di callback hasil ke Orkestrasi. Flag dari aturan structuring **tidak** ada di data ini: 9 dari 11 flag menolak dokumen (400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`, `message` = alasannya), 2 sisanya (nama satu kata, huruf di nomor NPWP) hanya menjadi input trust model.
+**Data `extract-ocr`** (sheet "OCR Nilam - Document Type"): `nomor_npwp` dan `nama` (nama wajib pajak, atau nama badan pada kartu perusahaan), tiap field `{"value", "confidence"}` dengan `confidence` 1 atau 0; yang tidak ditemukan `{"value": null, "confidence": 0}`. `nama_badan` terpisah hanya ada di callback hasil ke Orkestrasi. Flag dari aturan structuring **tidak** ada di data ini: 9 dari 11 flag menolak dokumen (200 `job_status: failed`, `guardrails: 1`, `message` = alasannya), 2 sisanya (nama satu kata, huruf di nomor NPWP) hanya menjadi input trust model.
 
 ## Skenario Testing via Nama File
 
@@ -433,7 +434,7 @@ Berlaku selama backend masih mock (guardrails: `GUARDRAILS_BACKEND=mock`; ekstra
 
 | Nama file mengandung | Pipeline async | Sumber |
 |---|---|---|
-| `blur` / `invalid` / `notnpwp` | guardrails `passed: false` + `reason`; orchestrator menjawab 400 `DOWNSTREAM_VALIDATION_ERROR`, tidak ada tahap yang jalan | guardrails (mock) |
+| `blur` / `invalid` / `notnpwp` | guardrails `passed: false` + `reason`; orchestrator menjawab 200 `guardrails: 1`, `message: "guardrails rejected"`, tidak ada tahap yang jalan | guardrails (mock) |
 | `servererror` | job OCR `FAILED` + tabel Orkestrasi `failed`, `OCR_FAILED` | ekstraksi (mock engine) |
 | `delay<N>s` (mis. `delay20s-npwp.jpg`) | tahap OCR menunggu N detik (maks. 120) sebelum bekerja, **apa pun backend-nya**, hanya dengan `ENVIRONMENT=local`. Dipakai [tools/tracker](tools/tracker) untuk memperlihatkan orchestrator menjawab 202 ketika pipeline melewati `PIPELINE_WAIT_SECONDS` | ekstraksi (`ocr_common/simulation.py`) |
 | lainnya | ketiga tahap `DONE`, data dummy deterministik dari isi file | |
@@ -651,7 +652,7 @@ Pemeriksaan yang dijalankan sebelum commit dan sebelum deploy, semuanya dari lap
 
 | Bagian | Isi |
 |---|---|
-| 1. Start the pipeline | `POST /v1/extract-ocr` di orchestrator: 200 hasil akhir, 202 masih berjalan, 400 ditolak, 422 tahap gagal |
+| 1. Start the pipeline | `POST /v1/extract-ocr` di orchestrator: 200 hasil akhir (`guardrails: 0`) atau ditolak (`guardrails: 1`), 202 masih berjalan, 422 tahap gagal |
 | 2. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
 | 3. Status | `GET /v1/extract-ocr/{request_id}` di orchestrator: kontrak yang sama, tanpa menunggu |
 

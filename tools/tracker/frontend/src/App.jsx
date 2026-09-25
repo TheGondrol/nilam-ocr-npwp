@@ -190,21 +190,24 @@ function Summary({ stage, result }) {
   return null
 }
 
-function httpClass(status) {
-  return status === 200 ? 'done' : status === 202 ? 'processing' : status === 400 ? 'rejected' : 'failed'
+// Dokumen yang ditolak dijawab 200 (guardrails: 1, job_status: failed); rejectedBy membedakannya dari hasil.
+function httpClass(status, rejectedBy) {
+  if (rejectedBy) return 'rejected'
+  return status === 200 ? 'done' : status === 202 ? 'processing' : 'failed'
 }
 
 function httpNote(status, rejectedBy) {
+  if (rejectedBy === 'structuring') return '200: ditolak aturan structuring (guardrails: 1)'
+  if (rejectedBy) return '200: ditolak guardrails (guardrails: 1)'
   if (status === 200) return '200: hasil lengkap ada di response'
   if (status === 202) return '202: hanya request_id, hasil menyusul lewat callback'
   if (status === 422) return '422: satu tahap gagal di dalam batas tunggu'
-  if (status === 400) return rejectedBy === 'structuring' ? '400: ditolak aturan structuring' : '400: ditolak guardrails'
   return `HTTP ${status}`
 }
 
 function GuardrailsResponse({ http, t0 }) {
   if (!http) return null
-  const cls = httpClass(http.http_status)
+  const cls = httpClass(http.http_status, http.rejected_by)
   const within = http.elapsed_ms / 1000 <= http.wait_seconds
   return (
     <div className={`http ${cls}`}>
@@ -217,10 +220,10 @@ function GuardrailsResponse({ http, t0 }) {
         </span>
       </div>
       <div className="meta">
-        {http.http_status === 200 && 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.'}
+        {http.http_status === 200 && !http.rejected_by && 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.'}
         {http.http_status === 202 && 'Batas tunggu habis sebelum SCORING selesai: hasil menyusul lewat callback, dan bisa dibaca kapan saja lewat GET /v1/extract-ocr/{request_id} di orchestrator.'}
         {http.http_status === 422 && 'Satu tahap gagal di dalam batas tunggu.'}
-        {http.http_status === 400 &&
+        {http.rejected_by &&
           (http.rejected_by === 'structuring'
             ? 'Lolos guardrails, lalu ditolak aturan structuring ML: OCR dan structuring sudah jalan, scoring tidak.'
             : 'Dokumen ditolak guardrails: tidak ada tahap yang dijalankan.')}
@@ -1025,7 +1028,7 @@ function Pipeline({ nav, overview: sharedOverview }) {
                 <span className="meta">
                   {r.http_status ? (
                     <>
-                      <span className={`pill ${httpClass(r.http_status)}`}>HTTP {r.http_status}</span> {r.job_status ?? ''}
+                      <span className={`pill ${httpClass(r.http_status, r.rejected_by)}`}>HTTP {r.http_status}</span> {r.job_status ?? ''}
                       {r.elapsed_ms != null ? ` · ${fmtMs(r.elapsed_ms)}` : ''}
                     </>
                   ) : (

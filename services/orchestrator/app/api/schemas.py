@@ -54,11 +54,10 @@ class ExtractOcrResponse(BaseModel):
     guardrails: Literal[0, 1] | None = Field(
         None,
         description=(
-            "1: the document passed the guardrails model (and the pipeline ran); 0: it was rejected by the "
-            "guardrails model or by the structuring rules. Null on 202, and when the request was refused before "
-            "the check"
+            "1: the document was rejected, by the guardrails model or by the structuring rules (answered 200 with "
+            "`job_status: failed`); 0: it passed. Null on 202, and when the request was refused before the check"
         ),
-        examples=[1],
+        examples=[0],
     )
     params: Any = Field(
         None,

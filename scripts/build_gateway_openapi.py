@@ -25,8 +25,8 @@ TAGS = [
         "description": (
             "The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for up to "
             "PIPELINE_WAIT_SECONDS; answers in the central orchestrator's extract-ocr contract. 200: `completed` "
-            "with the fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage "
-            "failed."
+            "with the fields (`guardrails: 0`), or rejected (`job_status: failed`, `guardrails: 1`). 202: still "
+            "`processing`, the result arrives by callback. 422: a stage failed."
         ),
     },
     {
@@ -51,13 +51,17 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your `request_id` and the
    document (`file` or `file_url`, optional `params`). It answers in the central orchestrator's
    `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
-   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`;
-     nothing runs and no callback follows.
+   - rejected by the guardrails model -> **200**, `job_status: failed`, `guardrails: 1`, `message:
+     guardrails rejected`, `errors: null`; nothing runs and no callback follows.
    - passed -> the document goes on to the OCR stage and the service waits for the pipeline for up to
      `PIPELINE_WAIT_SECONDS` (15 s by default, counted from the request's arrival). Finished in time ->
-     **200**, `job_status: completed`, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with
-     confidence 0/1; a stage failed -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still
-     running -> **202**, `job_status: processing`. Give this call an HTTP timeout well above the wait.
+     **200**, `job_status: completed`, `guardrails: 0`, `data` = `nomor_npwp` and `nama` as
+     `{value, confidence}` with confidence 0/1; rejected by the ML team's structuring rules -> **200**,
+     `job_status: failed`, `guardrails: 1`, `message` = the rules' Indonesian reason; a stage failed -> **422**
+     `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still running -> **202**, `job_status:
+     processing`. Give this call an HTTP timeout well above the wait.
+   - `guardrails` is `1` for a rejected document and `0` for one that passed: a rejection is a 200, so read
+     `guardrails` (or `job_status`), not the HTTP status.
 2. **Receive callbacks** (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The
    `SCORING` / `DONE` callback carries the **final result** (richer than `data`: OCR scores, trust
    probabilities, the guardrails report). A `FAILED` callback of any stage ends the request.
