@@ -43,6 +43,7 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         "document_type": "npwp",
         "job_status": "completed",
         "guardrails": 0,
+        "pipeline_last_stage": "scoring",
         "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
@@ -64,6 +65,7 @@ def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth
         "document_type": "npwp",
         "job_status": "failed",
         "guardrails": 1,
+        "pipeline_last_stage": "guardrails",
         "params": None,
     }
     assert stub_extraction.submitted == [] and stub_waiter.calls == []
@@ -326,3 +328,58 @@ def test_missing_api_key_returns_401_envelope(client):
     response = client.post("/v1/extract-ocr", data={"request_id": "OCR_7"}, files=image_upload())
     assert response.status_code == 401
     assert response.json()["errors"] == "Invalid or missing API key"
+
+
+@pytest.mark.parametrize(
+    ("sequence", "outcome", "status", "stage"),
+    [
+        (None, None, 200, "scoring"),
+        (["guardrails"], None, 200, "guardrails"),
+        (["guardrails", "extraction"], WaitOutcome("OCR", "DONE", results={"OCR": {"blocks": []}}), 200, "extraction"),
+        (None, WaitOutcome("OCR", "FAILED", "OCR model is unavailable"), 422, "extraction"),
+        (None, WaitOutcome("STRUCTURING", STATUS_REJECTED, "Kode provinsi pada NPWP tidak valid"), 400, "structuring"),
+        (None, WaitOutcome("STRUCTURING", "PROCESSING"), 202, "structuring"),
+    ],
+)
+def test_pipeline_last_stage_names_the_service_the_answer_comes_from(
+    client, auth, stub_waiter, sequence, outcome, status, stage
+):
+    if outcome is not None:
+        stub_waiter.outcome = outcome
+    data = {"pipeline_name_sequence": sequence} if sequence else {}
+
+    response = _submit(client, auth, **data)
+
+    assert (response.status_code, response.json()["pipeline_last_stage"]) == (status, stage)
+
+
+def test_a_guardrails_rejection_comes_from_guardrails(client, auth):
+    response = _submit(client, auth, filename="notnpwp.jpg")
+
+    assert (response.status_code, response.json()["pipeline_last_stage"]) == (400, "guardrails")
+
+
+@pytest.mark.parametrize(
+    ("failing", "stage"),
+    [("guardrails", "guardrails"), ("extraction", "extraction")],
+)
+def test_an_unreachable_service_is_named_in_the_error(client, auth, stub_guardrails, stub_extraction, failing, stage):
+    stub = stub_guardrails if failing == "guardrails" else stub_extraction
+    stub.error = UpstreamUnavailable(f"{failing} service is unavailable")
+
+    response = _submit(client, auth, params='{"refno": "X1"}')
+
+    assert response.status_code == 503
+    body = response.json()
+    assert (body["pipeline_last_stage"], body["message"], body["errors"]) == (
+        stage,
+        f"{failing} service is unavailable",
+        f"{failing} service is unavailable",
+    )
+    assert (body["request_id"], body["params"]) == ("OCR_1", {"refno": "X1"})
+
+
+def test_a_refusal_before_any_pipeline_service_names_none(client, auth):
+    response = _submit(client, auth, pipeline_name_sequence=["extraction", "scoring"])
+
+    assert (response.status_code, response.json()["pipeline_last_stage"]) == (422, None)

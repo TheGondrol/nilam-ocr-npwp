@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from typing import Any
 
@@ -24,6 +25,9 @@ from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
 from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
 from app.services.extract_service import ExtractOcrService
+from app.services.pipeline_waiter import StageError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
@@ -100,19 +104,50 @@ _GUARDRAILS_ONLY = extract_body(
 )
 
 _CONTRACT_TABLE = (
-    "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |\n"
-    "|---|---|---|---|---|---|\n"
-    "| Finished | 200 | `completed` | the fields | `0` | null |\n"
-    "| Still running | 202 | `processing` | null | null | null |\n"
-    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
-    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
+    "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |\n"
+    "|---|---|---|---|---|---|---|\n"
+    "| Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |\n"
+    "| Still running | 202 | `processing` | null | null | null | the service still running |\n"
+    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
+    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
     "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
-    "`SCORING_FAILED` |\n\n"
+    "`SCORING_FAILED` | the service that failed |\n\n"
+    "`pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence` names "
+    "it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504 from calling "
+    "one of them. It is null when this service refused the request before calling any (file checks, "
+    "`pipeline_name_sequence`, `params`, `document_type`).\n\n"
 )
 
 
 class _InvalidParams(Exception):
     pass
+
+
+def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, params: Any) -> dict[str, Any]:
+    """The answer when calling a pipeline service failed (unreachable, timed out, refused the file, answered
+    wrongly): the error envelope's status and message, in the extract-ocr shape, naming that service."""
+    if exc.status_code >= 500:
+        logger.error("%s -> %d: %s", exc.service, exc.status_code, exc.message)
+    return extract_body(
+        exc.status_code,
+        exc.message,
+        errors=exc.message,
+        request_id=request_id,
+        document_type=document_type,
+        params=params,
+        pipeline_last_stage=exc.service,
+    )
+
+
+def _stage_error_response(code: int, description: str, service: str, message: str) -> dict[str, Any]:
+    example = extract_body(
+        code, message, errors=message, request_id=RID, document_type="npwp", pipeline_last_stage=service
+    )
+    return {
+        "model": ExtractOcrResponse,
+        "description": description,
+        "content": {"application/json": {"example": example}},
+    }
 
 
 def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
@@ -232,19 +267,25 @@ def _parse_params(raw: str | None) -> Any:
             ),
             "content": {"application/json": {"example": _FAILED}},
         },
-        500: error(
+        500: _stage_error_response(
             500,
-            "The guardrails or extraction service failed, or answered in an unexpected shape",
+            "The guardrails or extraction service failed, or answered in an unexpected shape; "
+            "`pipeline_last_stage` names which",
+            "guardrails",
             "guardrails service returned an unexpected response",
         ),
-        503: error(
+        503: _stage_error_response(
             503,
-            "The guardrails service, its model, or the extraction service is unreachable; nothing was started",
+            "The guardrails service, its model, or the extraction service is unreachable; nothing was started. "
+            "`pipeline_last_stage` names which",
+            "extraction",
             "extraction service is unavailable",
         ),
-        504: error(
+        504: _stage_error_response(
             504,
-            "The guardrails service, its model, or the extraction service did not answer in time",
+            "The guardrails service, its model, or the extraction service did not answer in time; "
+            "`pipeline_last_stage` names which",
+            "extraction",
             "extraction service timed out after 10.0s",
         ),
     },
@@ -326,6 +367,9 @@ async def extract_ocr(
             file_url=file_url,
             sequence=sequence,
         )
+    except StageError as exc:
+        response.status_code = exc.status_code
+        return _stage_error_body(exc, request_id=request_id, document_type=document_type, params=parsed_params)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(
@@ -394,13 +438,25 @@ async def extract_ocr(
             "description": "A pipeline stage failed (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`)",
             "content": {"application/json": {"example": {**_FAILED, "params": None}}},
         },
-        500: error(
+        500: _stage_error_response(
             500,
-            "A stage answered in an unexpected shape, or refused this service (e.g. a wrong API key)",
+            "A stage answered in an unexpected shape, or refused this service (e.g. a wrong API key); "
+            "`pipeline_last_stage` names which",
+            "structuring",
             "structuring service error (401): Invalid or missing API key",
         ),
-        503: error(503, "A stage service is unreachable", "structuring service is unavailable"),
-        504: error(504, "A stage service did not answer in time", "structuring service timed out after 10.0s"),
+        503: _stage_error_response(
+            503,
+            "A stage service is unreachable; `pipeline_last_stage` names which",
+            "structuring",
+            "structuring service is unavailable",
+        ),
+        504: _stage_error_response(
+            504,
+            "A stage service did not answer in time; `pipeline_last_stage` names which",
+            "structuring",
+            "structuring service timed out after 10.0s",
+        ),
     },
 )
 async def get_extract_ocr(
@@ -413,6 +469,9 @@ async def get_extract_ocr(
     token = adopt_request_id(request, request_id)
     try:
         outcome = await service.status(request_id)
+    except StageError as exc:
+        response.status_code = exc.status_code
+        return _stage_error_body(exc, request_id=request_id, document_type=DOCUMENT_TYPE, params=None)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(

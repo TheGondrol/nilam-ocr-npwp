@@ -139,7 +139,21 @@ supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
 Path, field, dan bentuk jawabannya sama persis dengan `extract-ocr` yang dulu di guardrails port
 8031; hanya port-nya yang berubah ke **8034**. Bentuk jawabannya mengikuti kontrak `extract-ocr`
-kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, dan `params`.
+kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
+`pipeline_last_stage`, dan `params`.
+
+**`pipeline_last_stage`** menyebut service pipeline asal jawaban itu, dengan nama yang sama seperti
+di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET /v1/extract-ocr/{request_id}`:
+
+| Jawaban | `pipeline_last_stage` |
+|---|---|
+| 200 selesai | service terakhir di urutan (`scoring` untuk urutan penuh) |
+| 202 masih berjalan | service yang sedang berjalan |
+| 400 ditolak model guardrails | `guardrails` |
+| 400 ditolak aturan structuring | `structuring` |
+| 422 `<TAHAP>_FAILED` | service yang gagal (`OCR_FAILED` = `extraction`) |
+| 400 / 500 / 503 / 504 saat memanggil sebuah service (tidak terjangkau, timeout, file tidak terbaca model) | service itu |
+| ditolak sebelum service pipeline mana pun dipanggil (file, `pipeline_name_sequence`, `params`, `document_type`) | `null` |
 
 | Field | Wajib | Keterangan |
 |---|---|---|

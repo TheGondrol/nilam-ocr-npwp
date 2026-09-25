@@ -5,10 +5,11 @@ from typing import Any
 
 from prometheus_client import Counter
 
-from ocr_common.errors import NotFound
+from ocr_common.errors import NotFound, ServiceError
 from ocr_common.npwp import DOCUMENT_TYPE, final_result
 from ocr_common.pipeline import (
     DEFAULT_SEQUENCE,
+    EXTRACTION,
     GUARDRAILS,
     STAGE_OF,
     STAGE_SCORING,
@@ -20,7 +21,7 @@ from app.clients.extraction import ExtractionJobClient
 from app.clients.guardrails import GuardrailsClient
 from app.config import Settings
 from app.services.document_checks import check_document
-from app.services.pipeline_waiter import PipelineWait, WaitOutcome
+from app.services.pipeline_waiter import PipelineWait, StageError, WaitOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,10 @@ class ExtractOcrService:
         started = time.monotonic() if received_at is None else received_at
         check_document(content_type, content, self._settings)
         if GUARDRAILS in sequence:
-            report = await self._guardrails.check(request_id, filename, content_type, content)
+            try:
+                report = await self._guardrails.check(request_id, filename, content_type, content)
+            except ServiceError as exc:
+                raise StageError(GUARDRAILS, exc) from exc
             if not report["passed"]:
                 return {**report, "job": None, "pipeline": None, "result": None}
             verdict: dict[str, Any] = report
@@ -79,9 +83,12 @@ class ExtractOcrService:
             report = None
             verdict = {"passed": True, "reason": None}
 
-        job = await self._extraction.submit(
-            request_id, document_type, report, filename, content_type, content, file_url=file_url, sequence=sequence
-        )
+        try:
+            job = await self._extraction.submit(
+                request_id, document_type, report, filename, content_type, content, file_url=file_url, sequence=sequence
+            )
+        except ServiceError as exc:
+            raise StageError(EXTRACTION, exc) from exc
         wait_seconds = self._settings.pipeline_wait_seconds
         if wait_seconds <= 0:
             return {**verdict, "job": job, "pipeline": None, "result": None}

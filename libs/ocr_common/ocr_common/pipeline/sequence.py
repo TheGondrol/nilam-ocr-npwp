@@ -24,6 +24,8 @@ DEFAULT_SEQUENCE = PIPELINE_NAMES
 
 # The stage name of each pipeline service in jobs, callbacks and the orchestrator's tables.
 STAGE_OF = {GUARDRAILS: "GUARDRAILS", EXTRACTION: STAGE_OCR, STRUCTURING: STAGE_STRUCTURING, SCORING: STAGE_SCORING}
+# And back: the pipeline service of a stage name, as pipeline_name_sequence and pipeline_last_stage name it.
+SERVICE_OF_STAGE = {stage: name for name, stage in STAGE_OF.items()}
 
 
 class InvalidSequence(ValueError):

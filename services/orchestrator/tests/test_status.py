@@ -56,6 +56,7 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         "document_type": "npwp",
         "job_status": "completed",
         "guardrails": 0,
+        "pipeline_last_stage": "scoring",
         "params": None,
     }
     assert stub_waiter.snapshots == [RID]
@@ -270,3 +271,27 @@ def test_a_request_that_ended_before_scoring_is_answered_with_that_result(client
 
     assert response.status_code == 200
     assert (response.json()["job_status"], response.json()["data"]) == ("completed", structuring)
+
+
+def test_an_unreachable_stage_is_named_in_the_error(client, auth, stub_waiter):
+    from app.services.pipeline_waiter import StageError
+
+    stub_waiter.snapshot_error = StageError("structuring", UpstreamUnavailable("structuring service is unavailable"))
+
+    response = _get(client, auth)
+
+    assert response.status_code == 503
+    assert (response.json()["pipeline_last_stage"], response.json()["message"]) == (
+        "structuring",
+        "structuring service is unavailable",
+    )
+
+
+async def test_snapshot_names_the_stage_it_could_not_read():
+    from app.services.pipeline_waiter import StageError
+
+    stages = _stages(_job("DONE", {}), UpstreamUnavailable("structuring service is unavailable"))
+
+    with pytest.raises(StageError) as exc:
+        await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+    assert (exc.value.service, exc.value.status_code) == ("structuring", 503)

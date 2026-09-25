@@ -69,10 +69,13 @@ class StubGuardrails:
 class StubExtraction:
     def __init__(self) -> None:
         self.submitted: list[dict] = []
+        self.error: Exception | None = None
 
     async def submit(
         self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None, sequence=None
     ) -> dict:
+        if self.error is not None:
+            raise self.error
         self.submitted.append(
             {
                 "request_id": request_id,

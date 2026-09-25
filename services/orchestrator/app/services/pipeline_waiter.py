@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
 from ocr_common.pipeline import (
+    SERVICE_OF_STAGE,
     STAGE_OF,
     STATUS_DONE,
     STATUS_FAILED,
@@ -15,6 +16,17 @@ from ocr_common.pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class StageError(ServiceError):
+    """A `ServiceError` from calling one pipeline service (guardrails, extraction, or reading a stage's
+    job), with that service's name (`service`, as pipeline_name_sequence names it). Still a ServiceError:
+    uncaught, it becomes the usual error envelope."""
+
+    def __init__(self, service: str, error: ServiceError):
+        super().__init__(error.status_code, error.message)
+        self.service = service
+
 
 # The pipeline stopped because a stage rejected the document (a rejecting check of the structuring
 # rules: `reject_reason` in its result). Final, like FAILED, but answered as a 400.
@@ -81,18 +93,21 @@ class PipelineWaiter:
         The stage that ends the request comes from the pipeline_name_sequence stored with the first stage's
         job (this service keeps nothing itself)."""
         results: dict[str, dict[str, Any]] = {}
-        record = await self._stages[0].get(request_id)
+        record = await _read(self._stages[0], request_id)
         if record is None:
             return None
         stages = self._through(_last_stage(record.get("pipeline_name_sequence")))
         for index, stage in enumerate(stages):
             if index > 0:
-                record = await stage.get(request_id)
+                record = await _read(stage, request_id)
                 if record is None:
                     return WaitOutcome(stage.stage, STATUS_PROCESSING, results=results)
             status = record.get("status")
             if status not in (STATUS_PROCESSING, STATUS_DONE, STATUS_FAILED):
-                raise InternalError(f"{stage.stage} job has an unexpected status: {status}")
+                raise StageError(
+                    SERVICE_OF_STAGE[stage.stage],
+                    InternalError(f"{stage.stage} job has an unexpected status: {status}"),
+                )
             if status == STATUS_PROCESSING:
                 return WaitOutcome(stage.stage, STATUS_PROCESSING, results=results)
             ended = _ended(stage.stage, record, results)
@@ -117,6 +132,14 @@ class PipelineWaiter:
             if record is not None and record.get("status") in (STATUS_DONE, STATUS_FAILED):
                 return record
             await asyncio.sleep(self._poll_interval)
+
+
+async def _read(stage: StageStatus, request_id: str) -> dict[str, Any] | None:
+    """One read of `stage`'s job; its errors (unreachable, timed out, a bad answer) name the stage."""
+    try:
+        return await stage.get(request_id)
+    except ServiceError as exc:
+        raise StageError(SERVICE_OF_STAGE.get(stage.stage, stage.stage.lower()), exc) from exc
 
 
 def _last_stage(sequence: Any) -> str | None:
