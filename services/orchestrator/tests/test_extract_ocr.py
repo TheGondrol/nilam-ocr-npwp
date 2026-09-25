@@ -26,7 +26,7 @@ def test_health_has_no_backends(client):
     assert body["backends"] == {}
 
 
-def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, stub_guardrails, stub_ekstraksi):
+def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, stub_guardrails, stub_extraction):
     response = _submit(client, auth)
 
     assert response.status_code == 200
@@ -46,11 +46,11 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
-    [handed] = stub_ekstraksi.submitted
+    [handed] = stub_extraction.submitted
     assert handed["guardrails"]["passed"] is True
 
 
-def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth, stub_ekstraksi, stub_waiter):
+def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth, stub_extraction, stub_waiter):
     response = _submit(client, auth, filename="notnpwp.jpg")
 
     assert response.status_code == 400
@@ -66,7 +66,7 @@ def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth
         "guardrails": 1,
         "params": None,
     }
-    assert stub_ekstraksi.submitted == [] and stub_waiter.calls == []
+    assert stub_extraction.submitted == [] and stub_waiter.calls == []
 
 
 def test_request_id_is_required(client, auth):
@@ -77,7 +77,7 @@ def test_request_id_is_required(client, auth):
     assert body["message"] == "body.request_id: Field required"
 
 
-def test_file_url_is_fetched_here_and_forwarded_as_url(client, auth, monkeypatch, stub_ekstraksi):
+def test_file_url_is_fetched_here_and_forwarded_as_url(client, auth, monkeypatch, stub_extraction):
     async def fake_fetch(url, *, limit, timeout=10.0, policy):
         assert url == "http://minio.local/bucket/npwp.jpg"
         return JPEG, "npwp.jpg", "image/jpeg"
@@ -90,7 +90,7 @@ def test_file_url_is_fetched_here_and_forwarded_as_url(client, auth, monkeypatch
     )
     assert response.status_code == 200
     assert response.json()["job_status"] == "completed"
-    assert stub_ekstraksi.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
+    assert stub_extraction.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
 
 
 def test_unsupported_content_type_is_400_before_guardrails(client, auth, stub_guardrails):
@@ -127,14 +127,14 @@ def _submit_pdf(client, auth, content):
     return _submit(client, auth, filename="scan.pdf", content=content, content_type="application/pdf")
 
 
-def test_more_than_two_pages_is_400_before_guardrails(client, auth, stub_guardrails, stub_ekstraksi):
+def test_more_than_two_pages_is_400_before_guardrails(client, auth, stub_guardrails, stub_extraction):
     response = _submit_pdf(client, auth, _pdf(3))
 
     assert response.status_code == 400
     body = response.json()
     assert (body["message"], body["errors"]) == (TOO_MANY_PAGES, TOO_MANY_PAGES)
     assert "job_status" not in body
-    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
+    assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 
 def test_two_pages_are_within_the_limit(client, auth, stub_guardrails):
@@ -164,24 +164,24 @@ def test_unreadable_pdf_is_400_before_guardrails(client, auth, stub_guardrails):
     assert stub_guardrails.checked == []
 
 
-def test_a_refusal_of_the_guardrails_service_is_answered_as_it_is(client, auth, stub_guardrails, stub_ekstraksi):
+def test_a_refusal_of_the_guardrails_service_is_answered_as_it_is(client, auth, stub_guardrails, stub_extraction):
     stub_guardrails.error = ServiceError(400, "Uploaded file is not a readable image")
 
     response = _submit(client, auth)
 
     assert response.status_code == 400
     assert response.json()["message"] == "Uploaded file is not a readable image"
-    assert stub_ekstraksi.submitted == []
+    assert stub_extraction.submitted == []
 
 
-def test_guardrails_unreachable_is_503_and_nothing_starts(client, auth, stub_guardrails, stub_ekstraksi):
+def test_guardrails_unreachable_is_503_and_nothing_starts(client, auth, stub_guardrails, stub_extraction):
     stub_guardrails.error = UpstreamUnavailable("guardrails service is unavailable")
 
     response = _submit(client, auth)
 
     assert response.status_code == 503
     assert response.json()["message"] == "guardrails service is unavailable"
-    assert stub_ekstraksi.submitted == []
+    assert stub_extraction.submitted == []
 
 
 @pytest.fixture
@@ -193,7 +193,7 @@ def settings_override():
     app.dependency_overrides.pop(get_settings, None)
 
 
-def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_ekstraksi):
+def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_extraction):
     response = _submit(client, auth, skip_guardrails="true")
 
     assert response.status_code == 403
@@ -209,7 +209,7 @@ def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stu
         "guardrails": None,
         "params": None,
     }
-    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
+    assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 
 def test_skip_guardrails_false_is_never_refused(client, auth, stub_guardrails):
@@ -228,7 +228,7 @@ def test_skip_guardrails_must_be_a_boolean(client, auth, stub_guardrails):
 
 
 def test_skipped_guardrails_hand_the_document_on_without_a_report(
-    client, auth, settings_override, stub_guardrails, stub_ekstraksi
+    client, auth, settings_override, stub_guardrails, stub_extraction
 ):
     settings_override(guardrails_skip_allowed=True)
 
@@ -239,7 +239,7 @@ def test_skipped_guardrails_hand_the_document_on_without_a_report(
     body = response.json()
     assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
     assert stub_guardrails.checked == []
-    [handed] = stub_ekstraksi.submitted
+    [handed] = stub_extraction.submitted
     assert handed["guardrails"] is None
 
 
@@ -258,7 +258,7 @@ def test_with_guardrails_skipped_the_structuring_rules_still_reject(client, auth
     )
 
 
-def test_with_guardrails_skipped_the_file_checks_still_run(client, auth, settings_override, stub_ekstraksi):
+def test_with_guardrails_skipped_the_file_checks_still_run(client, auth, settings_override, stub_extraction):
     settings_override(guardrails_skip_allowed=True)
     pages = _submit(
         client, auth, filename="scan.pdf", content=_pdf(3), content_type="application/pdf", skip_guardrails="true"
@@ -268,7 +268,7 @@ def test_with_guardrails_skipped_the_file_checks_still_run(client, auth, setting
 
     assert (pages.status_code, pages.json()["message"]) == (400, TOO_MANY_PAGES)
     assert size.status_code == 413
-    assert stub_ekstraksi.submitted == []
+    assert stub_extraction.submitted == []
 
 
 def test_missing_api_key_returns_401_envelope(client):

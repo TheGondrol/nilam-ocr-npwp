@@ -1,7 +1,7 @@
 """Prometheus metrics of the HTTP layer, and the `/metrics` endpoint that exposes every metric of the
 process (these and the pipeline's, see `ocr_common.pipeline.metrics`).
 
-The labels use the route template (`/v1/ekstraksi/jobs/{request_id}`), never the concrete path, so the
+The labels use the route template (`/v1/extraction/jobs/{request_id}`), never the concrete path, so the
 cardinality stays one series per endpoint."""
 
 import time

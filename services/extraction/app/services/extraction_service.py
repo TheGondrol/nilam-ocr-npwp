@@ -7,7 +7,7 @@ from app.config import Settings
 from app.ml.base import OcrEngine
 
 
-class EkstraksiService:
+class ExtractionService:
     """Validates the upload, runs the OCR engine, and shapes the stage result (`OcrResult`)."""
 
     def __init__(self, engine: OcrEngine, settings: Settings):

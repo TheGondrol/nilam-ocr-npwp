@@ -4,7 +4,7 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 
 set_test_env(AUTH_DISABLED="false")
 
-from app.dependencies import get_ekstraksi_client, get_guardrails_client, get_pipeline_waiter  # noqa: E402
+from app.dependencies import get_extraction_client, get_guardrails_client, get_pipeline_waiter  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.pipeline_waiter import WaitOutcome  # noqa: E402
 
@@ -66,7 +66,7 @@ class StubGuardrails:
         pass
 
 
-class StubEkstraksi:
+class StubExtraction:
     def __init__(self) -> None:
         self.submitted: list[dict] = []
 
@@ -120,11 +120,11 @@ def stub_guardrails():
 
 
 @pytest.fixture(autouse=True)
-def stub_ekstraksi():
-    stub = StubEkstraksi()
-    app.dependency_overrides[get_ekstraksi_client] = lambda: stub
+def stub_extraction():
+    stub = StubExtraction()
+    app.dependency_overrides[get_extraction_client] = lambda: stub
     yield stub
-    app.dependency_overrides.pop(get_ekstraksi_client, None)
+    app.dependency_overrides.pop(get_extraction_client, None)
 
 
 @pytest.fixture(autouse=True)

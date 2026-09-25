@@ -4,14 +4,14 @@ from pydantic import ValidationError
 from app.config import Settings
 
 GUARDRAILS = "http://nilam-ocr-npwp-guardrails:8031"
-EKSTRAKSI = "http://nilam-ocr-npwp-ekstraksi:8030"
+EXTRACTION = "http://nilam-ocr-npwp-extraction:8030"
 STRUCTURING = "http://nilam-ocr-npwp-structuring:8032"
 SCORING = "http://nilam-ocr-npwp-scoring:8033"
 LOCALHOST = "http://127.0.0.1:9999"
 
 
 def _deployed(
-    guardrails: str = GUARDRAILS, ekstraksi: str = EKSTRAKSI, structuring: str = STRUCTURING, scoring: str = SCORING
+    guardrails: str = GUARDRAILS, extraction: str = EXTRACTION, structuring: str = STRUCTURING, scoring: str = SCORING
 ) -> Settings:
     return Settings(
         api_key="x",
@@ -19,7 +19,7 @@ def _deployed(
         environment="production",
         pipeline_wait_seconds=0,
         guardrails_service_url=guardrails,
-        ekstraksi_service_url=ekstraksi,
+        extraction_service_url=extraction,
         structuring_service_url=structuring,
         scoring_service_url=scoring,
     )
@@ -33,7 +33,7 @@ def test_service_addresses_are_accepted_outside_local():
     ("setting", "overrides"),
     [
         ("GUARDRAILS_SERVICE_URL", {"guardrails": LOCALHOST}),
-        ("EKSTRAKSI_SERVICE_URL", {"ekstraksi": LOCALHOST}),
+        ("EXTRACTION_SERVICE_URL", {"extraction": LOCALHOST}),
         ("STRUCTURING_SERVICE_URL", {"structuring": LOCALHOST}),
         ("SCORING_SERVICE_URL", {"scoring": LOCALHOST}),
     ],

@@ -8,10 +8,10 @@ from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, succ
 from ocr_common.web.security import verify_api_key
 
 from app.api.schemas import ExtractResponse
-from app.dependencies import get_ekstraksi_service
-from app.services.ekstraksi_service import EkstraksiService
+from app.dependencies import get_extraction_service
+from app.services.extraction_service import ExtractionService
 
-router = APIRouter(tags=["Ekstraksi"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(tags=["Extraction"], dependencies=[Depends(verify_api_key)])
 
 OCR_RESULT_EXAMPLE = {
     "engine": "paddle",
@@ -37,7 +37,7 @@ OCR_RESULT_EXAMPLE = {
 
 
 @router.post(
-    "/v1/ekstraksi/extract",
+    "/v1/extraction/extract",
     response_model=ExtractResponse,
     operation_id="extractText",
     summary="Raw OCR of a document, synchronous (no job, no callback)",
@@ -57,9 +57,9 @@ OCR_RESULT_EXAMPLE = {
             PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB"),
         ),
         401: UNAUTHORIZED,
-        500: error(500, "OCR engine failed", "ekstraksi OCR model error (500): error: OpenCV ..."),
-        503: error(503, "OCR model unreachable", "ekstraksi OCR model is unavailable"),
-        504: error(504, "OCR model did not answer in time", "ekstraksi OCR model timed out after 30.0s"),
+        500: error(500, "OCR engine failed", "extraction OCR model error (500): error: OpenCV ..."),
+        503: error(503, "OCR model unreachable", "extraction OCR model is unavailable"),
+        504: error(504, "OCR model did not answer in time", "extraction OCR model timed out after 30.0s"),
         422: error(422, "Validation Error", "body.file: Expected UploadFile, received: str", errors="VALIDATION_ERROR"),
     },
 )
@@ -67,7 +67,7 @@ async def extract(
     request: Request,
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
-    service: EkstraksiService = Depends(get_ekstraksi_service),
+    service: ExtractionService = Depends(get_extraction_service),
 ):
     content, filename, content_type = await read_image(request, file, file_url)
     data = await service.extract(filename, content_type, content)

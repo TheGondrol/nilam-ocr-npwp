@@ -7,7 +7,7 @@ from functools import lru_cache
 
 from fastapi import Depends
 
-from app.clients.ekstraksi import EkstraksiJobClient, build_ekstraksi_client
+from app.clients.extraction import ExtractionJobClient, build_extraction_client
 from app.clients.guardrails import GuardrailsClient, build_guardrails_client
 from app.clients.stages import StageStatusClient, build_stage_status_clients
 from app.config import Settings, get_settings
@@ -23,8 +23,8 @@ def get_guardrails_client() -> GuardrailsClient:
 
 
 @lru_cache
-def get_ekstraksi_client() -> EkstraksiJobClient:
-    return build_ekstraksi_client(get_settings())
+def get_extraction_client() -> ExtractionJobClient:
+    return build_extraction_client(get_settings())
 
 
 @lru_cache
@@ -42,8 +42,8 @@ def get_pipeline_waiter() -> PipelineWaiter:
 
 
 @lru_cache
-def get_testing_ekstraksi_client() -> EkstraksiJobClient:
-    return build_ekstraksi_client(get_settings(), testing=True)
+def get_testing_extraction_client() -> ExtractionJobClient:
+    return build_extraction_client(get_settings(), testing=True)
 
 
 @lru_cache
@@ -63,17 +63,17 @@ def get_testing_pipeline_waiter() -> PipelineWaiter:
 
 def get_extract_service(
     guardrails: GuardrailsClient = Depends(get_guardrails_client),
-    ekstraksi: EkstraksiJobClient = Depends(get_ekstraksi_client),
+    extraction: ExtractionJobClient = Depends(get_extraction_client),
     waiter: PipelineWaiter = Depends(get_pipeline_waiter),
     settings: Settings = Depends(get_settings),
 ) -> ExtractOcrService:
-    return ExtractOcrService(guardrails, ekstraksi, waiter, settings)
+    return ExtractOcrService(guardrails, extraction, waiter, settings)
 
 
 def get_testing_extract_service(
     guardrails: GuardrailsClient = Depends(get_guardrails_client),
-    ekstraksi: EkstraksiJobClient = Depends(get_testing_ekstraksi_client),
+    extraction: ExtractionJobClient = Depends(get_testing_extraction_client),
     waiter: PipelineWaiter = Depends(get_testing_pipeline_waiter),
     settings: Settings = Depends(get_settings),
 ) -> ExtractOcrService:
-    return ExtractOcrService(guardrails, ekstraksi, waiter, settings)
+    return ExtractOcrService(guardrails, extraction, waiter, settings)

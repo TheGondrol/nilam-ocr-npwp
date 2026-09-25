@@ -26,7 +26,7 @@ class OcrBlock(TypedDict):
 
 
 class OcrEngineResult(TypedDict):
-    """What an OCR engine (`app/ml/*` of ekstraksi) returns."""
+    """What an OCR engine (`app/ml/*` of extraction) returns."""
 
     blocks: list[OcrBlock]
     model: str | None

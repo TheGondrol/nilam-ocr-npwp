@@ -1,4 +1,4 @@
-"""The `paddle` backend: the PaddleOCR model server (EKSTRAKSI_OCR_URL) and its /ocr contract."""
+"""The `paddle` backend: the PaddleOCR model server (EXTRACTION_OCR_URL) and its /ocr contract."""
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import InternalError

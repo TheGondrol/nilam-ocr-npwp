@@ -3,7 +3,7 @@ Tracker pipeline untuk uji coba lokal. Memerankan ORKESTRASI di sequence
 diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 
     POST /api/requests               upload dokumen -> orchestrator /v1/extract-ocr (tunggu PIPELINE_WAIT_SECONDS)
-    POST /v1/callbacks/stage         dipanggil relay ekstraksi / structuring / scoring (ORCHESTRATION_URL)
+    POST /v1/callbacks/stage         dipanggil relay extraction / structuring / scoring (ORCHESTRATION_URL)
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
     POST /api/requests/{id}/outbox/release   lepaskan dead letter request itu (failed_at = NULL)
@@ -70,11 +70,11 @@ ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8034")
 SERVICES = {
     "ORCHESTRATOR": ORCHESTRATOR_URL,
     "GUARDRAILS": os.environ.get("GUARDRAILS_URL", "http://127.0.0.1:8031"),
-    "OCR": os.environ.get("EKSTRAKSI_URL", "http://127.0.0.1:8030"),
+    "OCR": os.environ.get("EXTRACTION_URL", "http://127.0.0.1:8030"),
     "STRUCTURING": os.environ.get("STRUCTURING_URL", "http://127.0.0.1:8032"),
     "SCORING": os.environ.get("SCORING_URL", "http://127.0.0.1:8033"),
 }
-PREFIXES = {"OCR": "ekstraksi", "STRUCTURING": "structuring", "SCORING": "scoring"}
+PREFIXES = {"OCR": "extraction", "STRUCTURING": "structuring", "SCORING": "scoring"}
 TABLES = {"OCR": "ocr", "STRUCTURING": "structuring", "SCORING": "scoring"}
 JOB_PATHS = {stage: f"/v1/{prefix}/jobs" for stage, prefix in PREFIXES.items()}
 API_KEY = os.environ.get("API_KEY")  # kosong kalau service dijalankan dengan AUTH_DISABLED=true
@@ -380,7 +380,7 @@ async def submit(
     content = await file.read()
     filename = file.filename or "upload"
     if slow_seconds > 0:
-        # Hook lokal di ekstraksi (ENVIRONMENT=local): tahap OCR ditunda sebelum bekerja,
+        # Hook lokal di extraction (ENVIRONMENT=local): tahap OCR ditunda sebelum bekerja,
         # supaya pipeline melewati PIPELINE_WAIT_SECONDS dan orchestrator menjawab 202.
         filename = f"delay{slow_seconds}s-{filename}"
     content_type = file.content_type or "image/jpeg"

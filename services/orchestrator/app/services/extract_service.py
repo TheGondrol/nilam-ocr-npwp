@@ -8,7 +8,7 @@ from ocr_common.errors import NotFound
 from ocr_common.npwp import DOCUMENT_TYPE, final_result
 from ocr_common.pipeline import STAGE_SCORING, STAGE_STRUCTURING, STATUS_DONE
 
-from app.clients.ekstraksi import EkstraksiJobClient
+from app.clients.extraction import ExtractionJobClient
 from app.clients.guardrails import GuardrailsClient
 from app.config import Settings
 from app.services.document_checks import check_document
@@ -26,10 +26,10 @@ class ExtractOcrService:
     wait for OCR -> structuring -> scoring."""
 
     def __init__(
-        self, guardrails: GuardrailsClient, ekstraksi: EkstraksiJobClient, waiter: PipelineWait, settings: Settings
+        self, guardrails: GuardrailsClient, extraction: ExtractionJobClient, waiter: PipelineWait, settings: Settings
     ):
         self._guardrails = guardrails
-        self._ekstraksi = ekstraksi
+        self._extraction = extraction
         self._waiter = waiter
         self._settings = settings
 
@@ -65,7 +65,7 @@ class ExtractOcrService:
                 return {**report, "job": None, "pipeline": None, "result": None}
             verdict = report
 
-        job = await self._ekstraksi.submit(
+        job = await self._extraction.submit(
             request_id, document_type, report, filename, content_type, content, file_url=file_url
         )
         wait_seconds = self._settings.pipeline_wait_seconds

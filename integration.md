@@ -16,7 +16,7 @@ yang sedang berjalan, bukan karangan. Yang belum terbukti ditandai eksplisit.
 
 Sudah terbukti jalan di cluster:
 
-- guardrails, ekstraksi, structuring, scoring `/ready` menjawab 200, koneksi database normal
+- guardrails, extraction, structuring, scoring `/ready` menjawab 200, koneksi database normal
 - satu kartu NPWP asli lewat rantai penuh dalam ±6 detik, hasil
   `npwp_confidence` 0.9926 dan `name_confidence` 0.9953
 - job tercatat `DONE` di ketiga tabel tahap
@@ -43,7 +43,7 @@ Satu-satunya alamat yang kalian pakai:
     http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034
 
 Di belakangnya, tiap service punya Deployment + Service sendiri (`nilam-ocr-npwp-<service>`):
-orchestrator (8034), guardrails (8031), ekstraksi (8030), structuring (8032), scoring (8033). Selain
+orchestrator (8034), guardrails (8031), extraction (8030), structuring (8032), scoring (8033). Selain
 orchestrator semuanya internal: hanya dipanggil orchestrator atau tahap sebelumnya.
 
 **Autentikasi.** Semua endpoint kecuali `/health` dan `/ready` memerlukan header:
@@ -113,7 +113,7 @@ default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu
 `request_id` dibuat oleh kalian dan menjadi kunci di semua tahap. Bebas formatnya,
 string; contoh yang kami pakai saat uji: `REQ_a0e0fd34ed7a`.
 
-Kalian **tidak** memanggil guardrails, ekstraksi, structuring, dan scoring sendiri (dan sejak
+Kalian **tidak** memanggil guardrails, extraction, structuring, dan scoring sendiri (dan sejak
 orchestrator ada, memang tidak bisa dari namespace kalian begitu NetworkPolicy ditegakkan). Keadaan
 sebuah request kapan saja: `GET :8034/v1/extract-ocr/{request_id}` (bagian 4). Bagian 5 dan 6
 menjelaskan apa yang terjadi di dalam, sebagai latar.
@@ -190,7 +190,7 @@ Selesai dalam waktu tunggu, **200**:
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
 - `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
   `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
-- Flag dari aturan ekstraksi ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
+- Flag dari aturan extraction ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
   input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
   nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
   menolak dokumen dengan 400 (lihat di bawah).
@@ -231,7 +231,7 @@ Tahap pipeline gagal dalam waktu tunggu, **422**; request berakhir di sini, sama
 callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
 
     {"status_code": 422, "status_desc": "Unprocessable Entity",
-     "message": "ekstraksi OCR model is unavailable",
+     "message": "extraction OCR model is unavailable",
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
      "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
 
@@ -280,16 +280,16 @@ tidak datang.
   letter di outbox kami) hanya tercatat di callback `FAILED` dan di tabel kalian; endpoint ini tetap
   menjawab 202 untuk request itu. Untuk keadaan final, callback dan tabel kalian yang berlaku.
 
-## 5. Service ekstraksi (port 8030)
+## 5. Service extraction (port 8030)
 
 Tahap OCR. Backend OCR-nya PaddleOCR yang berjalan di VM terpisah; service ini yang
 memanggilnya.
 
-`POST /v1/ekstraksi/jobs` dipanggil oleh orchestrator, bukan oleh kalian. Setelah dijawab
+`POST /v1/extraction/jobs` dipanggil oleh orchestrator, bukan oleh kalian. Setelah dijawab
 202, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, lalu job diserahkan ke
 structuring, yang kemudian menyerahkan ke scoring.
 
-### GET /v1/ekstraksi/jobs/{request_id} — status tahap OCR (internal)
+### GET /v1/extraction/jobs/{request_id} — status tahap OCR (internal)
 
 Dibaca orchestrator untuk `GET /v1/extract-ocr/{request_id}`; dicantumkan sebagai latar.
 
@@ -300,7 +300,7 @@ Dibaca orchestrator untuk `GET /v1/extract-ocr/{request_id}`; dicantumkan sebaga
 `status` bernilai `PROCESSING`, `DONE`, atau `FAILED`. `404` berarti tahap ini belum
 pernah menerima job dengan `request_id` tersebut.
 
-### POST /v1/ekstraksi/extract — OCR mentah, sinkron (internal)
+### POST /v1/extraction/extract — OCR mentah, sinkron (internal)
 
 Menjalankan OCR saja dan langsung mengembalikan hasilnya. Tidak membuat job, tidak
 mengirim callback, tidak menyentuh tahap lain. Untuk debugging kami.
@@ -312,8 +312,8 @@ Keduanya dipanggil berantai oleh service sebelumnya dan internal; kalian tidak m
 | Service | Endpoint | Siapa yang memanggil |
 |---|---|---|
 | guardrails | `POST /v1/guardrails/check` | orchestrator, untuk tiap dokumen |
-| ekstraksi | `POST /v1/ekstraksi/jobs` | orchestrator, otomatis |
-| structuring | `POST /v1/structuring/jobs` | ekstraksi, otomatis |
+| extraction | `POST /v1/extraction/jobs` | orchestrator, otomatis |
+| structuring | `POST /v1/structuring/jobs` | extraction, otomatis |
 | structuring | `GET /v1/structuring/jobs/{request_id}` | orchestrator (status) |
 | structuring | `POST /v1/structuring/structure` | debugging, sinkron |
 | scoring | `POST /v1/scoring/jobs` | structuring, otomatis |
@@ -503,11 +503,11 @@ penjelasan yang aman untuk di-log.
 
 ## 11. Kontrak lama (sinkron): sudah dihapus
 
-Sejak 24 September 2026, endpoint kontrak lama di service ekstraksi (port 8030) sudah
+Sejak 24 September 2026, endpoint kontrak lama di service extraction (port 8030) sudah
 dihapus:
 
     POST /v1/generate-request-id
-    POST /v1/extract-ocr                  (versi ekstraksi, port 8030)
+    POST /v1/extract-ocr                  (versi extraction, port 8030)
     GET  /v1/get-ocr-result/{request_id}
 
 Sejak orchestrator ada (24 September 2026), `POST /v1/extract-ocr` di guardrails (port 8031)

@@ -9,7 +9,7 @@ from ocr_common.pipeline import STAGE_STRUCTURING, HandoffPayload, StagePipeline
 from ocr_common.simulation import simulated_delay_seconds
 from ocr_common.types import OcrResult
 
-from app.services.ekstraksi_service import EkstraksiService
+from app.services.extraction_service import ExtractionService
 
 UploadedFile = tuple[bytes, str, str | None]
 Source = UploadedFile | str
@@ -21,11 +21,11 @@ INLINE_UPLOAD_GONE = (
 )
 
 
-class EkstraksiJobService:
+class ExtractionJobService:
     def __init__(
         self,
         pipeline: StagePipeline,
-        ekstraksi: EkstraksiService,
+        extraction: ExtractionService,
         max_upload_bytes: int,
         url_policy: UrlPolicy = STRICT_URL_POLICY,
         *,
@@ -33,7 +33,7 @@ class EkstraksiJobService:
         handoff_by_reference: bool = False,
     ):
         self._pipeline = pipeline
-        self._ekstraksi = ekstraksi
+        self._extraction = extraction
         self._max_upload_bytes = max_upload_bytes
         self._url_policy = url_policy
         self._simulate_delay = simulate_delay
@@ -83,7 +83,7 @@ class EkstraksiJobService:
             delay = simulated_delay_seconds(filename, enabled=self._simulate_delay)
             if delay:
                 await asyncio.sleep(delay)
-            return await self._ekstraksi.extract(filename, content_type, content)
+            return await self._extraction.extract(filename, content_type, content)
 
         def handoff(ocr: Mapping[str, Any]) -> dict[str, Any]:
             body: dict[str, Any] = {"request_id": request_id, "document_type": document_type, "guardrails": guardrails}

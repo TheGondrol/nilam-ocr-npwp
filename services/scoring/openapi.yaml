@@ -1256,7 +1256,7 @@ components:
           description: Active implementation per concern (model backend, storage). Useful to confirm a
             deployment
           examples:
-          - ekstraksi: paddle
+          - extraction: paddle
             storage: postgres
       type: object
       required:
@@ -1918,7 +1918,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:

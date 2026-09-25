@@ -113,7 +113,7 @@ class HealthResponse(BaseModel):
     backends: dict[str, str] = Field(
         ...,
         description="Active implementation per concern (model backend, storage). Useful to confirm a deployment",
-        examples=[{"ekstraksi": "paddle", "storage": "postgres"}],
+        examples=[{"extraction": "paddle", "storage": "postgres"}],
     )
 
 

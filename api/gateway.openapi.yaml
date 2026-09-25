@@ -263,7 +263,7 @@ paths:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
         '500':
-          description: The guardrails or ekstraksi service failed, or answered in an unexpected shape
+          description: The guardrails or extraction service failed, or answered in an unexpected shape
           content:
             application/json:
               schema:
@@ -274,7 +274,7 @@ paths:
                 message: guardrails service returned an unexpected response
                 errors: guardrails service returned an unexpected response
         '503':
-          description: The guardrails service, its model, or the ekstraksi service is unreachable; nothing
+          description: The guardrails service, its model, or the extraction service is unreachable; nothing
             was started
           content:
             application/json:
@@ -283,10 +283,11 @@ paths:
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: ekstraksi service is unavailable
-                errors: ekstraksi service is unavailable
+                message: extraction service is unavailable
+                errors: extraction service is unavailable
         '504':
-          description: The guardrails service, its model, or the ekstraksi service did not answer in time
+          description: The guardrails service, its model, or the extraction service did not answer in
+            time
           content:
             application/json:
               schema:
@@ -294,8 +295,8 @@ paths:
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: ekstraksi service timed out after 10.0s
-                errors: ekstraksi service timed out after 10.0s
+                message: extraction service timed out after 10.0s
+                errors: extraction service timed out after 10.0s
       security:
       - APIKeyHeader: []
       servers: &id001
@@ -513,10 +514,10 @@ webhooks:
         **When.** Once per stage, from the service that ran it:
 
 
-        - **ekstraksi**: Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once
-        the OCR result is stored, or `status: FAILED` with `error_message` when the document could not
-        be read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR
-        succeeded but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX`
+        - **extraction**: Once per job of `POST /v1/extraction/jobs`: `stage: OCR` with `status: DONE`
+        once the OCR result is stored, or `status: FAILED` with `error_message` when the document could
+        not be read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when
+        OCR succeeded but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX`
         the `OCR` callback is sent before the hand-off to structuring; with it the hand-off goes first,
         so the `STRUCTURING` callback may arrive before this one.
 
@@ -1051,7 +1052,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
@@ -1105,7 +1106,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:

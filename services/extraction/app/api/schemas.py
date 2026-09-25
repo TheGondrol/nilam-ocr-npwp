@@ -27,7 +27,7 @@ class TextBlock(BaseModel):
 
 class OcrResult(BaseModel):
     engine: str = Field(
-        ..., description="OCR backend that read the document (`EKSTRAKSI_BACKEND`)", examples=["paddle"]
+        ..., description="OCR backend that read the document (`EXTRACTION_BACKEND`)", examples=["paddle"]
     )
     model: str | None = Field(
         None,

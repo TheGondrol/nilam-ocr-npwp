@@ -7,19 +7,19 @@ from ocr_common.web.app import create_app
 from app.api import testing
 from app.config import get_settings
 from app.dependencies import (
-    get_ekstraksi_service,
+    get_extraction_service,
     get_testing_job_service,
     get_testing_next_stage,
     get_testing_pipeline,
 )
-from app.services.job_service import EkstraksiJobService
+from app.services.job_service import ExtractionJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 
 
 def _submit(client, auth, request_id):
     data = {"request_id": request_id, "document_type": "npwp", "guardrails": json.dumps(GUARDRAILS)}
-    return client.post("/v1/ekstraksi/jobs-test", headers=auth, data=data, files=image_upload("npwp.jpg"))
+    return client.post("/v1/extraction/jobs-test", headers=auth, data=data, files=image_upload("npwp.jpg"))
 
 
 def test_testing_endpoint_is_off_by_default(client, auth):
@@ -43,16 +43,16 @@ def test_testing_endpoint_runs_the_same_job(auth):
         next_stage_client=next_stage,
         callbacks=False,
     )
-    app = create_app(settings=get_settings(), title="Ekstraksi", description="testing", routers=[testing.router])
-    app.dependency_overrides[get_testing_job_service] = lambda: EkstraksiJobService(
-        pipeline, get_ekstraksi_service(), 5 * 1024 * 1024
+    app = create_app(settings=get_settings(), title="Extraction", description="testing", routers=[testing.router])
+    app.dependency_overrides[get_testing_job_service] = lambda: ExtractionJobService(
+        pipeline, get_extraction_service(), 5 * 1024 * 1024
     )
 
     with make_client(app) as client:
         response = _submit(client, auth, "REQ_T1")
         assert response.status_code == 202
         assert response.json()["data"]["stage"] == "OCR"
-        job = wait_for_job(client, "/v1/ekstraksi/jobs-test/REQ_T1")
+        job = wait_for_job(client, "/v1/extraction/jobs-test/REQ_T1")
 
     assert job["status"] == "DONE"
     assert [payload["request_id"] for payload in next_stage.payloads] == ["REQ_T1"]

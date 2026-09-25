@@ -88,14 +88,14 @@ async def test_a_failed_ocr_stage_is_reported_as_extraction(tmp_path):
     repo, table = await _repository(tmp_path, STAGE_OCR, lambda table, stage: ApiEventOutcome(table, stage=stage))
     try:
         await repo.claim(RID)
-        await repo.fail(RID, "ekstraksi OCR model is unavailable")
+        await repo.fail(RID, "extraction OCR model is unavailable")
 
         [row] = await _rows((repo, table))
         assert (row["status_code"], row["downstream_status"], row["downstream_stage"]) == (422, "FAILED", "EXTRACTION")
         assert row["error_code"] == "OCR_FAILED"
         assert row["result_data"]["result"] is None
         assert row["result_data"]["status"] == "failed"
-        assert row["result_data"]["error_message"] == "ekstraksi OCR model is unavailable"
+        assert row["result_data"]["error_message"] == "extraction OCR model is unavailable"
     finally:
         await database.dispose_engines()
 

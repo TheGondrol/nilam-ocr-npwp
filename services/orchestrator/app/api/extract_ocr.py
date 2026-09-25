@@ -199,18 +199,18 @@ def _parse_params(raw: str | None) -> Any:
         },
         500: error(
             500,
-            "The guardrails or ekstraksi service failed, or answered in an unexpected shape",
+            "The guardrails or extraction service failed, or answered in an unexpected shape",
             "guardrails service returned an unexpected response",
         ),
         503: error(
             503,
-            "The guardrails service, its model, or the ekstraksi service is unreachable; nothing was started",
-            "ekstraksi service is unavailable",
+            "The guardrails service, its model, or the extraction service is unreachable; nothing was started",
+            "extraction service is unavailable",
         ),
         504: error(
             504,
-            "The guardrails service, its model, or the ekstraksi service did not answer in time",
-            "ekstraksi service timed out after 10.0s",
+            "The guardrails service, its model, or the extraction service did not answer in time",
+            "extraction service timed out after 10.0s",
         ),
     },
 )

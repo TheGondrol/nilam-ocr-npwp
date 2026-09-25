@@ -22,10 +22,10 @@ from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAcceptedResponse, error, success_examples
 from ocr_common.web.security import verify_api_key
 
-from app.api.ekstraksi import OCR_RESULT_EXAMPLE
+from app.api.extraction import OCR_RESULT_EXAMPLE
 from app.api.schemas import OcrJobStatusResponse
 from app.dependencies import get_job_service, get_pipeline
-from app.services.job_service import EkstraksiJobService, Source
+from app.services.job_service import ExtractionJobService, Source
 
 router = APIRouter(tags=["Pipeline"], dependencies=[Depends(verify_api_key)])
 
@@ -45,7 +45,7 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
 
 
 @router.post(
-    "/v1/ekstraksi/jobs",
+    "/v1/extraction/jobs",
     status_code=202,
     response_model=JobAcceptedResponse,
     operation_id="submitOcrJob",
@@ -119,7 +119,7 @@ async def submit_job(
     ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
-    service: EkstraksiJobService = Depends(get_job_service),
+    service: ExtractionJobService = Depends(get_job_service),
 ):
     upload, url = resolve_intake(file, file_url)
     source: Source
@@ -133,7 +133,7 @@ async def submit_job(
 
 
 @router.get(
-    "/v1/ekstraksi/jobs/{request_id}",
+    "/v1/extraction/jobs/{request_id}",
     response_model=OcrJobStatusResponse,
     operation_id="getOcrJob",
     summary="Status and result of the OCR stage",
@@ -184,7 +184,7 @@ async def submit_job(
                     {
                         **_JOB,
                         "status": "FAILED",
-                        "error_message": "ekstraksi OCR model is unavailable",
+                        "error_message": "extraction OCR model is unavailable",
                         "result": None,
                         "updated_at": "2026-09-18T04:00:03+00:00",
                     },
@@ -208,15 +208,15 @@ async def submit_job(
         ),
     },
 )
-async def get_job(request_id: str, service: EkstraksiJobService = Depends(get_job_service)):
+async def get_job(request_id: str, service: ExtractionJobService = Depends(get_job_service)):
     data = await service.get(request_id)
     return envelope(200, "Success", data, request_id)
 
 
 @router.get(
-    "/v1/ekstraksi/outbox",
+    "/v1/extraction/outbox",
     response_model=OutboxStatusResponse,
-    operation_id="getEkstraksiOutboxStatus",
+    operation_id="getExtractionOutboxStatus",
     summary=OUTBOX_STATUS_SUMMARY,
     description=OUTBOX_STATUS_DESCRIPTION,
     responses=outbox_status_responses("OCR"),
@@ -226,7 +226,7 @@ async def get_outbox_status(request: Request, pipeline: StagePipeline = Depends(
 
 
 @router.post(
-    "/v1/ekstraksi/outbox/release",
+    "/v1/extraction/outbox/release",
     response_model=OutboxReleaseResponse,
     operation_id="releaseOcrOutbox",
     summary=OUTBOX_RELEASE_SUMMARY,

@@ -102,9 +102,9 @@ jobs:
           - service: guardrails
             port: 8031
             env: -e GUARDRAILS_BACKEND=mock
-          - service: ekstraksi
+          - service: extraction
             port: 8030
-            env: -e EKSTRAKSI_BACKEND=mock
+            env: -e EXTRACTION_BACKEND=mock
           - service: structuring
             port: 8032
             env: ""

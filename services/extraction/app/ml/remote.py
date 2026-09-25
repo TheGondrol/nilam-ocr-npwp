@@ -6,7 +6,7 @@ rec_scores, rec_polys}], n_boxes, avg_doc_score, min_doc_score}` (nilamnpwp `ocr
 and `models` are used: the document-level scores are recomputed by scoring from the blocks.
 
 In production one OCR model will serve several document types and take its parameters per call, so
-`EKSTRAKSI_OCR_PARAMS` (a JSON object) is sent as extra form fields with every request."""
+`EXTRACTION_OCR_PARAMS` (a JSON object) is sent as extra form fields with every request."""
 
 from typing import Any
 

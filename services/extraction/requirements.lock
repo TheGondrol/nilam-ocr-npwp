@@ -69,7 +69,7 @@ asyncpg==0.31.0 \
     --hash=sha256:eee690960e8ab85063ba93af2ce128c0f52fd655fdff9fdb1a28df01329f031d \
     --hash=sha256:f6b56b91bb0ffc328c4e3ed113136cddd9deefdf5f79ab448598b9772831df44 \
     --hash=sha256:f890de5e1e4f7e14023619399a471ce4b71f5418cd67a51853b9910fdfa73696
-    # via -r services/ekstraksi/requirements.txt
+    # via -r services/extraction/requirements.txt
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
@@ -84,7 +84,7 @@ fastapi==0.115.0 \
     --hash=sha256:17ea427674467486e997206a5ab25760f6b09e069f099b96f5b55a32fb6f1631 \
     --hash=sha256:f93b4ca3529a8ebc6fc3fcf710e5efa8de3df9b41570958abf1d97d843138004
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
 greenlet==3.2.4 \
     --hash=sha256:00fadb3fedccc447f517ee0d3fd8fe49eae949e1cd0f6a611818f4f6fb7dc83b \
@@ -154,7 +154,7 @@ greenlet==3.2.4 \
     --hash=sha256:f28588772bb5fb869a8eb331374ec06f24a83a9c25bfa1f38b6993afe9c1e968 \
     --hash=sha256:f47617f698838ba98f4ff4189aef02e7343952df3a615f847bb575c3feb177a7
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
     #   sqlalchemy
 h11==0.16.0 \
@@ -223,7 +223,7 @@ httpx==0.27.2 \
     --hash=sha256:7bb2708e112d8fdd7829cd4243970f0c223274051cb35ee80c03301ee29a3df0 \
     --hash=sha256:f7c2be1d2f3c3c3160d441802406b206c2b76f5947b11115e6df10c6c65e66c2
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
@@ -367,7 +367,7 @@ pydantic-settings==2.5.2 \
     --hash=sha256:2c912e55fd5794a59bf8c832b9de832dcfdf4778d79ff79b708744eed499a907 \
     --hash=sha256:f90b139682bee4d2065273d5185d71d37ea46cfe57e1b5ae184fc6a0b2484ca0
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
 python-dotenv==1.2.3 \
     --hash=sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9 \
@@ -379,7 +379,7 @@ python-multipart==0.0.9 \
     --hash=sha256:03f54688c663f1b7977105f021043b0793151e4cb1c1a9d4a11fc13d622c4026 \
     --hash=sha256:97ca7b8ea7b05f977dc3849c3ba99d51689822fab725c3703af7c866a0c2b215
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
@@ -514,7 +514,7 @@ sqlalchemy==2.0.52 \
     --hash=sha256:f2b09029ef6f260409eefa5dc2b8276f6c3d7b892bfb50d50e8f852257d4a6b4 \
     --hash=sha256:f4d4f7afc682961dc567db70e00a7b5bd81ccd3743c46199b0257f0744902dde
     # via
-    #   -r services/ekstraksi/requirements.txt
+    #   -r services/extraction/requirements.txt
     #   ocr-common (libs/ocr_common/pyproject.toml)
 starlette==0.38.6 \
     --hash=sha256:4517a1409e2e73ee4951214ba012052b9e16f60e90d73cfb06192c19203bbb05 \
@@ -537,7 +537,7 @@ typing-inspection==0.4.4 \
 uvicorn==0.30.6 \
     --hash=sha256:4b15decdda1e72be08209e860a1e10e92439ad5b97cf44cc945fcbee66fc5788 \
     --hash=sha256:65fd46fe3fda5bdc1b03b94eb634923ff18cd35b2f084813ea79d1f103f711b5
-    # via -r services/ekstraksi/requirements.txt
+    # via -r services/extraction/requirements.txt
 uvloop==0.22.1 \
     --hash=sha256:017bd46f9e7b78e81606329d07141d3da446f8798c6baeec124260e22c262772 \
     --hash=sha256:0530a5fbad9c9e4ee3f2b33b148c6a64d47bbad8000ea63704fa8260f4cf728e \

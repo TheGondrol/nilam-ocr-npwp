@@ -4,9 +4,9 @@ Service OCR untuk dokumen NPWP (kartu identitas pajak) Indonesia, dipecah menjad
 
 | Service | Port | Image | Peran |
 |---|---|---|---|
-| **orchestrator** | 8034 | `nilam-ocr-orchestrator` | Orkestrasi khusus NPWP, **pintu masuk tunggal**: Orkestrasi pusat hanya memanggil `POST /v1/extract-ocr` (dan `GET /v1/extract-ocr/{request_id}`) di sini. Memeriksa file (tipe, ukuran), minta guardrails menilai dokumen, menyerahkan dokumen yang lolos ke ekstraksi, lalu **menunggu pipeline** sampai `PIPELINE_WAIT_SECONDS`: 200 hasil akhir, 202 masih berjalan, 400 ditolak, 422 satu tahap gagal. Stateless: tanpa database, tanpa callback |
+| **orchestrator** | 8034 | `nilam-ocr-orchestrator` | Orkestrasi khusus NPWP, **pintu masuk tunggal**: Orkestrasi pusat hanya memanggil `POST /v1/extract-ocr` (dan `GET /v1/extract-ocr/{request_id}`) di sini. Memeriksa file (tipe, ukuran), minta guardrails menilai dokumen, menyerahkan dokumen yang lolos ke extraction, lalu **menunggu pipeline** sampai `PIPELINE_WAIT_SECONDS`: 200 hasil akhir, 202 masih berjalan, 400 ditolak, 422 satu tahap gagal. Stateless: tanpa database, tanpa callback |
 | **guardrails** | 8031 | `nilam-ocr-guardrails` | "ServiceGuardrails", internal: `POST /v1/guardrails/check` dipanggil orchestrator untuk tiap dokumen. Klasifikasi tiap halaman `accepted`/`reject` dengan model EfficientNet-B0 (lokal, CPU) + vonis dokumen; batas halaman (400) dan ukuran (413) dicek sebelum model |
-| **ekstraksi** | 8030 | `nilam-ocr-ekstraksi` | "ServiceOCR": tahap pertama pipeline async (`/v1/ekstraksi/jobs` → 202, OCR di background, hasil ke tabel Orkestrasi, handoff ke structuring). Juga OCR mentah sinkron (`/v1/ekstraksi/extract`) |
+| **extraction** | 8030 | `nilam-ocr-extraction` | "ServiceOCR": tahap pertama pipeline async (`/v1/extraction/jobs` → 202, OCR di background, hasil ke tabel Orkestrasi, handoff ke structuring). Juga OCR mentah sinkron (`/v1/extraction/extract`) |
 | **structuring** | 8032 | `nilam-ocr-structuring` | "ServiceStructuring": `/v1/structuring/jobs` → 202, baris teks → `nomor_npwp`, `nama`, `nama_badan` dengan confidence per field, handoff ke scoring |
 | **scoring** | 8033 | `nilam-ocr-scoring` | "ServiceScoring", tahap terakhir: `/v1/scoring/jobs` → 202, confidence per field (`npwp_confidence`, `name_confidence`) dari trust model ML engineer; menulis **hasil akhir** ke tabel Orkestrasi (`ORCHESTRATION_OUTCOME_TABLE`). Tanpa skor dokumen / keputusan: ambang milik Orkestrasi |
 
@@ -86,18 +86,18 @@ nilam-ocr-npwp/
 │   ├── orchestrator/                 # port 8034, pintu masuk: app/{main, config, dependencies, api, services, clients}, tests (tanpa ml/)
 │   │   ├── app/api/extract_ocr.py    # POST /v1/extract-ocr, GET /v1/extract-ocr/{request_id}; api/testing.py kembaran -test
 │   │   ├── app/services/             # extract_service.py (cek file, guardrails, hand-off, tunggu); pipeline_waiter.py (wait, snapshot)
-│   │   └── app/clients/              # guardrails.py (/v1/guardrails/check), ekstraksi.py (hand-off), stages.py (status tahap)
-│   ├── ekstraksi/                    # port 8030 (slot ocr-npwp)
+│   │   └── app/clients/              # guardrails.py (/v1/guardrails/check), extraction.py (hand-off), stages.py (status tahap)
+│   ├── extraction/                    # port 8030 (slot ocr-npwp)
 │   │   ├── Dockerfile · requirements.txt · requirements.lock · .env.example · openapi.yaml · pyproject.toml
 │   │   ├── app/
 │   │   │   ├── main.py               # create_app(...) + lifespan
 │   │   │   ├── config.py             # Settings
 │   │   │   ├── dependencies.py       # composition root: OCR_BACKENDS, get_ocr_engine, get_pipeline, get_*_service
-│   │   │   ├── api/jobs.py           # pipeline async: POST/GET /v1/ekstraksi/jobs, GET .../outbox, POST .../outbox/release
-│   │   │   ├── api/ekstraksi.py      # /v1/ekstraksi/extract
+│   │   │   ├── api/jobs.py           # pipeline async: POST/GET /v1/extraction/jobs, GET .../outbox, POST .../outbox/release
+│   │   │   ├── api/extraction.py      # /v1/extraction/extract
 │   │   │   ├── api/schemas.py        # request/response Pydantic
 │   │   │   ├── services/job_service.py        # kerja tahap OCR + payload handoff ke structuring
-│   │   │   ├── services/ekstraksi_service.py
+│   │   │   ├── services/extraction_service.py
 │   │   │   ├── ml/base.py            # Protocol OcrEngine
 │   │   │   ├── ml/paddle.py · ml/remote.py · ml/mock.py   # satu backend per file
 │   │   │   └── ml/utils.py           # normalisasi jawaban model -> blok teks
@@ -139,10 +139,10 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
    passed=false ◄─ 400 {errors: DOWNSTREAM_VALIDATION_ERROR, job_status: failed, guardrails: 1, message, params}
                 ─► Orkestrasi pusat jawab client 400 dari respons sinkron ini. Tidak ada tahap yang jalan,
                    jadi `downstream_status` untuk request yang ditolak guardrails TIDAK pernah ditulis pipeline.
-   passed=true  ─► ekstraksi:8030 POST /v1/ekstraksi/jobs              202 segera
+   passed=true  ─► extraction:8030 POST /v1/extraction/jobs              202 segera
                      (request_id, document_type, guardrails, file | file_url yang sama)
                    orchestrator MENUNGGU maks. PIPELINE_WAIT_SECONDS (default 15 dtk, sejak request diterima):
-                   GET /v1/{ekstraksi,structuring,scoring}/jobs/{request_id} berurutan,
+                   GET /v1/{extraction,structuring,scoring}/jobs/{request_id} berurutan,
                    tiap PIPELINE_POLL_INTERVAL_SECONDS (default 0,5 dtk)
                 ◄─ 200 {job_status: completed, data: {nomor_npwp, nama, flag, flag_reason}, guardrails: 0, params}
                 ◄─ 422 {job_status: failed, errors: <TAHAP>_FAILED, guardrails: 0, message, params} gagal
@@ -150,7 +150,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 ─► Orkestrasi pusat: 200/422 → jawab client; 202 → jawab client 202, hasil menyusul di tabelnya
 
 
-   ekstraksi:   ┌─ SATU TRANSAKSI (klaim) ──────────────────────────────────────────────────────┐
+   extraction:   ┌─ SATU TRANSAKSI (klaim) ──────────────────────────────────────────────────────┐
                 │ INSERT ocr_jobs (PROCESSING, input: {document_type, guardrails, file_url})    │
                 │   ON CONFLICT DO NOTHING                                                       │
                 │ UPSERT orchestration_extract_ocr {downstream_status: processing, stage: OCR}  │
@@ -193,7 +193,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
 
 Client ─► Orkestrasi: GET status by request_id  ─► Orkestrasi: SELECT downstream_status (+ result_data) FROM orchestration_extract_ocr
 Orkestrasi pusat ─► orchestrator:8034 GET /v1/extract-ocr/{request_id}: kontrak yang sama (200/202/400/422, params null),
-          dibaca sekali dari GET /v1/{ekstraksi,structuring,scoring}/jobs/{request_id}, tanpa menunggu; 404 = tidak ada tahap
+          dibaca sekali dari GET /v1/{extraction,structuring,scoring}/jobs/{request_id}, tanpa menunggu; 404 = tidak ada tahap
           yang punya job (ditolak model guardrails, atau belum dikirim)
 Ops    ─► tiap tahap: GET /v1/<tahap>/outbox {pending, retrying, oldest_pending_seconds, dead_letters}
           GET /v1/<tahap>/jobs/{request_id} untuk debugging (internal, dari dalam namespace)
@@ -210,17 +210,17 @@ Cara membacanya:
 Ketiga tahap memakai mesin yang sama, `ocr_common/pipeline/stage.py`; tiap service hanya mengisi kerjanya (`services/job_service.py`). Perilaku yang sama di ketiganya:
 
 - **202 segera, kerja di background.** Job jalan sebagai `asyncio` task (referensi kuat, di-drain saat shutdown). Job yang belum selesai saat batas drain habis dibatalkan, ditandai `FAILED`, dan dicatat ke tabel Orkestrasi, jadi orkestrator bisa mengirimnya ulang. Kerja sinkron yang CPU-bound (structuring, scoring) dijalankan di threadpool supaya event loop tetap menerima job lain.
-- **Job basi diambil lagi** (`PIPELINE_STALE_JOBS`, butuh `DATABASE_URL`). Proses yang mati mendadak (OOM, SIGKILL, node hilang) meninggalkan baris `jobs` berstatus `PROCESSING` tanpa pemilik. Pengambil job basi di tiap proses, seperti relay outbox, tiap `PIPELINE_STALE_JOB_INTERVAL_SECONDS` mengklaim baris yang lewat lease dan menjalankannya lagi dari database: `input` yang disimpan saat klaim (`document_type`, laporan guardrails, `file_url`) dan hasil tahap sebelumnya di `*_results`. Structuring dan scoring selalu bisa diulang; OCR hanya kalau request ke orchestrator memakai `file_url`: orchestrator meneruskan URL itu (bukan byte-nya) ke `/v1/ekstraksi/jobs`, ekstraksi menyimpannya di `input` dan mengunduh lagi saat mengulang. Upload inline tidak disimpan, jadi job OCR-nya `FAILED` minta kirim ulang. Konsekuensinya: `FILE_URL_ALLOWED_HOSTS` harus diisi di ekstraksi juga, dan presigned URL harus hidup lebih lama dari `PIPELINE_JOB_LEASE_SECONDS`. Orkestrasi tidak perlu lagi mengirim ulang, tapi kiriman ulang tetap aman (klaim ulang yang sama).
+- **Job basi diambil lagi** (`PIPELINE_STALE_JOBS`, butuh `DATABASE_URL`). Proses yang mati mendadak (OOM, SIGKILL, node hilang) meninggalkan baris `jobs` berstatus `PROCESSING` tanpa pemilik. Pengambil job basi di tiap proses, seperti relay outbox, tiap `PIPELINE_STALE_JOB_INTERVAL_SECONDS` mengklaim baris yang lewat lease dan menjalankannya lagi dari database: `input` yang disimpan saat klaim (`document_type`, laporan guardrails, `file_url`) dan hasil tahap sebelumnya di `*_results`. Structuring dan scoring selalu bisa diulang; OCR hanya kalau request ke orchestrator memakai `file_url`: orchestrator meneruskan URL itu (bukan byte-nya) ke `/v1/extraction/jobs`, extraction menyimpannya di `input` dan mengunduh lagi saat mengulang. Upload inline tidak disimpan, jadi job OCR-nya `FAILED` minta kirim ulang. Konsekuensinya: `FILE_URL_ALLOWED_HOSTS` harus diisi di extraction juga, dan presigned URL harus hidup lebih lama dari `PIPELINE_JOB_LEASE_SECONDS`. Orkestrasi tidak perlu lagi mengirim ulang, tapi kiriman ulang tetap aman (klaim ulang yang sama).
 - **Idempoten per `request_id`.** `INSERT … ON CONFLICT DO NOTHING`: `request_id` yang sama dikirim lagi tetap 202 dengan `duplicate: true` dan kerja **tidak** diulang. Pengecualian: job `FAILED`, atau job `PROCESSING` yang melewati lease (`PIPELINE_JOB_LEASE_SECONDS`, default 300 detik; artinya proses yang menjalankannya mati tanpa mencatat apa pun, mis. OOM/SIGKILL), boleh diklaim ulang (`attempts` bertambah), supaya orkestrator bisa retry. Klaim ulang atomik: dari dua kiriman bersamaan hanya satu yang menang.
 - **Gagal = `failed` di tabel Orkestrasi, bukan diam.** File rusak, model tidak terjangkau, tidak ada teks, dst. → `jobs.status=FAILED` + baris Orkestrasi `failed`, `<TAHAP>_FAILED`, `error_message`, dalam satu transaksi, dan rantai berhenti. Request-nya sendiri sudah dijawab 202 (atau 422 kalau masih di dalam batas tunggu orchestrator), jadi kegagalan sesudah itu hanya terlihat lewat tabel Orkestrasi dan `GET …/jobs/{request_id}`.
-- **Handoff gagal dilaporkan atas nama tahap berikutnya.** Kalau ekstraksi sudah DONE tapi structuring tidak terjangkau setelah retry (atau handoff-nya menjadi dead letter), tabel Orkestrasi ditandai `failed` + `STRUCTURING_FAILED`; tanpa itu request menggantung selamanya di `STRUCTURING`.
+- **Handoff gagal dilaporkan atas nama tahap berikutnya.** Kalau extraction sudah DONE tapi structuring tidak terjangkau setelah retry (atau handoff-nya menjadi dead letter), tabel Orkestrasi ditandai `failed` + `STRUCTURING_FAILED`; tanpa itu request menggantung selamanya di `STRUCTURING`.
 - **Handoff di-retry** (`PIPELINE_RETRY_ATTEMPTS`, backoff eksponensial) hanya untuk 5xx / tidak terjangkau; 4xx tidak. Pengiriman *at-least-once*: handoff yang terkirim dua kali tidak menjalankan ulang job tahap berikutnya, kecuali job itu sudah `FAILED` (diklaim ulang, sama seperti kiriman ulang dari Orkestrasi).
 
 **Mode callback (opsional, tidak dipakai).** Kalau suatu saat Orkestrasi menyediakan endpoint callback, isi `ORCHESTRATION_URL` (+ `ORCHESTRATION_API_KEY`, `ORCHESTRATION_CALLBACK_PATH`, default `/v1/callbacks/stage`): tiap tahap lalu juga mengirim `POST {"request_id", "stage": "OCR | STRUCTURING | SCORING", "status": "DONE | FAILED", "result", "error_message"}` lewat outbox yang sama (handoff dikirim lebih dulu; urutan callback antar-tahap tidak dijamin, jadi harus idempoten per tahap), dengan `result` hasil akhir hanya di `SCORING`/`DONE` (`final_result` di `ocr_common/npwp.py`). Bentuk body ada di `OrchestrationCallback.notify` (`ocr_common/pipeline/callbacks.py`), satu tempat untuk ketiga service. Kedua mode boleh aktif bersamaan; di luar `local` salah satunya wajib. Setiap panggilan keluar (handoff, callback, service model) membawa header `X-Request-ID` berisi `request_id` request itu. Respons 200 orchestrator dan `result_data` di tabel Orkestrasi diturunkan dari hasil yang sama ke bentuk kontrak `extract-ocr` (`contract_fields` di `ocr_common/npwp.py`): `nomor_npwp` dan `nama` (nama badan untuk kartu perusahaan) dengan `confidence` 0/1 dari trust model dan `FIELD_CONFIDENCE_THRESHOLD`.
 
 ### Kontrak lama (sinkron): sudah dihapus
 
-`generate-request-id` → `extract-ocr` → `get-ocr-result` di ekstraksi (port 8030) dihapus pada 24 September 2026, tabelnya `ocr_npwp_requests` ikut dibuang migrasi `0007`. `POST /v1/extract-ocr` di guardrails (port 8031) juga sudah tidak ada: pintunya pindah ke orchestrator (port 8034). `/v1/structuring/structure` dan `/v1/scoring/score` (skor dokumen **heuristik lama**, bukan dari ML engineer) tersisa hanya untuk debugging.
+`generate-request-id` → `extract-ocr` → `get-ocr-result` di extraction (port 8030) dihapus pada 24 September 2026, tabelnya `ocr_npwp_requests` ikut dibuang migrasi `0007`. `POST /v1/extract-ocr` di guardrails (port 8031) juga sudah tidak ada: pintunya pindah ke orchestrator (port 8034). `/v1/structuring/structure` dan `/v1/scoring/score` (skor dokumen **heuristik lama**, bukan dari ML engineer) tersisa hanya untuk debugging.
 
 Di dalam tiap service: `api/*.py` (controller; hanya memanggil service dan membungkus jawabannya, tidak menangkap error) → `services/*_service.py` (logika, tidak tahu HTTP; gagal = `raise BadRequest(...)`, `NotFound(...)`, `UpstreamUnavailable(...)` dari `ocr_common.errors`, yang diubah menjadi envelope oleh satu handler di `create_app`) → `ml/*.py` (pembungkus model, dipilih di `dependencies.py` lewat env) / `repositories/`. Data antar lapisan dan antar tahap memakai `TypedDict` dari `ocr_common/types.py` (`OcrBlock`, `OcrResult`, `StructuredField`, `StructuringResult`, `FieldConfidences`, `FinalResult`), jadi bentuknya terbaca di tanda tangan fungsi dan diperiksa ty.
 
@@ -231,13 +231,13 @@ python -m venv .venv
 .venv/Scripts/pip install -r requirements-dev.txt   # Windows; Linux/macOS: .venv/bin/pip
 # memasang libs/ocr_common (editable) + requirements kelima service + tooling
 
-for s in orchestrator guardrails ekstraksi structuring scoring; do cp services/$s/.env.example services/$s/.env; done
+for s in orchestrator guardrails extraction structuring scoring; do cp services/$s/.env.example services/$s/.env; done
 # isi API_KEY di tiap .env (boleh sama semua; tiap service memakai API_KEY-nya sendiri ke service lain kalau *_API_KEY kosong)
 
 make run-guardrails     # terminal 1, :8031
 make run-structuring    # terminal 2, :8032
 make run-scoring        # terminal 3, :8033
-make run-ekstraksi      # terminal 4, :8030  (default menunjuk structuring di 127.0.0.1:8032)
+make run-extraction      # terminal 4, :8030  (default menunjuk structuring di 127.0.0.1:8032)
 make run-orchestrator   # terminal 5, :8034  (default menunjuk 127.0.0.1:8030-8033)
 make smoke              # rantai extract-ocr lewat kelimanya
 ```
@@ -253,12 +253,12 @@ Editor: tiap service punya `pyproject.toml` yang menunjuk root import ke folder 
 Lima image, dibangun dari **root repo** karena tiap image butuh `libs/ocr_common`:
 
 ```bash
-make build                      # docker compose build  (5 image: nilam-ocr-{orchestrator,guardrails,ekstraksi,structuring,scoring})
+make build                      # docker compose build  (5 image: nilam-ocr-{orchestrator,guardrails,extraction,structuring,scoring})
 make up                         # build + jalankan kelimanya, port hanya di 127.0.0.1
 make ps                         # status container
 make up-db                      # sama, plus PostgreSQL lokal (jobs/results ketiga tahap)
 make smoke                      # memerankan Orkestrasi pusat: orchestrator -> jobs -> GET status
-make logs-ekstraksi
+make logs-extraction
 make down
 ```
 
@@ -280,8 +280,8 @@ Image yang dipakai cluster dibangun dan didorong dari laptop oleh `deploy/helm/d
 
 Image guardrails berisi torch CPU (~1 GB) dan bobot model. Deploy terpisah: jalankan tiap image di mana saja, lalu sambungkan rantainya lewat env:
 
-- orchestrator: `GUARDRAILS_SERVICE_URL`, `EKSTRAKSI_SERVICE_URL`, `STRUCTURING_SERVICE_URL`, `SCORING_SERVICE_URL`; ekstraksi: `STRUCTURING_SERVICE_URL`; structuring: `SCORING_SERVICE_URL` (+ `*_API_KEY` kalau key-nya berbeda).
-- ekstraksi, structuring, scoring: `DATABASE_URL` yang sama (satu database, schema per service), plus `ORCHESTRATION_OUTCOME_TABLE` (hasil ke tabel orkestrasi) dan/atau `ORCHESTRATION_URL` (+ `ORCHESTRATION_API_KEY`) kalau orkestrasi punya endpoint callback.
+- orchestrator: `GUARDRAILS_SERVICE_URL`, `EXTRACTION_SERVICE_URL`, `STRUCTURING_SERVICE_URL`, `SCORING_SERVICE_URL`; extraction: `STRUCTURING_SERVICE_URL`; structuring: `SCORING_SERVICE_URL` (+ `*_API_KEY` kalau key-nya berbeda).
+- extraction, structuring, scoring: `DATABASE_URL` yang sama (satu database, schema per service), plus `ORCHESTRATION_OUTCOME_TABLE` (hasil ke tabel orkestrasi) dan/atau `ORCHESTRATION_URL` (+ `ORCHESTRATION_API_KEY`) kalau orkestrasi punya endpoint callback.
 - Orkestrasi pusat hanya perlu satu alamat: orchestrator (`:8034`).
 
 Di compose, URL antar service sudah di-override ke nama service (`http://structuring:8032`, dst.).
@@ -303,13 +303,13 @@ Semua service (`ocr_common.config.BaseServiceSettings`):
 | `ENVIRONMENT` | Di laptop: `local` | `production` | `local` (laptop) atau `dev` / `staging` / `production` (ter-deploy). Di luar `local` service **menolak start** kalau: `AUTH_DISABLED=true`, backend `mock`, `DATABASE_URL` kosong, `ORCHESTRATION_URL` dan `ORCHESTRATION_OUTCOME_TABLE` dua-duanya kosong, atau alamat service menunjuk localhost. Default `production` supaya konfigurasi yang lupa mengisinya gagal keras, bukan berjalan dengan pengaman mati. `dev` bukan mode longgar: cluster dev GKE bernama "dev" |
 | `AUTH_DISABLED` | Tidak | `false` | `true` = pemeriksaan `X-API-Key` dimatikan. Hanya diterima dengan `ENVIRONMENT=local`; service mencatat peringatan saat start. `API_KEY` tetap wajib karena dipakai sebagai key keluar |
 | `SERVICE_BASE_URL` | Tidak | – | Nilai `servers` di OpenAPI (`/docs`) |
-| `PORT` | Tidak | per service | orchestrator 8034, ekstraksi 8030, guardrails 8031, structuring 8032, scoring 8033 |
+| `PORT` | Tidak | per service | orchestrator 8034, extraction 8030, guardrails 8031, structuring 8032, scoring 8033 |
 | `MAX_UPLOAD_BYTES` | Tidak | `2621440` (2,5 MB) | Berlaku untuk `file` maupun `file_url`. Lebih besar → **413** `Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`, sebelum model apa pun jalan. Angka dari ML engineer (NPWP umumnya 1–2 MB, ada yang 2,1 MB) |
-| `FILE_URL_ALLOWED_HOSTS` | Produksi: ya, kalau `file_url` menunjuk storage internal; **di orchestrator dan ekstraksi**, karena orchestrator mengunduhnya untuk cek guardrails lalu meneruskan `file_url` ke ekstraksi | – | Host yang boleh diunduh lewat `file_url`, dipisah koma; entri berawalan titik (`.example.internal`) = semua subdomain. Host terdaftar boleh resolve ke IP privat (MinIO internal), tapi tidak ke loopback / link-local (metadata server). Kosong = hanya host yang resolve ke alamat publik. Di `ENVIRONMENT=local` pemeriksaan alamat dimatikan. Redirect tidak pernah diikuti |
+| `FILE_URL_ALLOWED_HOSTS` | Produksi: ya, kalau `file_url` menunjuk storage internal; **di orchestrator dan extraction**, karena orchestrator mengunduhnya untuk cek guardrails lalu meneruskan `file_url` ke extraction | – | Host yang boleh diunduh lewat `file_url`, dipisah koma; entri berawalan titik (`.example.internal`) = semua subdomain. Host terdaftar boleh resolve ke IP privat (MinIO internal), tapi tidak ke loopback / link-local (metadata server). Kosong = hanya host yang resolve ke alamat publik. Di `ENVIRONMENT=local` pemeriksaan alamat dimatikan. Redirect tidak pernah diikuti |
 | `ALLOWED_CONTENT_TYPES` | Tidak | `["image/jpeg","image/jpg","image/png","application/pdf"]` | JSON list |
 | `FIELD_CONFIDENCE_THRESHOLD` | Tidak | `0.5` | Probabilitas trust model minimal agar `confidence` sebuah field bernilai `1` (di bawahnya `0`). Dipakai orchestrator untuk respons `/v1/extract-ocr` **dan** scoring untuk baris `ORCHESTRATION_OUTCOME_TABLE`, jadi **isinya harus sama di keduanya**. Keputusan bisnis: sesuaikan setelah divalidasi |
 
-ekstraksi, structuring, scoring (`ocr_common.config.PipelineSettings`, pipeline async):
+extraction, structuring, scoring (`ocr_common.config.PipelineSettings`, pipeline async):
 
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
@@ -334,15 +334,15 @@ ekstraksi, structuring, scoring (`ocr_common.config.PipelineSettings`, pipeline 
 | `PIPELINE_OUTBOX_STALE_AFTER_SECONDS` | Tidak | `300.0` | Relay menulis log `WARNING` tiap menit selama pesan tertua yang belum terkirim lebih tua dari ini (atau ada dead letter) |
 | `ORCHESTRATION_OUTCOME_TABLE` | Salah satu dengan `ORCHESTRATION_URL` | – | Nama tabel milik orkestrasi yang ikut ditulis di transaksi job (mis. `orchestration_extract_ocr`). Kosong = tidak menulis. Tabelnya wajib punya `request_id` unik plus kolom `downstream_status`, `downstream_stage`, `status_code`, `error_code`, `error_message`, `result_data`, `ds`; DDL yang dibutuhkan ada di [db/external/](db/external) |
 
-ekstraksi:
+extraction:
 
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
-| `EKSTRAKSI_BACKEND` | Tidak | `mock` | `remote` (service model ML engineer, `/v1/predict/json`), `paddle` (API lama PaddleOCR, `/ocr`), atau `mock` |
-| `EKSTRAKSI_OCR_URL` | Jika `remote` / `paddle` | – | `remote`: mis. `http://localhost:8082`; `paddle`: mis. `http://10.213.128.67:8070` |
-| `EKSTRAKSI_OCR_API_KEY` | Tidak | – | Hanya `remote`: `X-API-Key` yang dikirim **ke service model** (bukan `API_KEY` service ini) |
-| `EKSTRAKSI_OCR_TIMEOUT_SECONDS` | Tidak | `30.0` | |
-| `EKSTRAKSI_OCR_PARAMS` | Tidak | `{}` | Hanya `remote`: JSON object yang dikirim sebagai form field tambahan di tiap panggilan `/v1/predict/json` (mis. `{"document_type": "npwp"}`). Di produksi model OCR ML engineer melayani banyak jenis dokumen dan menerima parameternya per panggilan |
+| `EXTRACTION_BACKEND` | Tidak | `mock` | `remote` (service model ML engineer, `/v1/predict/json`), `paddle` (API lama PaddleOCR, `/ocr`), atau `mock` |
+| `EXTRACTION_OCR_URL` | Jika `remote` / `paddle` | – | `remote`: mis. `http://localhost:8082`; `paddle`: mis. `http://10.213.128.67:8070` |
+| `EXTRACTION_OCR_API_KEY` | Tidak | – | Hanya `remote`: `X-API-Key` yang dikirim **ke service model** (bukan `API_KEY` service ini) |
+| `EXTRACTION_OCR_TIMEOUT_SECONDS` | Tidak | `30.0` | |
+| `EXTRACTION_OCR_PARAMS` | Tidak | `{}` | Hanya `remote`: JSON object yang dikirim sebagai form field tambahan di tiap panggilan `/v1/predict/json` (mis. `{"document_type": "npwp"}`). Di produksi model OCR ML engineer melayani banyak jenis dokumen dan menerima parameternya per panggilan |
 | `STRUCTURING_SERVICE_URL` | Tidak | `http://127.0.0.1:8032` | Tujuan handoff tahap OCR |
 | `STRUCTURING_API_KEY` | Tidak | = `API_KEY` | Key structuring, kalau berbeda |
 | `STRUCTURING_TIMEOUT_SECONDS` | Tidak | `10.0` | |
@@ -355,9 +355,9 @@ orchestrator (pintu masuk, tanpa database):
 | `MAX_DOCUMENT_PAGES` | Tidak | `2` | PDF dengan halaman lebih dari ini ditolak **400** `Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP` di sini, sebelum guardrails dipanggil (permintaan ML engineer: NPWP asli maksimal 2 halaman). PDF yang tidak terbaca juga 400 di sini. Halaman dihitung dengan PyMuPDF, parser yang sama dengan render guardrails |
 | `GUARDRAILS_TIMEOUT_SECONDS` | Tidak | `20.0` | Cek guardrails tidak diulang (sudah di dalam anggaran waktu pemanggil): 503/504 diteruskan ke Orkestrasi pusat, yang boleh mengirim ulang |
 | `GUARDRAILS_SKIP_ALLOWED` | Tidak | `false` | Boleh tidaknya request melewati model guardrails dengan field `skip_guardrails=true`. `false`: request seperti itu ditolak **403** `GUARDRAILS_SKIP_NOT_ALLOWED`, jadi API key saja tidak cukup untuk melewatinya. Pengecekan file (tipe, `MAX_UPLOAD_BYTES`, `MAX_DOCUMENT_PAGES`) dan aturan structuring tetap jalan; trust model bekerja tanpa probabilitas guardrails. Nyala = peringatan di log saat start dan tiap request yang melewati guardrails (metrik `guardrails_skipped_total`) |
-| `EKSTRAKSI_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8030` | Tujuan hand-off (`POST /v1/ekstraksi/jobs`) dan status tahap OCR. `EKSTRAKSI_API_KEY`, `EKSTRAKSI_TIMEOUT_SECONDS` (`10.0`) |
+| `EXTRACTION_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8030` | Tujuan hand-off (`POST /v1/extraction/jobs`) dan status tahap OCR. `EXTRACTION_API_KEY`, `EXTRACTION_TIMEOUT_SECONDS` (`10.0`) |
 | `STRUCTURING_SERVICE_URL` / `SCORING_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8032` / `:8033` | Untuk membaca status tahap (`GET …/jobs/{request_id}`) saat menunggu dan untuk `GET /v1/extract-ocr/{request_id}`. `STRUCTURING_API_KEY` / `SCORING_API_KEY` = `API_KEY` kalau kosong. Di luar `local` keempat URL ditolak kalau menunjuk localhost |
-| `PIPELINE_RETRY_ATTEMPTS` / `PIPELINE_RETRY_DELAY_SECONDS` | Tidak | `3` / `0.5` | Retry hand-off ke ekstraksi (5xx / tidak terjangkau), backoff ×2 |
+| `PIPELINE_RETRY_ATTEMPTS` / `PIPELINE_RETRY_DELAY_SECONDS` | Tidak | `3` / `0.5` | Retry hand-off ke extraction (5xx / tidak terjangkau), backoff ×2 |
 | `PIPELINE_WAIT_SECONDS` | Tidak | `15` | Berapa lama `POST /v1/extract-ocr` menunggu pipeline, dihitung sejak request diterima. Selesai dalam waktu ini → **200** `job_status: completed` dengan `data` (atau **422** `<TAHAP>_FAILED` kalau gagal); belum → **202** `processing`. `0` = tidak menunggu (selalu 202 setelah hand-off). HTTP timeout pemanggil harus di atas nilai ini |
 | `PIPELINE_POLL_INTERVAL_SECONDS` | Tidak | `0.5` | Jeda antar-cek status tahap selama menunggu. Menambah latensi paling banyak sebesar ini tiap kali sebuah tahap masih berjalan; lebih kecil = lebih cepat tapi lebih banyak `GET` |
 
@@ -394,25 +394,25 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 | Service | Method | Path | Body |
 |---|---|---|---|
 | semua | GET | `/health` | – (tanpa API key; `backends` menunjukkan implementasi aktif dan `storage`: `postgres` / `memory`). **Liveness**: hanya "proses hidup", tidak menyentuh dependensi |
-| semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk ekstraksi / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
+| semua | GET | `/ready` | – (tanpa API key). **Readiness**: 200 `{status: ready, checks}` kalau dependensi wajib menjawab (database untuk extraction / structuring / scoring), 503 `not_ready` kalau tidak. Tahap berikutnya dan service model sengaja tidak diperiksa: gangguannya dilaporkan per job |
 | semua | GET | `/metrics` | – (tanpa API key). Metrik Prometheus proses ini; lihat [Observability](#observability) |
-| orchestrator | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, kontrak `extract-ocr` Orkestrasi pusat.** form: `request_id`, `document_type` (default `npwp`), `params` (opsional, JSON; dikembalikan apa adanya di setiap jawaban), `skip_guardrails` (opsional, boolean; lewati model guardrails kalau `GUARDRAILS_SKIP_ALLOWED`, selain itu 403) + tepat satu dari `file` / `file_url`. Dicek tipe/ukuran, lalu dinilai guardrails. Ditolak → 400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 1`. Lolos → diteruskan ke `ekstraksi/jobs`, lalu menunggu sampai `PIPELINE_WAIT_SECONDS`: 200 `job_status: completed` + `data` {`nomor_npwp`, `nama`} (`confidence` 0/1), 422 `<TAHAP>_FAILED`, atau 202 `processing` |
+| orchestrator | POST | `/v1/extract-ocr` | **Pintu masuk pipeline, kontrak `extract-ocr` Orkestrasi pusat.** form: `request_id`, `document_type` (default `npwp`), `params` (opsional, JSON; dikembalikan apa adanya di setiap jawaban), `skip_guardrails` (opsional, boolean; lewati model guardrails kalau `GUARDRAILS_SKIP_ALLOWED`, selain itu 403) + tepat satu dari `file` / `file_url`. Dicek tipe/ukuran, lalu dinilai guardrails. Ditolak → 400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 1`. Lolos → diteruskan ke `extraction/jobs`, lalu menunggu sampai `PIPELINE_WAIT_SECONDS`: 200 `job_status: completed` + `data` {`nomor_npwp`, `nama`} (`confidence` 0/1), 422 `<TAHAP>_FAILED`, atau 202 `processing` |
 | orchestrator | GET | `/v1/extract-ocr/{request_id}` | Kontrak yang sama, **tanpa menunggu**: status tiap tahap dibaca sekali, berurutan. 200 / 202 / 400 (ditolak aturan structuring) / 422, `params: null`; 404 kalau tidak ada tahap yang punya job (ditolak model guardrails, atau belum dikirim); 503/504 kalau sebuah tahap tidak terjangkau. Hand-off yang mati permanen (dead letter) tetap terbaca 202: keadaan finalnya ada di callback / tabel Orkestrasi |
 | guardrails | POST | `/v1/guardrails/check` | **Internal, dipanggil orchestrator untuk tiap dokumen; hanya menilai, selalu 200.** `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`. Tidak memulai apa pun; untuk debugging |
-| ekstraksi | POST | `/v1/ekstraksi/jobs` | **202.** Dipanggil orchestrator. form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
+| extraction | POST | `/v1/extraction/jobs` | **202.** Dipanggil orchestrator. form: `request_id`, `document_type` (default `npwp`), `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
 | structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}`; `ocr` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `ocr_results`) |
 | scoring | POST | `/v1/scoring/jobs` | **202.** JSON `{"request_id", "document_type", "guardrails", "ocr", "structuring": {"fields": {...}}}`; `ocr` dan `structuring` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `*_results`) |
 | ketiganya | GET | `/v1/<tahap>/jobs/{request_id}` | – → `{request_id, stage, status: PROCESSING\|DONE\|FAILED, result, error_message, created_at, updated_at}`; untuk debug/rekonsiliasi, sumber status resmi tetap Orkestrasi |
 | ketiganya | GET | `/v1/<tahap>/outbox` | – → `{enabled, stage, pending, retrying, oldest_pending_seconds, dead_letters}`: backlog outbox tahap ini (`PIPELINE_OUTBOX`) |
 | ketiganya | POST | `/v1/<tahap>/outbox/release` | query `request_id` opsional → `{stage, request_id, released}`: dead letter tahap ini diantrekan ulang dan relay dibangunkan; 409 kalau outbox mati |
-| ekstraksi | POST | `/v1/ekstraksi/extract` | form: `file` / `file_url` → blok teks, `confidence`, `bbox`, `page`, `model` |
-| structuring | POST | `/v1/structuring/structure` | JSON `{"lines": [{"text", "confidence", "bbox"?, "page"?}]}` → `fields`, `flag`, `flag_reason`. `bbox` (dari `blocks[]` ekstraksi) dipakai `npwp_rules` untuk mencari nama dari posisinya; tanpa itu dipakai urutan baris. Tidak ada penolakan berdasarkan isi: dokumen lain yang tergabung, CAPTCHA, screenshot "Cek NPWP", nomor/nama tidak ketemu, nama satu kata, huruf di nomor, kode wilayah/tanggal lahir/KPP tidak valid, > 2 halaman → `flag: true` + `flag_reason` (bahasa Indonesia, untuk reviewer) |
+| extraction | POST | `/v1/extraction/extract` | form: `file` / `file_url` → blok teks, `confidence`, `bbox`, `page`, `model` |
+| structuring | POST | `/v1/structuring/structure` | JSON `{"lines": [{"text", "confidence", "bbox"?, "page"?}]}` → `fields`, `flag`, `flag_reason`. `bbox` (dari `blocks[]` extraction) dipakai `npwp_rules` untuk mencari nama dari posisinya; tanpa itu dipakai urutan baris. Tidak ada penolakan berdasarkan isi: dokumen lain yang tergabung, CAPTCHA, screenshot "Cek NPWP", nomor/nama tidak ketemu, nama satu kata, huruf di nomor, kode wilayah/tanggal lahir/KPP tidak valid, > 2 halaman → `flag: true` + `flag_reason` (bahasa Indonesia, untuk reviewer) |
 | scoring | POST | `/v1/scoring/confidence` | **Kontrak ML engineer (model 21 Sep 2026).** JSON 9 kunci (`npwp`, `npwp_score`, `npwp_candidate_count`, `name_base`, `name_score`, `avg_doc_score`, `min_doc_score`, `flag`, `guardrail_probability`; semua boleh null) → `{"npwp_confidence", "name_confidence"}`. `name_base` = nama sebelum normalisasi (`signals.name_base` structuring). Field yang nilainya null mendapat confidence null |
 | scoring | POST | `/v1/scoring/score` | lama, heuristik. JSON `{"document_type", "fields": {name: {"value", "confidence"}}}` → `score`, `decision` |
 
 **Response `/jobs`** (202): `data: {"request_id", "stage", "status", "duplicate"}`. `status` adalah `PROCESSING` untuk job baru, atau status terkini kalau `duplicate: true`. Validasi isi (file rusak, tidak ada teks, `document_type` tidak didukung) terjadi di background, jadi muncul sebagai `failed` + `<TAHAP>_FAILED` di tabel Orkestrasi (dan callback `FAILED` bila mode callback aktif), bukan 4xx; yang langsung ditolak hanya bentuk request yang salah (400 intake / JSON `guardrails`, 401, 422).
 
-**Response guardrails** (`message: "OK"`). `passed` / `reason` adalah "true/false + alasan" di sequence diagram; orchestrator meneruskan `data` ini apa adanya sebagai form `guardrails` ke `/v1/ekstraksi/jobs`:
+**Response guardrails** (`message: "OK"`). `passed` / `reason` adalah "true/false + alasan" di sequence diagram; orchestrator meneruskan `data` ini apa adanya sebagai form `guardrails` ke `/v1/extraction/jobs`:
 
 ```json
 {
@@ -435,13 +435,13 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 
 ## Skenario Testing via Nama File
 
-Berlaku selama backend masih mock (guardrails: `GUARDRAILS_BACKEND=mock`; ekstraksi: `EKSTRAKSI_BACKEND=mock`), kecuali `delay<N>s` yang berlaku untuk semua backend selama `ENVIRONMENT=local`:
+Berlaku selama backend masih mock (guardrails: `GUARDRAILS_BACKEND=mock`; extraction: `EXTRACTION_BACKEND=mock`), kecuali `delay<N>s` yang berlaku untuk semua backend selama `ENVIRONMENT=local`:
 
 | Nama file mengandung | Pipeline async | Sumber |
 |---|---|---|
 | `blur` / `invalid` / `notnpwp` | guardrails `passed: false` + `reason`; orchestrator menjawab 400 `DOWNSTREAM_VALIDATION_ERROR`, tidak ada tahap yang jalan | guardrails (mock) |
-| `servererror` | job OCR `FAILED` + tabel Orkestrasi `failed`, `OCR_FAILED` | ekstraksi (mock engine) |
-| `delay<N>s` (mis. `delay20s-npwp.jpg`) | tahap OCR menunggu N detik (maks. 120) sebelum bekerja, **apa pun backend-nya**, hanya dengan `ENVIRONMENT=local`. Dipakai [tools/tracker](tools/tracker) untuk memperlihatkan orchestrator menjawab 202 ketika pipeline melewati `PIPELINE_WAIT_SECONDS` | ekstraksi (`ocr_common/simulation.py`) |
+| `servererror` | job OCR `FAILED` + tabel Orkestrasi `failed`, `OCR_FAILED` | extraction (mock engine) |
+| `delay<N>s` (mis. `delay20s-npwp.jpg`) | tahap OCR menunggu N detik (maks. 120) sebelum bekerja, **apa pun backend-nya**, hanya dengan `ENVIRONMENT=local`. Dipakai [tools/tracker](tools/tracker) untuk memperlihatkan orchestrator menjawab 202 ketika pipeline melewati `PIPELINE_WAIT_SECONDS` | extraction (`ocr_common/simulation.py`) |
 | lainnya | ketiga tahap `DONE`, data dummy deterministik dari isi file | |
 
 `request_id` sama dua kali → 202 `duplicate: true`.
@@ -458,8 +458,8 @@ hanya tempat datanya yang berbeda. Aktif hanya dengan `TESTING_ENDPOINTS=true` (
 |---|---|---|
 | `POST /v1/extract-ocr` (orchestrator) | `POST /v1/extract-ocr-test` | tim ML (k6 / curl) |
 | `GET /v1/extract-ocr/{request_id}` (orchestrator) | `GET /v1/extract-ocr-test/{request_id}` | tim ML |
-| `POST`/`GET /v1/ekstraksi/jobs` | `POST`/`GET /v1/ekstraksi/jobs-test` | orchestrator |
-| `POST`/`GET /v1/structuring/jobs` | `POST`/`GET /v1/structuring/jobs-test` | ekstraksi, orchestrator |
+| `POST`/`GET /v1/extraction/jobs` | `POST`/`GET /v1/extraction/jobs-test` | orchestrator |
+| `POST`/`GET /v1/structuring/jobs` | `POST`/`GET /v1/structuring/jobs-test` | extraction, orchestrator |
 | `POST`/`GET /v1/scoring/jobs` | `POST`/`GET /v1/scoring/jobs-test` | structuring, orchestrator |
 
 Guardrails tidak punya kembaran: `/v1/guardrails/check` tidak menyimpan apa pun, jadi kembaran di orchestrator memanggil endpoint yang sama.
@@ -544,7 +544,7 @@ Satu database PostgreSQL; **semua tabel repo ini di schema `public`**. Database 
 
 | Tabel | Pemilik | Isi |
 |---|---|---|
-| `ocr_jobs` / `ocr_results` | ekstraksi | status tahap OCR per `request_id` dan blok teks mentah |
+| `ocr_jobs` / `ocr_results` | extraction | status tahap OCR per `request_id` dan blok teks mentah |
 | `structuring_jobs` / `structuring_results` | structuring | status tahap structuring dan field bernama |
 | `scoring_jobs` / `scoring_results` | scoring | status tahap scoring dan skor trust model |
 
@@ -591,7 +591,7 @@ curl -X POST http://localhost:8081/v1/predict/json -H "X-API-Key: dummy-key" -F 
 
 Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** (`POST /v1/guardrails/check`, dipanggil orchestrator) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: envelope dan `passed`/`reason` (tipe, ukuran, dan jumlah halaman sudah dicek orchestrator sebelum berkas sampai di sini). Model yang mati atau lambat menjadi 503/504 di sini, dan orchestrator meneruskannya apa adanya. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
 
-**Ekstraksi, backend `remote` (sudah ada)**: klien ke service model ekstraksi milik ML engineer. Kontrak model (`nilamnpwp/ocr`, 23 September 2026):
+**Extraction, backend `remote` (sudah ada)**: klien ke service model extraction milik ML engineer. Kontrak model (`nilamnpwp/ocr`, 23 September 2026):
 
 ```bash
 curl -X POST http://localhost:8082/v1/predict/json -H "X-API-Key: dummy-key" -F "file=@sample_npwp.jpg"
@@ -604,9 +604,9 @@ curl -X POST http://localhost:8082/v1/predict/json -H "X-API-Key: dummy-key" -F 
 #  "n_boxes": 10, "avg_doc_score": 0.9813, "min_doc_score": 0.9438}
 ```
 
-Yang dipakai hanya `pages` dan `models` (`avg/min_doc_score` dihitung ulang scoring dari blok); bentuk lama (list halaman telanjang, atau `{"data": [...]}`) tetap diterima. `EKSTRAKSI_OCR_PARAMS` dikirim sebagai form field tambahan. Satu elemen `pages` per halaman, dan ketiga array-nya **paralel** (indeks `i` = satu baris teks): itu hasil mentah PaddleOCR. Pemetaan: `rec_texts[i]` → `text`, `rec_scores[i]` → `confidence` (dibulatkan 4 desimal), `rec_polys[i]` (4 titik, bisa miring) → `bbox` kotak tegak yang melingkupinya, `page_index` → `page` (default: posisi elemen). Teks kosong dilewati; `[]` → `blocks: []` (di pipeline menjadi `No text lines to structure` dari structuring). `rec_polys` boleh tidak ada (`bbox: null`), tapi kalau ada harus sejajar. Envelope `{"data": [...]}` juga diterima. Array yang **tidak sama panjang** menjadi 500 `ekstraksi OCR model returned an unexpected response`, bukan dipotong diam-diam: confidence yang menempel ke baris yang salah akan merusak skor dokumen. `data.model` diisi dari `models.detection+recognition` (`null` pada bentuk lama). Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya. Aktifkan dengan `EKSTRAKSI_BACKEND=remote` + `EKSTRAKSI_OCR_URL` (+ `EKSTRAKSI_OCR_API_KEY`); kontrak **kita** (`/v1/ekstraksi/jobs`, `/v1/ekstraksi/extract`, `extract-ocr`) tidak berubah. Response asli di atas disimpan sebagai fixture test (`services/ekstraksi/tests/fixtures/remote_npwp_response.json`). Test live: `cd services/ekstraksi && EKSTRAKSI_REMOTE_URL=http://localhost:8082 EKSTRAKSI_REMOTE_API_KEY=dummy-key python -m pytest tests/test_ekstraksi_remote_live.py`.
+Yang dipakai hanya `pages` dan `models` (`avg/min_doc_score` dihitung ulang scoring dari blok); bentuk lama (list halaman telanjang, atau `{"data": [...]}`) tetap diterima. `EXTRACTION_OCR_PARAMS` dikirim sebagai form field tambahan. Satu elemen `pages` per halaman, dan ketiga array-nya **paralel** (indeks `i` = satu baris teks): itu hasil mentah PaddleOCR. Pemetaan: `rec_texts[i]` → `text`, `rec_scores[i]` → `confidence` (dibulatkan 4 desimal), `rec_polys[i]` (4 titik, bisa miring) → `bbox` kotak tegak yang melingkupinya, `page_index` → `page` (default: posisi elemen). Teks kosong dilewati; `[]` → `blocks: []` (di pipeline menjadi `No text lines to structure` dari structuring). `rec_polys` boleh tidak ada (`bbox: null`), tapi kalau ada harus sejajar. Envelope `{"data": [...]}` juga diterima. Array yang **tidak sama panjang** menjadi 500 `extraction OCR model returned an unexpected response`, bukan dipotong diam-diam: confidence yang menempel ke baris yang salah akan merusak skor dokumen. `data.model` diisi dari `models.detection+recognition` (`null` pada bentuk lama). Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya. Aktifkan dengan `EXTRACTION_BACKEND=remote` + `EXTRACTION_OCR_URL` (+ `EXTRACTION_OCR_API_KEY`); kontrak **kita** (`/v1/extraction/jobs`, `/v1/extraction/extract`, `extract-ocr`) tidak berubah. Response asli di atas disimpan sebagai fixture test (`services/extraction/tests/fixtures/remote_npwp_response.json`). Test live: `cd services/extraction && EXTRACTION_REMOTE_URL=http://localhost:8082 EXTRACTION_REMOTE_API_KEY=dummy-key python -m pytest tests/test_extraction_remote_live.py`.
 
-**Ekstraksi, backend `paddle` (API lama)**: klien ke PaddleOCR PP-OCRv6 (`POST {EKSTRAKSI_OCR_URL}/ocr`, multipart `file`). Pemetaan response `pages[].texts[]{text, score, poly}` → `blocks[]{text, confidence, bbox, page}`, `models.detection+recognition` → `model`. File yang tidak terbaca (`num_pages: 0`) → `blocks: []`, di pipeline menjadi 400 `No text lines to structure` dari structuring. Aktifkan dengan `EKSTRAKSI_BACKEND=paddle` + `EKSTRAKSI_OCR_URL`.
+**Extraction, backend `paddle` (API lama)**: klien ke PaddleOCR PP-OCRv6 (`POST {EXTRACTION_OCR_URL}/ocr`, multipart `file`). Pemetaan response `pages[].texts[]{text, score, poly}` → `blocks[]{text, confidence, bbox, page}`, `models.detection+recognition` → `model`. File yang tidak terbaca (`num_pages: 0`) → `blocks: []`, di pipeline menjadi 400 `No text lines to structure` dari structuring. Aktifkan dengan `EXTRACTION_BACKEND=paddle` + `EXTRACTION_OCR_URL`.
 
 **Scoring, trust model (sudah ada)**: `services/scoring/weights/trust_model.joblib` dari ML engineer (3 KB, ikut di repo dan di-COPY ke image; versi retrain **21 September 2026**, diterima 23 September). Isinya, dibaca dari file-nya: dict `pipeline` (`SimpleImputer(median)` → `StandardScaler` → `LogisticRegression`, scikit-learn **1.9.0**), `feature_cols` (**9 fitur**: `field_is_npwp`, `field_score`, `shape_confidence`, `field_multiple_candidates`, `name_max_char_len`, `avg_doc_score`, `min_doc_score`, `flag`, `guardrail_probability`; `field_corrected` dan `n_boxes_per_page` dibuang), `train_report` (n=1860 = 930 dokumen × 2 field, 1738 benar / 122 salah, AUC 0,93). Modelnya **per field**: satu baris fitur untuk nomor NPWP dan satu untuk nama; keluarannya P(field itu benar). Versi scikit-learn harus sama dengan saat training: beda versi = service menolak start, bukan sekadar peringatan.
 
@@ -618,7 +618,7 @@ Pemetaan payload → fitur adalah port dari `scoring/trust_scoring.py` ML engine
 2. Daftarkan di `<X>_BACKENDS` di `app/dependencies.py` (`"nama": lambda settings: ...`) dan tambahkan field URL/timeout di `app/config.py`.
 3. Set `<APP>_BACKEND=nama` di `.env`. Tidak ada controller, service, atau skema yang berubah.
 
-Kontrak method per app: guardrails lokal `classify(filename, pages: list[PIL.Image]) -> [(proba_approve, proba_reject), ...]` (+ atribut `reject_threshold`), atau guardrails remote `async check_document(filename, content, content_type) -> {"document", "pages"}` (service memilih dari ada-tidaknya `check_document`); ekstraksi `async extract(filename, content, content_type) -> {"blocks", "model"}`; structuring `structure(lines) -> {field: {"value", "confidence", "source"}}` untuk semua `NPWP_FIELDS`; scoring `score(fields) -> {"score", "field_scores", "reasons"}` + atribut `supported_document_types`.
+Kontrak method per app: guardrails lokal `classify(filename, pages: list[PIL.Image]) -> [(proba_approve, proba_reject), ...]` (+ atribut `reject_threshold`), atau guardrails remote `async check_document(filename, content, content_type) -> {"document", "pages"}` (service memilih dari ada-tidaknya `check_document`); extraction `async extract(filename, content, content_type) -> {"blocks", "model"}`; structuring `structure(lines) -> {field: {"value", "confidence", "source"}}` untuk semua `NPWP_FIELDS`; scoring `score(fields) -> {"score", "field_scores", "reasons"}` + atribut `supported_document_types`.
 
 ## Menambah Service Baru
 
@@ -643,7 +643,7 @@ make openapi       # tulis ulang openapi.yaml tiap service dari kodenya, lalu ap
 make api-docs      # Swagger UI keenam spec tanpa menjalankan service: http://127.0.0.1:8088/api/
 ```
 
-Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipeline async (`tests/test_jobs.py`) mengganti Orkestrasi dan tahap berikutnya dengan perekam dari `ocr_common.testing` (`RecordingCallback`, `RecordingNextStage`) dan menunggu job background dengan `wait_for_job`. Implementasi diganti lewat `app.dependency_overrides[get_x]` pada fungsi di `app/dependencies.py`; `conftest.py` tiap service menyediakan fixture-nya (`use_classifier` di guardrails, `use_engine` di ekstraksi; di orchestrator guardrails, ekstraksi, dan penunggu pipeline diganti stub secara otomatis), jadi test tidak perlu `monkeypatch` path modul. Mesin pipelinenya sendiri (`libs/ocr_common/tests/test_jobs.py`) diuji terhadap repository in-memory **dan** SQL (SQLite sungguhan: `ON CONFLICT`, upsert, join). Rantai HTTP sungguhan antar container diuji `make smoke` (`scripts/smoke_e2e.py`). `SMOKE_LATENCY_RUNS=20 make smoke` menambah pengukuran latensi: p50 / p95 / max end-to-end dari sisi klien, jumlah jawaban 200 vs 202, dan durasi tiap tahap di server. Angkanya baru bermakna terhadap backend asli, jadi jalankan di cluster dev dengan `ORCHESTRATOR_URL`, `GUARDRAILS_URL`, `EKSTRAKSI_URL`, `STRUCTURING_URL`, `SCORING_URL` menunjuk ke service di sana. Test live ke PaddleOCR: `cd services/ekstraksi && EKSTRAKSI_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_ekstraksi_live.py`.
+Test unit tiap service memakai stub untuk model, jadi tidak butuh jaringan: pipeline async (`tests/test_jobs.py`) mengganti Orkestrasi dan tahap berikutnya dengan perekam dari `ocr_common.testing` (`RecordingCallback`, `RecordingNextStage`) dan menunggu job background dengan `wait_for_job`. Implementasi diganti lewat `app.dependency_overrides[get_x]` pada fungsi di `app/dependencies.py`; `conftest.py` tiap service menyediakan fixture-nya (`use_classifier` di guardrails, `use_engine` di extraction; di orchestrator guardrails, extraction, dan penunggu pipeline diganti stub secara otomatis), jadi test tidak perlu `monkeypatch` path modul. Mesin pipelinenya sendiri (`libs/ocr_common/tests/test_jobs.py`) diuji terhadap repository in-memory **dan** SQL (SQLite sungguhan: `ON CONFLICT`, upsert, join). Rantai HTTP sungguhan antar container diuji `make smoke` (`scripts/smoke_e2e.py`). `SMOKE_LATENCY_RUNS=20 make smoke` menambah pengukuran latensi: p50 / p95 / max end-to-end dari sisi klien, jumlah jawaban 200 vs 202, dan durasi tiap tahap di server. Angkanya baru bermakna terhadap backend asli, jadi jalankan di cluster dev dengan `ORCHESTRATOR_URL`, `GUARDRAILS_URL`, `EXTRACTION_URL`, `STRUCTURING_URL`, `SCORING_URL` menunjuk ke service di sana. Test live ke PaddleOCR: `cd services/extraction && EXTRACTION_OCR_URL=http://10.213.128.67:8070 python -m pytest tests/test_extraction_live.py`.
 
 Di `libs/ocr_common/tests`: `test_app.py` (envelope, API key termasuk rotasi `API_KEYS`, readiness), `test_outbox.py` (transaksi, relay, retry, dead letter, release, stop), `test_outcomes.py`, `test_reaper.py`, `test_config.py` (penjaga `ENVIRONMENT`), `test_fetch_url.py` (SSRF), `test_gateway_spec.py`.
 
@@ -673,10 +673,10 @@ Keadaan per branch `refactor/arch` (September 2026). Butir yang butuh keputusan 
 
 - **Structuring memakai aturan ML engineer (`npwp_rules`) versi 23 September 2026**, di-vendor dari folder `regex/` repo `nilamnpwp` mereka (`services/structuring/app/vendor/npwp_rules/README.md` mencatat selisihnya), dan `app/ml/npwp_rules.py` meniru `regex/main.py` mereka: nomor per halaman lewat `npwp_priority` (16 digit mengalahkan 15), nama dari posisinya terhadap nomor, halaman pertama yang punya nilai yang dipakai. Semua pemeriksaan isi adalah **flag lunak** (`flag`, `flag_reason`), tidak ada yang menolak; koreksi homoglyph digit **dimatikan** oleh ML engineer (huruf salah baca dibuang, nomor jadi lebih pendek dan confidence-nya jatuh; ditandai `has_homoglyph`). Name matching fuzzy per `file_id` (`correct_name_with_npwp_list`) **tidak** dipakai di sini: ML engineer memutuskan itu dilakukan di orkestrator. `kode_wilayah.json` (7.230 kecamatan) dan `kpp_codes.json` (173 KPP) dari ML engineer ada di `app/vendor/npwp_rules/data/`; `name_lnmast.xlsx` (tie-break nama dikenal) **sengaja tidak dipakai dulu** (keputusan 23 September 2026); tanpa itu jarak ke nomor yang menentukan, dan `NAME_MASTER_PATH` tinggal diisi kalau nanti dipakai. **[keputusan]** nomor 15 digit tetap `XX.XXX.XXX.X-XXX.XXX` hanya bila OCR membacanya dalam bentuk bertitik lengkap; 16 digit dan nomor yang kehilangan huruf dikembalikan sebagai digit polos.
 - **Model kiriman 23 September 2026 terpasang** (checkpoint guardrails epoch 32 dan trust model 21 Sep), tapi belum divalidasi dengan sampel NPWP produksi: pada dua foto NPWP dari internet model guardrails baru menerima satu (0,99) dan menolak satu (foto kartu dipegang tangan, ada wajah dan watermark, 0,99 reject). Ambang guardrails dan ambang `FIELD_CONFIDENCE_THRESHOLD` menunggu keputusan ML engineer. Trust model baru memberi confidence rendah untuk nomor 15 digit (contoh mereka: 0,33), jadi ambang 0,5 akan menandai banyak kartu lama sebagai `confidence: 0`.
-- **Job hidup di memori proses; pemulihannya menunggu lease.** Job jalan sebagai `asyncio` task. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), lalu sisanya dilaporkan `FAILED`. Kalau proses mati mendadak, baris `jobs` tertinggal `PROCESSING` sampai pengambil job basi (`PIPELINE_STALE_JOBS`) mengklaimnya setelah `PIPELINE_JOB_LEASE_SECONDS` (default 5 menit), jadi latensi kasus itu paling cepat sebesar lease. Dua batasan: job OCR yang dokumennya diunggah inline ke orchestrator tidak bisa diulang (langsung `FAILED` minta kirim ulang; kirim `file_url` ke orchestrator supaya bisa, URL-nya diteruskan ke ekstraksi dan diunduh lagi saat mengulang), dan job yang berjalan lebih lama dari lease akan dianggap basi dan dijalankan dua kali, jadi lease harus jauh di atas durasi job terlama. Kalau volume naik, ganti `BackgroundRunner` di `ocr_common/pipeline/runner.py` dengan antrean yang tahan restart (Cloud Tasks / Pub/Sub) tanpa mengubah service.
+- **Job hidup di memori proses; pemulihannya menunggu lease.** Job jalan sebagai `asyncio` task. Shutdown normal menunggu job selesai (`PIPELINE_DRAIN_TIMEOUT_SECONDS`), lalu sisanya dilaporkan `FAILED`. Kalau proses mati mendadak, baris `jobs` tertinggal `PROCESSING` sampai pengambil job basi (`PIPELINE_STALE_JOBS`) mengklaimnya setelah `PIPELINE_JOB_LEASE_SECONDS` (default 5 menit), jadi latensi kasus itu paling cepat sebesar lease. Dua batasan: job OCR yang dokumennya diunggah inline ke orchestrator tidak bisa diulang (langsung `FAILED` minta kirim ulang; kirim `file_url` ke orchestrator supaya bisa, URL-nya diteruskan ke extraction dan diunduh lagi saat mengulang), dan job yang berjalan lebih lama dari lease akan dianggap basi dan dijalankan dua kali, jadi lease harus jauh di atas durasi job terlama. Kalau volume naik, ganti `BackgroundRunner` di `ocr_common/pipeline/runner.py` dengan antrean yang tahan restart (Cloud Tasks / Pub/Sub) tanpa mengubah service.
 - **Dead letter menunggu keputusan manusia.** Dengan outbox aktif, handoff (dan callback, bila mode itu aktif) yang gagal disimpan dan dicoba ulang sampai berumur `PIPELINE_OUTBOX_MAX_AGE_SECONDS`, lalu menetap sebagai dead letter; melepasnya (mis. setelah kontrak callback diperbaiki) lewat `POST /v1/<tahap>/outbox/release` (opsional `?request_id=`), yang mengantrekan ulang dead letter tahap itu dan membangunkan relay. Tanpa outbox, callback yang gagal setelah retry hanya dicatat di log. Apa pun modenya, orkestrasi bisa merekonsiliasi lewat `GET /v1/<tahap>/jobs/{request_id}`.
 - **`PIPELINE_OUTBOX` dan `ORCHESTRATION_OUTCOME_TABLE` default mati.** Keduanya sudah diuji lokal (SQLite di test, PostgreSQL di compose) tapi belum dinyalakan di cluster dev; `values-ddb-dev.yaml` perlu diisi sebelum perilaku yang dijelaskan di [Alur Request](#alur-request) berlaku di sana.
-- Kontrak lama sinkron di ekstraksi (`generate-request-id` → `extract-ocr` → `get-ocr-result`) sudah dihapus (24 September 2026), tabelnya `ocr_npwp_requests` ikut dibuang oleh migrasi `0007`. `POST /v1/guardrails/check` sekarang dipanggil orchestrator untuk tiap dokumen; `/v1/structuring/structure` dan `/v1/scoring/score` dulu dipanggil kontrak itu, sekarang hanya untuk debugging dan belum dihapus.
+- Kontrak lama sinkron di extraction (`generate-request-id` → `extract-ocr` → `get-ocr-result`) sudah dihapus (24 September 2026), tabelnya `ocr_npwp_requests` ikut dibuang oleh migrasi `0007`. `POST /v1/guardrails/check` sekarang dipanggil orchestrator untuk tiap dokumen; `/v1/structuring/structure` dan `/v1/scoring/score` dulu dipanggil kontrak itu, sekarang hanya untuk debugging dan belum dihapus.
 - **`GET /v1/extract-ocr/{request_id}` membaca status tahap, bukan keadaan final request.** Hand-off yang gagal permanen (retry langsung habis, atau dead letter outbox) hanya tercatat di callback `FAILED` dan tabel Orkestrasi; tahap sebelumnya tetap `DONE` dan tahap berikutnya belum punya job, jadi GET menjawab 202 untuk request itu (dan bisa berubah menjadi 200 setelah `POST /v1/<tahap>/outbox/release`). Orchestrator sengaja tanpa database; menutup celah ini butuh status hand-off per request yang bisa dibaca dari tahap pengirim.
 
 ### Utang teknis yang sudah diketahui

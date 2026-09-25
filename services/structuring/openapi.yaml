@@ -513,7 +513,7 @@ paths:
       tags:
       - Structuring
       summary: Turn OCR lines into named fields, synchronous (no job, no callback)
-      description: 'Maps raw text lines (e.g. from the ekstraksi service) to named document fields with
+      description: 'Maps raw text lines (e.g. from the extraction service) to named document fields with
         per-field confidence, using the ML team''s rules (`npwp_rules`). Nothing is rejected on content:
         a bundled second document, a CAPTCHA or lookup screenshot, a missing or single-word name, a letter
         in the number, an invalid Kode Wilayah / birthdate / KPP code or more than 2 pages set `flag`
@@ -971,7 +971,7 @@ components:
           description: Active implementation per concern (model backend, storage). Useful to confirm a
             deployment
           examples:
-          - ekstraksi: paddle
+          - extraction: paddle
             storage: postgres
       type: object
       required:
@@ -1356,7 +1356,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:

@@ -55,12 +55,12 @@ def build_stage_status_clients(settings: Settings, *, testing: bool = False) -> 
         StageStatusClient(
             STAGE_OCR,
             remote(
-                settings.ekstraksi_service_url,
-                settings.ekstraksi_api_key,
-                settings.ekstraksi_timeout_seconds,
-                "ekstraksi service",
+                settings.extraction_service_url,
+                settings.extraction_api_key,
+                settings.extraction_timeout_seconds,
+                "extraction service",
             ),
-            jobs_path("/v1/ekstraksi/jobs"),
+            jobs_path("/v1/extraction/jobs"),
         ),
         StageStatusClient(
             STAGE_STRUCTURING,

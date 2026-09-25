@@ -3,7 +3,7 @@ info:
   title: OCR NPWP Orchestrator API
   description: 'Entry point of the OCR NPWP pipeline, and the only service the central orchestrator /
     gateway calls. `POST /v1/extract-ocr` checks the file, has the guardrails service judge it, hands
-    a document that passes to the OCR stage (ekstraksi, which chains to structuring and scoring), and
+    a document that passes to the OCR stage (extraction, which chains to structuring and scoring), and
     waits up to `PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is
     still running. `GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later
     time. This service stores nothing: the stages keep the jobs, and they send the result callback. All
@@ -366,7 +366,7 @@ paths:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
         '500':
-          description: The guardrails or ekstraksi service failed, or answered in an unexpected shape
+          description: The guardrails or extraction service failed, or answered in an unexpected shape
           content:
             application/json:
               schema:
@@ -377,7 +377,7 @@ paths:
                 message: guardrails service returned an unexpected response
                 errors: guardrails service returned an unexpected response
         '503':
-          description: The guardrails service, its model, or the ekstraksi service is unreachable; nothing
+          description: The guardrails service, its model, or the extraction service is unreachable; nothing
             was started
           content:
             application/json:
@@ -386,10 +386,11 @@ paths:
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: ekstraksi service is unavailable
-                errors: ekstraksi service is unavailable
+                message: extraction service is unavailable
+                errors: extraction service is unavailable
         '504':
-          description: The guardrails service, its model, or the ekstraksi service did not answer in time
+          description: The guardrails service, its model, or the extraction service did not answer in
+            time
           content:
             application/json:
               schema:
@@ -397,8 +398,8 @@ paths:
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: ekstraksi service timed out after 10.0s
-                errors: ekstraksi service timed out after 10.0s
+                message: extraction service timed out after 10.0s
+                errors: extraction service timed out after 10.0s
       security:
       - APIKeyHeader: []
   /v1/extract-ocr/{request_id}:
@@ -821,7 +822,7 @@ components:
           description: Active implementation per concern (model backend, storage). Useful to confirm a
             deployment
           examples:
-          - ekstraksi: paddle
+          - extraction: paddle
             storage: postgres
       type: object
       required:

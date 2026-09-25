@@ -25,35 +25,35 @@ from app.ml.base import OcrEngine
 from app.ml.mock import MockOcrEngine
 from app.ml.paddle import PaddleOcrEngine
 from app.ml.remote import RemoteOcrEngine
-from app.services.ekstraksi_service import EkstraksiService
-from app.services.job_service import EkstraksiJobService
+from app.services.extraction_service import ExtractionService
+from app.services.job_service import ExtractionJobService
 
 DB_TABLE_PREFIX = "ocr"
 
 
 def _build_paddle(settings: Settings) -> PaddleOcrEngine:
-    if not settings.ekstraksi_ocr_url:
-        raise RuntimeError("EKSTRAKSI_OCR_URL is required when EKSTRAKSI_BACKEND=paddle")
+    if not settings.extraction_ocr_url:
+        raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=paddle")
     client = RemoteModelClient(
-        settings.ekstraksi_ocr_url, settings.ekstraksi_ocr_timeout_seconds, name="ekstraksi OCR model"
+        settings.extraction_ocr_url, settings.extraction_ocr_timeout_seconds, name="extraction OCR model"
     )
     return PaddleOcrEngine(client)
 
 
 def _build_remote(settings: Settings) -> RemoteOcrEngine:
-    if not settings.ekstraksi_ocr_url:
-        raise RuntimeError("EKSTRAKSI_OCR_URL is required when EKSTRAKSI_BACKEND=remote")
-    headers = {"X-API-Key": settings.ekstraksi_ocr_api_key} if settings.ekstraksi_ocr_api_key else None
+    if not settings.extraction_ocr_url:
+        raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=remote")
+    headers = {"X-API-Key": settings.extraction_ocr_api_key} if settings.extraction_ocr_api_key else None
     client = RemoteModelClient(
-        settings.ekstraksi_ocr_url,
-        settings.ekstraksi_ocr_timeout_seconds,
-        name="ekstraksi OCR model",
+        settings.extraction_ocr_url,
+        settings.extraction_ocr_timeout_seconds,
+        name="extraction OCR model",
         headers=headers,
     )
-    return RemoteOcrEngine(client, params=settings.ekstraksi_ocr_params)
+    return RemoteOcrEngine(client, params=settings.extraction_ocr_params)
 
 
-# EKSTRAKSI_BACKEND -> how to build it. Add a backend here and, if it needs settings, in config.py.
+# EXTRACTION_BACKEND -> how to build it. Add a backend here and, if it needs settings, in config.py.
 OCR_BACKENDS: dict[str, Factory[OcrEngine]] = {
     "mock": lambda settings: MockOcrEngine(),
     "paddle": _build_paddle,
@@ -67,7 +67,7 @@ OCR_BACKENDS: dict[str, Factory[OcrEngine]] = {
 @lru_cache
 def get_ocr_engine() -> OcrEngine:
     settings: Settings = get_settings()
-    return build_backend(OCR_BACKENDS, settings.ekstraksi_backend, settings, "ekstraksi OCR")
+    return build_backend(OCR_BACKENDS, settings.extraction_backend, settings, "extraction OCR")
 
 
 # --- pipeline -----------------------------------------------------------------------
@@ -133,15 +133,15 @@ def get_testing_relay() -> OutboxRelay | None:
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
-def get_ekstraksi_service() -> EkstraksiService:
-    return EkstraksiService(get_ocr_engine(), get_settings())
+def get_extraction_service() -> ExtractionService:
+    return ExtractionService(get_ocr_engine(), get_settings())
 
 
-def _job_service(pipeline: StagePipeline) -> EkstraksiJobService:
+def _job_service(pipeline: StagePipeline) -> ExtractionJobService:
     settings = get_settings()
-    return EkstraksiJobService(
+    return ExtractionJobService(
         pipeline,
-        get_ekstraksi_service(),
+        get_extraction_service(),
         settings.max_upload_bytes,
         url_policy=settings.file_url_policy,
         simulate_delay=settings.is_local,
@@ -149,11 +149,11 @@ def _job_service(pipeline: StagePipeline) -> EkstraksiJobService:
     )
 
 
-def get_job_service() -> EkstraksiJobService:
+def get_job_service() -> ExtractionJobService:
     return _job_service(get_pipeline())
 
 
-def get_testing_job_service() -> EkstraksiJobService:
+def get_testing_job_service() -> ExtractionJobService:
     return _job_service(get_testing_pipeline())
 
 

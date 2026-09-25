@@ -7,8 +7,8 @@ from app.dependencies import get_testing_job_service
 router = build_testing_router(
     jobs.router,
     {
-        "/v1/ekstraksi/jobs": "/v1/ekstraksi/jobs-test",
-        "/v1/ekstraksi/jobs/{request_id}": "/v1/ekstraksi/jobs-test/{request_id}",
+        "/v1/extraction/jobs": "/v1/extraction/jobs-test",
+        "/v1/extraction/jobs/{request_id}": "/v1/extraction/jobs-test/{request_id}",
     },
     service=get_testing_job_service,
 )

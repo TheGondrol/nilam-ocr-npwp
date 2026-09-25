@@ -5,7 +5,7 @@ FROM python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88
 WORKDIR /app
 
 # Dependensi dari lock file ber-hash (make lock): versi transitif dan isi setiap wheel terkunci.
-COPY services/ekstraksi/requirements.lock ./requirements.lock
+COPY services/extraction/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # ocr_common dipasang tanpa resolusi dependensi: semua dependensinya sudah ada di lock.
@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY libs/ocr_common ./libs/ocr_common
 RUN pip install --no-cache-dir --no-deps --no-build-isolation ./libs/ocr_common
 
-COPY services/ekstraksi/app ./app
+COPY services/extraction/app ./app
 
 RUN useradd --create-home --shell /bin/bash appuser
 USER appuser

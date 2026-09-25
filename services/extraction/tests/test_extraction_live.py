@@ -8,10 +8,10 @@ from ocr_common.testing import image_upload
 
 from app.config import Settings
 from app.ml.paddle import PaddleOcrEngine
-from app.services.ekstraksi_service import EkstraksiService
+from app.services.extraction_service import ExtractionService
 
-OCR_URL = os.environ.get("EKSTRAKSI_OCR_URL")
-pytestmark = pytest.mark.skipif(not OCR_URL, reason="EKSTRAKSI_OCR_URL tidak di-set; test live dilewati")
+OCR_URL = os.environ.get("EXTRACTION_OCR_URL")
+pytestmark = pytest.mark.skipif(not OCR_URL, reason="EXTRACTION_OCR_URL tidak di-set; test live dilewati")
 
 
 def synthetic_npwp_jpeg() -> bytes:
@@ -41,11 +41,11 @@ def synthetic_npwp_jpeg() -> bytes:
 @pytest.fixture
 def engine() -> PaddleOcrEngine:
     assert OCR_URL
-    return PaddleOcrEngine(RemoteModelClient(OCR_URL, 60.0, name="ekstraksi OCR model"))
+    return PaddleOcrEngine(RemoteModelClient(OCR_URL, 60.0, name="extraction OCR model"))
 
 
 async def test_live_engine_reads_synthetic_npwp(engine):
-    result = await EkstraksiService(engine, Settings(api_key="x", _env_file=None)).extract(
+    result = await ExtractionService(engine, Settings(api_key="x", _env_file=None)).extract(
         "npwp.jpg", "image/jpeg", synthetic_npwp_jpeg()
     )
     assert result["engine"] == "paddle"
@@ -57,7 +57,9 @@ async def test_live_engine_reads_synthetic_npwp(engine):
 
 def test_live_http_extract_returns_model_and_blocks(client, auth, engine, use_engine):
     use_engine(engine)
-    response = client.post("/v1/ekstraksi/extract", headers=auth, files=image_upload("npwp.jpg", synthetic_npwp_jpeg()))
+    response = client.post(
+        "/v1/extraction/extract", headers=auth, files=image_upload("npwp.jpg", synthetic_npwp_jpeg())
+    )
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["engine"] == "paddle"

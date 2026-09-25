@@ -59,9 +59,9 @@ async def test_complete_stores_result_and_is_not_reclaimable(repository):
 
 async def test_failed_job_can_be_claimed_again(repository):
     await repository.claim("REQ_3")
-    await repository.fail("REQ_3", "ekstraksi OCR model is unavailable")
+    await repository.fail("REQ_3", "extraction OCR model is unavailable")
     record = await repository.get("REQ_3")
-    assert (record["status"], record["error_message"]) == ("FAILED", "ekstraksi OCR model is unavailable")
+    assert (record["status"], record["error_message"]) == ("FAILED", "extraction OCR model is unavailable")
 
     assert await repository.claim("REQ_3") is True
     record = await repository.get("REQ_3")
@@ -144,7 +144,7 @@ async def test_pipeline_work_failure_is_recorded_and_reported(repository):
     pipeline, callback = _pipeline(repository, next_stage)
 
     async def work():
-        raise ServiceError(503, "ekstraksi OCR model is unavailable")
+        raise ServiceError(503, "extraction OCR model is unavailable")
 
     await pipeline.submit("REQ_12", work, handoff_payload=lambda result: result, next_stage=STAGE_STRUCTURING)
     await pipeline.runner.drain(5)
@@ -153,7 +153,7 @@ async def test_pipeline_work_failure_is_recorded_and_reported(repository):
     assert (await repository.get("REQ_12"))["status"] == "FAILED"
     assert callback.calls[0]["stage"] == "OCR"
     assert callback.calls[0]["status"] == "FAILED"
-    assert callback.calls[0]["error_message"] == "ekstraksi OCR model is unavailable"
+    assert callback.calls[0]["error_message"] == "extraction OCR model is unavailable"
 
 
 async def test_pipeline_unexpected_exception_does_not_leak_details(repository):

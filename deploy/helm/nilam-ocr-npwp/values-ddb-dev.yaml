@@ -11,7 +11,7 @@ existingSecret: nilam-ocr-npwp-secrets
 orchestration:
   # Callback hasil ke Orkestrasi (endpoint dari tim Orkestrasi, 24 Sep 2026): satu POST per request
   # saat selesai, dengan X-Callback-Key = ORCHESTRATION_CALLBACK_KEY di Secret nilam-ocr-npwp-secrets.
-  # Key itu WAJIB ada di Secret sebelum deploy: tanpa key, ekstraksi/structuring/scoring menolak start.
+  # Key itu WAJIB ada di Secret sebelum deploy: tanpa key, extraction/structuring/scoring menolak start.
   url: http://ocr-orchestration.ocr-dev.svc.cluster.local
   callbackPath: /v1/ocr-callback
   callbackFormat: result
@@ -39,6 +39,6 @@ services:
     env:
       # Dev: Orkestrasi pusat boleh melewati model guardrails per request (skip_guardrails=true).
       GUARDRAILS_SKIP_ALLOWED: "true"
-  ekstraksi:
+  extraction:
     env:
-      EKSTRAKSI_OCR_URL: http://10.213.128.67:8070
+      EXTRACTION_OCR_URL: http://10.213.128.67:8070

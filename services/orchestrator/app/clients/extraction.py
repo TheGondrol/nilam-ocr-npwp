@@ -8,17 +8,17 @@ from ocr_common.testing_endpoints import testing_path
 
 from app.config import Settings
 
-EKSTRAKSI_JOBS_PATH = "/v1/ekstraksi/jobs"
+EXTRACTION_JOBS_PATH = "/v1/extraction/jobs"
 
 
-class EkstraksiJobClient:
+class ExtractionJobClient:
     def __init__(
         self,
         client: RemoteModelClient,
         *,
         attempts: int = 3,
         delay: float = 0.5,
-        jobs_path: str = EKSTRAKSI_JOBS_PATH,
+        jobs_path: str = EXTRACTION_JOBS_PATH,
     ):
         self._client = client
         self._jobs_path = jobs_path
@@ -39,7 +39,7 @@ class EkstraksiJobClient:
         """Hand the document to the OCR stage. When the request came as `file_url`, that URL is forwarded
         instead of the bytes: the OCR service downloads it itself, and a job left behind by a dead process
         can be run again from the URL stored with the job. `guardrails` is None when the check was skipped:
-        the field is then left out (ekstraksi refuses a `guardrails` that is not a JSON object)."""
+        the field is then left out (extraction refuses a `guardrails` that is not a JSON object)."""
         fields = {"request_id": request_id, "document_type": document_type}
         if guardrails is not None:
             fields["guardrails"] = json.dumps(guardrails)
@@ -62,18 +62,18 @@ class EkstraksiJobClient:
         await self._client.aclose()
 
 
-def build_ekstraksi_client(settings: Settings, *, testing: bool = False) -> EkstraksiJobClient:
+def build_extraction_client(settings: Settings, *, testing: bool = False) -> ExtractionJobClient:
     """The client to the OCR stage; `testing=True` submits to its `-test` endpoint (TESTING_ENDPOINTS)."""
     client = RemoteModelClient(
-        settings.ekstraksi_service_url,
-        settings.ekstraksi_timeout_seconds,
-        name="ekstraksi service (testing)" if testing else "ekstraksi service",
-        headers={"X-API-Key": settings.ekstraksi_api_key or settings.api_key},
+        settings.extraction_service_url,
+        settings.extraction_timeout_seconds,
+        name="extraction service (testing)" if testing else "extraction service",
+        headers={"X-API-Key": settings.extraction_api_key or settings.api_key},
         passthrough_client_errors=True,
     )
-    return EkstraksiJobClient(
+    return ExtractionJobClient(
         client,
         attempts=settings.pipeline_retry_attempts,
         delay=settings.pipeline_retry_delay_seconds,
-        jobs_path=testing_path(EKSTRAKSI_JOBS_PATH) if testing else EKSTRAKSI_JOBS_PATH,
+        jobs_path=testing_path(EXTRACTION_JOBS_PATH) if testing else EXTRACTION_JOBS_PATH,
     )

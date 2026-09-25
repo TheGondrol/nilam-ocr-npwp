@@ -61,7 +61,7 @@ async def _age_all(outbox: SqlOutbox, seconds: float) -> None:
 async def _run(pipeline, *, fails: bool = False) -> None:
     async def work():
         if fails:
-            raise ServiceError(503, "ekstraksi OCR model is unavailable")
+            raise ServiceError(503, "extraction OCR model is unavailable")
         return {"full_text": "NPWP"}
 
     await pipeline.submit(
@@ -109,7 +109,7 @@ async def test_a_failed_job_queues_a_failed_callback(pipeline):
     assert row["kind"] == KIND_CALLBACK
     assert (row["payload"]["status"], row["payload"]["error_message"]) == (
         "FAILED",
-        "ekstraksi OCR model is unavailable",
+        "extraction OCR model is unavailable",
     )
     assert (await stage.repository.get(RID))["status"] == "FAILED"
 

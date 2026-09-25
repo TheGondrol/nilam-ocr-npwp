@@ -1,8 +1,8 @@
-SERVICES := orchestrator guardrails ekstraksi structuring scoring
+SERVICES := orchestrator guardrails extraction structuring scoring
 PY ?= python
 PORT_orchestrator := 8034
 PORT_guardrails := 8031
-PORT_ekstraksi := 8030
+PORT_extraction := 8030
 PORT_structuring := 8032
 PORT_scoring := 8033
 
@@ -22,7 +22,7 @@ lock-orchestrator:
 	$(LOCK) services/orchestrator/requirements.txt libs/ocr_common/pyproject.toml -o services/orchestrator/requirements.lock
 lock-guardrails:
 	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --emit-index-url -o services/guardrails/requirements.lock
-lock-ekstraksi lock-structuring lock-scoring: lock-%:
+lock-extraction lock-structuring lock-scoring: lock-%:
 	$(LOCK) services/$*/requirements.txt libs/ocr_common/pyproject.toml --extra db -o services/$*/requirements.lock
 lock-db:
 	$(LOCK) db/requirements.txt libs/ocr_common/pyproject.toml -o db/requirements.lock
