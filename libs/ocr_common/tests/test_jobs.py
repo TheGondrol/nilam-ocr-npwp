@@ -59,9 +59,9 @@ async def test_complete_stores_result_and_is_not_reclaimable(repository):
 
 async def test_failed_job_can_be_claimed_again(repository):
     await repository.claim("REQ_3")
-    await repository.fail("REQ_3", "ekstraksi OCR model is unavailable")
+    await repository.fail("REQ_3", "extraction OCR model is unavailable")
     record = await repository.get("REQ_3")
-    assert (record["status"], record["error_message"]) == ("FAILED", "ekstraksi OCR model is unavailable")
+    assert (record["status"], record["error_message"]) == ("FAILED", "extraction OCR model is unavailable")
 
     assert await repository.claim("REQ_3") is True
     record = await repository.get("REQ_3")
@@ -144,7 +144,7 @@ async def test_pipeline_work_failure_is_recorded_and_reported(repository):
     pipeline, callback = _pipeline(repository, next_stage)
 
     async def work():
-        raise ServiceError(503, "ekstraksi OCR model is unavailable")
+        raise ServiceError(503, "extraction OCR model is unavailable")
 
     await pipeline.submit("REQ_12", work, handoff_payload=lambda result: result, next_stage=STAGE_STRUCTURING)
     await pipeline.runner.drain(5)
@@ -153,7 +153,7 @@ async def test_pipeline_work_failure_is_recorded_and_reported(repository):
     assert (await repository.get("REQ_12"))["status"] == "FAILED"
     assert callback.calls[0]["stage"] == "OCR"
     assert callback.calls[0]["status"] == "FAILED"
-    assert callback.calls[0]["error_message"] == "ekstraksi OCR model is unavailable"
+    assert callback.calls[0]["error_message"] == "extraction OCR model is unavailable"
 
 
 async def test_pipeline_unexpected_exception_does_not_leak_details(repository):
@@ -373,3 +373,13 @@ async def test_without_callbacks_a_failed_job_is_not_reported_by_callback():
     assert callback.calls == []
     record = await repository.get("REQ_nocb3")
     assert record is not None and record["status"] == "FAILED"
+
+
+async def test_the_record_carries_the_sequence_stored_in_the_input(repository):
+    await repository.claim("REQ_seq", input={"pipeline_name_sequence": ["guardrails", "extraction"]})
+    await repository.claim("REQ_plain", input={"document_type": "npwp"})
+
+    record, plain = await repository.get("REQ_seq"), await repository.get("REQ_plain")
+
+    assert record is not None and record["pipeline_name_sequence"] == ["guardrails", "extraction"]
+    assert plain is not None and plain["pipeline_name_sequence"] is None

@@ -252,7 +252,7 @@ class StageCallback(BaseModel):
     )
 
     request_id: str = Field(
-        ..., description="The request_id you submitted with `POST /v1/ekstraksi/jobs`", examples=[REQUEST_ID_EXAMPLE]
+        ..., description="The request_id you submitted with `POST /v1/extraction/jobs`", examples=[REQUEST_ID_EXAMPLE]
     )
     stage: Stage = Field(
         ...,

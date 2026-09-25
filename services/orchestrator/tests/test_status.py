@@ -56,6 +56,7 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         "document_type": "npwp",
         "job_status": "completed",
         "guardrails": 0,
+        "pipeline_last_stage": "scoring",
         "params": None,
     }
     assert stub_waiter.snapshots == [RID]
@@ -167,7 +168,7 @@ async def test_snapshot_reads_a_next_stage_without_a_job_yet_as_running():
 
 
 async def test_snapshot_stops_at_a_failed_stage():
-    stages = _stages(_job("FAILED", error_message="ekstraksi OCR model is unavailable"))
+    stages = _stages(_job("FAILED", error_message="extraction OCR model is unavailable"))
 
     outcome = await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
 
@@ -175,7 +176,7 @@ async def test_snapshot_stops_at_a_failed_stage():
     assert (outcome.stage, outcome.status, outcome.error_message) == (
         "OCR",
         "FAILED",
-        "ekstraksi OCR model is unavailable",
+        "extraction OCR model is unavailable",
     )
     assert [stage.calls for stage in stages] == [1, 0, 0]
 
@@ -218,21 +219,79 @@ async def test_a_stage_answering_404_is_no_job_and_401_is_500_not_passed_on():
         return httpx.Response(401, json={"message": "Invalid API key"})
 
     remote = RemoteModelClient(
-        "http://ekstraksi:8030",
+        "http://extraction:8030",
         5.0,
-        name="ekstraksi service",
+        name="extraction service",
         passthrough_statuses=(404,),
         transport=httpx.MockTransport(handler),
     )
-    stage = StageStatusClient("OCR", remote, "/v1/ekstraksi/jobs")
+    stage = StageStatusClient("OCR", remote, "/v1/extraction/jobs")
 
     assert await stage.get("missing") is None
     with pytest.raises(ServiceError) as exc:
         await stage.get(RID)
-    assert (exc.value.status_code, exc.value.message) == (500, "ekstraksi service error (401): Invalid API key")
+    assert (exc.value.status_code, exc.value.message) == (500, "extraction service error (401): Invalid API key")
 
 
 def test_the_stage_clients_pass_only_404_through():
     for stage in build_stage_status_clients(get_settings()):
         assert stage._client._passthrough_statuses == frozenset({404})
         assert stage._client._passthrough is False
+
+
+async def test_snapshot_stops_at_the_last_stage_of_the_stored_sequence():
+    ocr = {**_job("DONE", {"blocks": []}), "pipeline_name_sequence": ["guardrails", "extraction"]}
+    stages = _stages(ocr, _job("DONE", {}), _job("DONE", {}))
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+
+    assert outcome is not None
+    assert (outcome.stage, outcome.status, outcome.results) == ("OCR", "DONE", {"OCR": {"blocks": []}})
+    assert [stage.calls for stage in stages] == [1, 0, 0]
+
+
+async def test_snapshot_of_a_job_without_a_sequence_reads_the_whole_pipeline():
+    """Jobs submitted before pipeline_name_sequence existed, or with an unreadable one."""
+    ocr = {**_job("DONE", {"blocks": []}), "pipeline_name_sequence": ["extraction", "scoring"]}
+    stages = _stages(ocr, _job("DONE", {}), _job("PROCESSING"))
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+
+    assert outcome is not None
+    assert (outcome.stage, outcome.status) == ("SCORING", "PROCESSING")
+
+
+def test_a_request_that_ended_before_scoring_is_answered_with_that_result(client, auth, stub_waiter):
+    structuring = {"fields": {"nomor_npwp": {"value": "12.345.678.9-012.345"}}, "flag": False}
+    stub_waiter.snapshot_outcome = WaitOutcome(
+        "STRUCTURING", "DONE", results={"OCR": {"blocks": []}, "STRUCTURING": structuring}
+    )
+
+    response = _get(client, auth)
+
+    assert response.status_code == 200
+    assert (response.json()["job_status"], response.json()["data"]) == ("completed", structuring)
+
+
+def test_an_unreachable_stage_is_named_in_the_error(client, auth, stub_waiter):
+    from app.services.pipeline_waiter import StageError
+
+    stub_waiter.snapshot_error = StageError("structuring", UpstreamUnavailable("structuring service is unavailable"))
+
+    response = _get(client, auth)
+
+    assert response.status_code == 503
+    assert (response.json()["pipeline_last_stage"], response.json()["message"]) == (
+        "structuring",
+        "structuring service is unavailable",
+    )
+
+
+async def test_snapshot_names_the_stage_it_could_not_read():
+    from app.services.pipeline_waiter import StageError
+
+    stages = _stages(_job("DONE", {}), UpstreamUnavailable("structuring service is unavailable"))
+
+    with pytest.raises(StageError) as exc:
+        await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+    assert (exc.value.service, exc.value.status_code) == ("structuring", 503)

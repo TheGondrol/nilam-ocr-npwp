@@ -13,7 +13,7 @@ EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2
 TIMEOUT="${TIMEOUT:-10m}"
 # Revisi release yang disimpan Helm (satu Secret sh.helm.release.v1.<release>.vN per revisi), untuk rollback.
 HISTORY_MAX="${HISTORY_MAX:-5}"
-ALL_SERVICES=(orchestrator guardrails ekstraksi structuring scoring)
+ALL_SERVICES=(orchestrator guardrails extraction structuring scoring)
 
 usage() {
   cat <<EOF
@@ -46,7 +46,7 @@ untuk rollback, default 5).
 
 Contoh:
   deploy/helm/deploy.sh scoring
-  deploy/helm/deploy.sh ekstraksi structuring scoring
+  deploy/helm/deploy.sh extraction structuring scoring
   deploy/helm/deploy.sh --dry-run --skip-build --tag 4d02eba all
 EOF
 }

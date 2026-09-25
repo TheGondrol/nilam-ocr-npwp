@@ -2,10 +2,10 @@ openapi: 3.1.0
 info:
   title: OCR NPWP API
   description: 'OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. **Async
-    pipeline:** the orchestrator NPWP POSTs /v1/ekstraksi/jobs once a document passed the guardrails check
-    and gets 202; this service runs OCR in the background, stores the result, reports to the central orchestrator
-    (callback / its tables), and hands the job to the structuring service. The raw OCR step is also exposed
-    as /v1/ekstraksi/extract. All endpoints except /health require an X-API-Key header.
+    pipeline:** the orchestrator NPWP POSTs /v1/extraction/jobs once a document passed the guardrails
+    check and gets 202; this service runs OCR in the background, stores the result, reports to the central
+    orchestrator (callback / its tables), and hands the job to the structuring service. The raw OCR step
+    is also exposed as /v1/extraction/extract. All endpoints except /health require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -69,13 +69,13 @@ info:
 servers:
 - url: /
   description: This host (where this page is served)
-- url: http://nilam-ocr-npwp-ekstraksi.{namespace}.svc.cluster.local:8030
+- url: http://nilam-ocr-npwp-extraction.{namespace}.svc.cluster.local:8030
   description: GKE, from inside the release's namespace (the other services of this pipeline)
   variables:
     namespace:
       default: nilam-ocr-npwp
       description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
-- url: http://ekstraksi:8030
+- url: http://extraction:8030
   description: The Docker Compose network
 - url: http://127.0.0.1:8030
   description: Local development
@@ -103,7 +103,7 @@ paths:
                     version: 1.0.0
                     device: cpu
                     backends:
-                      ekstraksi: paddle
+                      extraction: paddle
                       storage: postgres
   /ready:
     get:
@@ -159,7 +159,7 @@ paths:
             text/plain:
               schema:
                 type: string
-  /v1/ekstraksi/jobs:
+  /v1/extraction/jobs:
     post:
       tags:
       - Pipeline
@@ -184,7 +184,12 @@ paths:
 
         **Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run
         OCR twice, unless the earlier attempt `FAILED` or has been `PROCESSING` for longer than the job
-        lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default), in which case it is run again.'
+        lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default), in which case it is run again.
+
+
+        **Where the chain stops.** `pipeline_name_sequence` decides: when `extraction` is its last service,
+        the job ends here, nothing is handed on, and the OCR result is the request''s answer, as it is
+        (the `OCR` callback then carries `final: true`).'
       operationId: submitOcrJob
       requestBody:
         content:
@@ -226,7 +231,8 @@ paths:
                       duplicate: true
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Neither or both of file / file_url, or `guardrails` is not a JSON object
+          description: Neither or both of file / file_url, `guardrails` is not a JSON object, or `pipeline_name_sequence`
+            is not a valid sequence that includes `extraction`
           content:
             application/json:
               schema:
@@ -260,7 +266,7 @@ paths:
                 errors: VALIDATION_ERROR
       security:
       - APIKeyHeader: []
-  /v1/ekstraksi/jobs/{request_id}:
+  /v1/extraction/jobs/{request_id}:
     get:
       tags:
       - Pipeline
@@ -359,7 +365,7 @@ paths:
                       stage: OCR
                       created_at: '2026-09-18T04:00:00+00:00'
                       status: FAILED
-                      error_message: ekstraksi OCR model is unavailable
+                      error_message: extraction OCR model is unavailable
                       updated_at: '2026-09-18T04:00:03+00:00'
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '401':
@@ -397,7 +403,7 @@ paths:
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /v1/ekstraksi/outbox:
+  /v1/extraction/outbox:
     get:
       tags:
       - Pipeline
@@ -407,7 +413,7 @@ paths:
         were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
         is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
         or a dead letter is waiting.'
-      operationId: getEkstraksiOutboxStatus
+      operationId: getExtractionOutboxStatus
       responses:
         '200':
           description: The backlog of this stage
@@ -469,7 +475,7 @@ paths:
                 errors: Invalid or missing API key
       security:
       - APIKeyHeader: []
-  /v1/ekstraksi/outbox/release:
+  /v1/extraction/outbox/release:
     post:
       tags:
       - Pipeline
@@ -553,10 +559,10 @@ paths:
                 errors: VALIDATION_ERROR
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /v1/ekstraksi/extract:
+  /v1/extraction/extract:
     post:
       tags:
-      - Ekstraksi
+      - Extraction
       summary: Raw OCR of a document, synchronous (no job, no callback)
       description: Runs the OCR engine and returns raw text blocks with confidence and bounding boxes.
         Send the image as `file` or `file_url`; exactly one of the two.
@@ -657,8 +663,8 @@ paths:
               example:
                 status_code: 500
                 status_desc: Internal Server Error
-                message: 'ekstraksi OCR model error (500): error: OpenCV ...'
-                errors: 'ekstraksi OCR model error (500): error: OpenCV ...'
+                message: 'extraction OCR model error (500): error: OpenCV ...'
+                errors: 'extraction OCR model error (500): error: OpenCV ...'
         '503':
           description: OCR model unreachable
           content:
@@ -668,8 +674,8 @@ paths:
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: ekstraksi OCR model is unavailable
-                errors: ekstraksi OCR model is unavailable
+                message: extraction OCR model is unavailable
+                errors: extraction OCR model is unavailable
         '504':
           description: OCR model did not answer in time
           content:
@@ -679,8 +685,8 @@ paths:
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: ekstraksi OCR model timed out after 30.0s
-                errors: ekstraksi OCR model timed out after 30.0s
+                message: extraction OCR model timed out after 30.0s
+                errors: extraction OCR model timed out after 30.0s
         '422':
           description: Validation Error
           content:
@@ -708,7 +714,7 @@ webhooks:
         `Content-Type: application/json`.
 
 
-        **When.** Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once the
+        **When.** Once per job of `POST /v1/extraction/jobs`: `stage: OCR` with `status: DONE` once the
         OCR result is stored, or `status: FAILED` with `error_message` when the document could not be
         read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR succeeded
         but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX` the
@@ -804,6 +810,18 @@ components:
           - '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821,
             "n_pages": 1, "n_approve": 1, "n_reject": 0}, "pages": [{"page_index": 0, "proba_approve":
             0.9821, "proba_reject": 0.0179, "verdict": "accepted"}]}'
+        pipeline_name_sequence:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, in order, from the central orchestrator (forwarded
+            by the orchestrator NPWP and each stage): `guardrails`, `extraction`, `structuring`, `scoring`,
+            guardrails optional at the front and the end cut off, never one skipped in the middle. The
+            last one ends the request: its result is the answer, as it is, and nothing is handed on. Omitted:
+            the full pipeline. Serialised as a JSON array string'
+          examples:
+          - '["guardrails", "extraction", "structuring", "scoring"]'
         file:
           anyOf:
           - type: string
@@ -974,7 +992,7 @@ components:
           description: Active implementation per concern (model backend, storage). Useful to confirm a
             deployment
           examples:
-          - ekstraksi: paddle
+          - extraction: paddle
             storage: postgres
       type: object
       required:
@@ -1120,6 +1138,20 @@ components:
           description: Last status change (ISO 8601, UTC)
           examples:
           - '2026-09-18T04:00:01+00:00'
+        pipeline_name_sequence:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, as the job was submitted with them; the last one
+            ends the request. Null for a job submitted without it: the full pipeline'
+          examples:
+          - - guardrails
+            - extraction
+            - structuring
+            - scoring
         result:
           anyOf:
           - $ref: '#/components/schemas/OcrResult'
@@ -1179,7 +1211,7 @@ components:
         engine:
           type: string
           title: Engine
-          description: OCR backend that read the document (`EKSTRAKSI_BACKEND`)
+          description: OCR backend that read the document (`EXTRACTION_BACKEND`)
           examples:
           - paddle
         model:
@@ -1425,7 +1457,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
@@ -1525,7 +1557,7 @@ tags:
   description: 'Asynchronous pipeline stage: 202, background work, callback, hand-off'
 - name: Callbacks
   description: Requests this service SENDS to the orchestrator (see Webhooks)
-- name: Ekstraksi
+- name: Extraction
   description: Raw OCR text, synchronous
 - name: Health
   description: Liveness and readiness probes; no API key

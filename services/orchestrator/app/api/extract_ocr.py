@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from typing import Any
 
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import DOCUMENT_TYPE
+from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
 from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
@@ -23,13 +25,15 @@ from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
 from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
 from app.services.extract_service import ExtractOcrService
+from app.services.pipeline_waiter import StageError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
-SKIP_NOT_ALLOWED_CODE = "GUARDRAILS_SKIP_NOT_ALLOWED"
-SKIP_NOT_ALLOWED_MESSAGE = "skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off"
+INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -75,28 +79,91 @@ _FAILED = extract_body(
     document_type="npwp",
     params=_PARAMS,
 )
-_SKIP_NOT_ALLOWED = extract_body(
-    403,
-    SKIP_NOT_ALLOWED_MESSAGE,
-    errors=SKIP_NOT_ALLOWED_CODE,
+_GUARDRAILS_REPORT = {
+    "passed": True,
+    "reason": None,
+    "document": {
+        "verdict": "accepted",
+        "confidence": 0.9821,
+        "n_pages": 1,
+        "n_approve": 1,
+        "n_reject": 0,
+        "reject_threshold": 0.5,
+    },
+    "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
+}
+_GUARDRAILS_ONLY = extract_body(
+    200,
+    COMPLETED_MESSAGE,
+    data=_GUARDRAILS_REPORT,
+    job_status="completed",
+    guardrails=0,
     request_id=RID,
     document_type="npwp",
+    params=_PARAMS,
 )
 
 _CONTRACT_TABLE = (
-    "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |\n"
-    "|---|---|---|---|---|---|\n"
-    "| Finished | 200 | `completed` | the fields | `0` | null |\n"
-    "| Still running | 202 | `processing` | null | null | null |\n"
-    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
-    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` |\n"
+    "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |\n"
+    "|---|---|---|---|---|---|---|\n"
+    "| Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |\n"
+    "| Still running | 202 | `processing` | null | null | null | the service still running |\n"
+    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
+    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
     "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
-    "`SCORING_FAILED` |\n\n"
+    "`SCORING_FAILED` | the service that failed |\n\n"
+    "`pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence` names "
+    "it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504 from calling "
+    "one of them. It is null when this service refused the request before calling any (file checks, "
+    "`pipeline_name_sequence`, `params`, `document_type`).\n\n"
 )
 
 
 class _InvalidParams(Exception):
     pass
+
+
+def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, params: Any) -> dict[str, Any]:
+    """The answer when calling a pipeline service failed (unreachable, timed out, refused the file, answered
+    wrongly): the error envelope's status and message, in the extract-ocr shape, naming that service."""
+    if exc.status_code >= 500:
+        logger.error("%s -> %d: %s", exc.service, exc.status_code, exc.message)
+    return extract_body(
+        exc.status_code,
+        exc.message,
+        errors=exc.message,
+        request_id=request_id,
+        document_type=document_type,
+        params=params,
+        pipeline_last_stage=exc.service,
+    )
+
+
+def _stage_error_response(code: int, description: str, service: str, message: str) -> dict[str, Any]:
+    example = extract_body(
+        code, message, errors=message, request_id=RID, document_type="npwp", pipeline_last_stage=service
+    )
+    return {
+        "model": ExtractOcrResponse,
+        "description": description,
+        "content": {"application/json": {"example": example}},
+    }
+
+
+def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
+    """`pipeline_name_sequence` as repeated form fields, or as one JSON array string; the full pipeline when
+    omitted. Raises `InvalidSequence`."""
+    if not values:
+        return DEFAULT_SEQUENCE
+    if len(values) == 1 and values[0].lstrip().startswith("["):
+        try:
+            parsed = json.loads(values[0])
+        except ValueError:
+            parsed = None
+        if not isinstance(parsed, list) or not all(isinstance(name, str) for name in parsed):
+            raise InvalidSequence("send it as a JSON array of strings, or as repeated form fields")
+        values = parsed
+    return validate_sequence(values)
 
 
 def _parse_params(raw: str | None) -> Any:
@@ -118,7 +185,8 @@ def _parse_params(raw: str | None) -> Any:
     summary="Judge a document, run the pipeline, answer with the OCR result or 202",
     description=(
         "**The call the central orchestrator makes.** Checks the file, has the guardrails service judge it, "
-        "hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring for up to "
+        "hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring (or the services "
+        "`pipeline_name_sequence` names, see below) for up to "
         "`PIPELINE_WAIT_SECONDS` (15 s by default), counted from when this request arrived. The response follows "
         'the central orchestrator\'s `extract-ocr` contract ("Finished" meaning finished within the wait):\n\n'
         + _CONTRACT_TABLE
@@ -135,11 +203,17 @@ def _parse_params(raw: str | None) -> Any:
         "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
         "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
-        "**Skipping guardrails.** `skip_guardrails=true` leaves the guardrails model out for this one request, "
-        "when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise `403` "
-        f"`{SKIP_NOT_ALLOWED_CODE}` and nothing runs). The file checks above still run, and the structuring rules "
-        "still reject, so `guardrails: 1` can then only come from them. The trust model gets no guardrails "
-        "probability and works with that input missing.\n\n"
+        "**Which services run: `pipeline_name_sequence`.** The services of this request, in order: `guardrails`, "
+        "`extraction`, `structuring`, `scoring`. Guardrails may be left out at the front and the end cut off, "
+        "never one skipped in the middle or the order changed (else `422` "
+        f"`{INVALID_SEQUENCE_CODE}` and nothing runs). Omitted: all four. The last service ends the request and "
+        "its result is `data`, **as it is**: the guardrails report (`{passed, reason, document, pages}`) when "
+        "only `guardrails` runs, the OCR result (`{text, blocks, ...}`) after `extraction`, the structuring result "
+        "(`{fields, flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. "
+        "The rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving "
+        "`guardrails` out is the central orchestrator's call: the file checks above always run, and the trust "
+        "model then works without a guardrails probability. A `guardrails`-only request stores nothing: its "
+        "POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
         "(e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -156,6 +230,10 @@ def _parse_params(raw: str | None) -> Any:
         200: success_examples(
             "Accepted and finished within the wait",
             completed=("The OCR result", _COMPLETED),
+            guardrails_only=(
+                '`pipeline_name_sequence: ["guardrails"]`: the guardrails report as it is',
+                _GUARDRAILS_ONLY,
+            ),
         ),
         202: {
             **success_examples(
@@ -175,14 +253,6 @@ def _parse_params(raw: str | None) -> Any:
             "content": {"application/json": {"example": _REJECTED}},
         },
         401: UNAUTHORIZED,
-        403: {
-            "model": ExtractOcrResponse,
-            "description": (
-                f"`skip_guardrails=true` while `GUARDRAILS_SKIP_ALLOWED` is off (`{SKIP_NOT_ALLOWED_CODE}`); "
-                "nothing was started"
-            ),
-            "content": {"application/json": {"example": _SKIP_NOT_ALLOWED}},
-        },
         413: error(
             413,
             "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started",
@@ -192,25 +262,31 @@ def _parse_params(raw: str | None) -> Any:
             "model": ExtractOcrResponse,
             "description": (
                 "A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`; "
-                "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is "
-                "missing (`VALIDATION_ERROR`)"
+                "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence` breaks "
+                f"the order rules (`{INVALID_SEQUENCE_CODE}`), or a required field is missing (`VALIDATION_ERROR`)"
             ),
             "content": {"application/json": {"example": _FAILED}},
         },
-        500: error(
+        500: _stage_error_response(
             500,
-            "The guardrails or ekstraksi service failed, or answered in an unexpected shape",
+            "The guardrails or extraction service failed, or answered in an unexpected shape; "
+            "`pipeline_last_stage` names which",
+            "guardrails",
             "guardrails service returned an unexpected response",
         ),
-        503: error(
+        503: _stage_error_response(
             503,
-            "The guardrails service, its model, or the ekstraksi service is unreachable; nothing was started",
-            "ekstraksi service is unavailable",
+            "The guardrails service, its model, or the extraction service is unreachable; nothing was started. "
+            "`pipeline_last_stage` names which",
+            "extraction",
+            "extraction service is unavailable",
         ),
-        504: error(
+        504: _stage_error_response(
             504,
-            "The guardrails service, its model, or the ekstraksi service did not answer in time",
-            "ekstraksi service timed out after 10.0s",
+            "The guardrails service, its model, or the extraction service did not answer in time; "
+            "`pipeline_last_stage` names which",
+            "extraction",
+            "extraction service timed out after 10.0s",
         ),
     },
 )
@@ -230,13 +306,14 @@ async def extract_ocr(
     ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
-    skip_guardrails: bool = Form(
-        False,
+    pipeline_name_sequence: list[str] | None = Form(
+        None,
         description=(
-            "`true` leaves the guardrails model out for this request; only when this service allows it "
-            f"(`GUARDRAILS_SKIP_ALLOWED`), else `403` `{SKIP_NOT_ALLOWED_CODE}`. The file checks still run and the "
-            "structuring rules still reject"
+            "The services to run, in order: `guardrails`, `extraction`, `structuring`, `scoring`; guardrails "
+            "optional at the front, the end may be cut off, nothing skipped in the middle. Repeated form fields, or "
+            "one JSON array string. Omitted: all four. The last one's result is `data`, as it is"
         ),
+        examples=[["guardrails", "extraction", "structuring", "scoring"]],
     ),
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
@@ -262,12 +339,14 @@ async def extract_ocr(
             request_id=request_id,
             document_type=document_type,
         )
-    if skip_guardrails and not settings.guardrails_skip_allowed:
-        response.status_code = 403
+    try:
+        sequence = _parse_sequence(pipeline_name_sequence)
+    except InvalidSequence as exc:
+        response.status_code = 422
         return extract_body(
-            403,
-            SKIP_NOT_ALLOWED_MESSAGE,
-            errors=SKIP_NOT_ALLOWED_CODE,
+            422,
+            f"Invalid pipeline_name_sequence: {exc}",
+            errors=INVALID_SEQUENCE_CODE,
             request_id=request_id,
             document_type=document_type,
         )
@@ -286,8 +365,11 @@ async def extract_ocr(
             content,
             received_at=received_at,
             file_url=file_url,
-            skip_guardrails=skip_guardrails,
+            sequence=sequence,
         )
+    except StageError as exc:
+        response.status_code = exc.status_code
+        return _stage_error_body(exc, request_id=request_id, document_type=document_type, params=parsed_params)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(
@@ -356,13 +438,25 @@ async def extract_ocr(
             "description": "A pipeline stage failed (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`)",
             "content": {"application/json": {"example": {**_FAILED, "params": None}}},
         },
-        500: error(
+        500: _stage_error_response(
             500,
-            "A stage answered in an unexpected shape, or refused this service (e.g. a wrong API key)",
+            "A stage answered in an unexpected shape, or refused this service (e.g. a wrong API key); "
+            "`pipeline_last_stage` names which",
+            "structuring",
             "structuring service error (401): Invalid or missing API key",
         ),
-        503: error(503, "A stage service is unreachable", "structuring service is unavailable"),
-        504: error(504, "A stage service did not answer in time", "structuring service timed out after 10.0s"),
+        503: _stage_error_response(
+            503,
+            "A stage service is unreachable; `pipeline_last_stage` names which",
+            "structuring",
+            "structuring service is unavailable",
+        ),
+        504: _stage_error_response(
+            504,
+            "A stage service did not answer in time; `pipeline_last_stage` names which",
+            "structuring",
+            "structuring service timed out after 10.0s",
+        ),
     },
 )
 async def get_extract_ocr(
@@ -375,6 +469,9 @@ async def get_extract_ocr(
     token = adopt_request_id(request, request_id)
     try:
         outcome = await service.status(request_id)
+    except StageError as exc:
+        response.status_code = exc.status_code
+        return _stage_error_body(exc, request_id=request_id, document_type=DOCUMENT_TYPE, params=None)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(

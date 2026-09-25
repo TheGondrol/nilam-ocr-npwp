@@ -16,7 +16,7 @@ yang sedang berjalan, bukan karangan. Yang belum terbukti ditandai eksplisit.
 
 Sudah terbukti jalan di cluster:
 
-- guardrails, ekstraksi, structuring, scoring `/ready` menjawab 200, koneksi database normal
+- guardrails, extraction, structuring, scoring `/ready` menjawab 200, koneksi database normal
 - satu kartu NPWP asli lewat rantai penuh dalam ±6 detik, hasil
   `npwp_confidence` 0.9926 dan `name_confidence` 0.9953
 - job tercatat `DONE` di ketiga tabel tahap
@@ -43,7 +43,7 @@ Satu-satunya alamat yang kalian pakai:
     http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034
 
 Di belakangnya, tiap service punya Deployment + Service sendiri (`nilam-ocr-npwp-<service>`):
-orchestrator (8034), guardrails (8031), ekstraksi (8030), structuring (8032), scoring (8033). Selain
+orchestrator (8034), guardrails (8031), extraction (8030), structuring (8032), scoring (8033). Selain
 orchestrator semuanya internal: hanya dipanggil orchestrator atau tahap sebelumnya.
 
 **Autentikasi.** Semua endpoint kecuali `/health` dan `/ready` memerlukan header:
@@ -113,7 +113,7 @@ default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu
 `request_id` dibuat oleh kalian dan menjadi kunci di semua tahap. Bebas formatnya,
 string; contoh yang kami pakai saat uji: `REQ_a0e0fd34ed7a`.
 
-Kalian **tidak** memanggil guardrails, ekstraksi, structuring, dan scoring sendiri (dan sejak
+Kalian **tidak** memanggil guardrails, extraction, structuring, dan scoring sendiri (dan sejak
 orchestrator ada, memang tidak bisa dari namespace kalian begitu NetworkPolicy ditegakkan). Keadaan
 sebuah request kapan saja: `GET :8034/v1/extract-ocr/{request_id}` (bagian 4). Bagian 5 dan 6
 menjelaskan apa yang terjadi di dalam, sebagai latar.
@@ -139,7 +139,21 @@ supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
 Path, field, dan bentuk jawabannya sama persis dengan `extract-ocr` yang dulu di guardrails port
 8031; hanya port-nya yang berubah ke **8034**. Bentuk jawabannya mengikuti kontrak `extract-ocr`
-kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, dan `params`.
+kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
+`pipeline_last_stage`, dan `params`.
+
+**`pipeline_last_stage`** menyebut service pipeline asal jawaban itu, dengan nama yang sama seperti
+di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET /v1/extract-ocr/{request_id}`:
+
+| Jawaban | `pipeline_last_stage` |
+|---|---|
+| 200 selesai | service terakhir di urutan (`scoring` untuk urutan penuh) |
+| 202 masih berjalan | service yang sedang berjalan |
+| 400 ditolak model guardrails | `guardrails` |
+| 400 ditolak aturan structuring | `structuring` |
+| 422 `<TAHAP>_FAILED` | service yang gagal (`OCR_FAILED` = `extraction`) |
+| 400 / 500 / 503 / 504 saat memanggil sebuah service (tidak terjangkau, timeout, file tidak terbaca model) | service itu |
+| ditolak sebelum service pipeline mana pun dipanggil (file, `pipeline_name_sequence`, `params`, `document_type`) | `null` |
 
 | Field | Wajib | Keterangan |
 |---|---|---|
@@ -147,12 +161,38 @@ kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, d
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
-| `skip_guardrails` | tidak | boolean, default `false`. `true` = lewati model guardrails untuk request ini (lihat di bawah) |
+| `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
 
-**Melewati guardrails.** Dengan `skip_guardrails=true`, dokumen tidak dinilai model guardrails dan
-langsung masuk pipeline. Ini hanya berlaku kalau service mengizinkannya (`GUARDRAILS_SKIP_ALLOWED`,
-nyala di dev). Kalau tidak diizinkan, jawabannya **403** `GUARDRAILS_SKIP_NOT_ALLOWED` dan tidak ada
-yang dijalankan. Yang tetap berlaku:
+**Memilih service: `pipeline_name_sequence`.** Isinya nama service yang dijalankan, berurutan:
+`guardrails`, `extraction`, `structuring`, `scoring`. Kirim sebagai field form berulang
+(`pipeline_name_sequence=guardrails`, `pipeline_name_sequence=extraction`, ...) atau satu string
+JSON array (`["guardrails", "extraction"]`). Tanpa field ini keempat service dijalankan, sama seperti
+sebelumnya.
+
+Aturannya: urutan tidak boleh diubah, `guardrails` boleh dilewati dari depan, dan service di
+belakang boleh dipotong, tetapi service di tengah tidak boleh dilewati (setiap service setelah
+guardrails butuh hasil service sebelumnya).
+
+| `pipeline_name_sequence` | Boleh? | Isi `data` saat selesai |
+|---|---|---|
+| (tidak dikirim) atau `[guardrails, extraction, structuring, scoring]` | ya | `{nomor_npwp, nama}` seperti biasa |
+| `[guardrails, extraction, structuring]` | ya | hasil structuring apa adanya: `{fields, flag, flag_reason, reject_reason, ...}` |
+| `[guardrails, extraction]` | ya | hasil OCR apa adanya: `{full_text, blocks, ...}` |
+| `[guardrails]` | ya | laporan guardrails apa adanya: `{passed, reason, document, pages}` |
+| `[extraction, structuring, scoring]`, `[extraction, structuring]`, `[extraction]` | ya: guardrails dilewati (lihat di bawah) | seperti baris yang sama di atas |
+| `[extraction, scoring]`, `[guardrails, structuring]` | tidak: ada yang dilewati di tengah | **422** `INVALID_PIPELINE_SEQUENCE` |
+| `[structuring, scoring]`, `[scoring]` | tidak: tidak ada input untuk service pertama | **422** `INVALID_PIPELINE_SEQUENCE` |
+| urutan terbalik, nama dobel, nama tidak dikenal (mis. `ekstraksi`) | tidak | **422** `INVALID_PIPELINE_SEQUENCE` |
+
+Selain `data`, bentuk jawabannya tetap sama (`status_code`, `job_status`, `guardrails`, `params`,
+dan seterusnya), begitu juga kode 200 / 202 / 400 / 422-nya. Service terakhir di urutan mengakhiri
+request: hasilnya jadi `data`, dan tidak ada yang diteruskan ke service berikutnya. Aturan structuring
+tetap bisa menolak (400) selama `structuring` ada di urutan. Request `[guardrails]` saja tidak
+menyimpan apa pun: jawaban POST-nya final, dan `GET /v1/extract-ocr/{request_id}` untuknya dijawab 404.
+
+**Melewati guardrails.** Urutan tanpa `guardrails` membuat dokumen tidak dinilai model guardrails dan
+langsung masuk pipeline. Keputusannya sepenuhnya di kalian: kami tidak punya pengaturan yang
+menolaknya. OCR (`extraction`) tidak bisa dilewati. Yang tetap berlaku:
 
 - pengecekan file: tipe, 2,5 MB (413), dan 2 halaman (400);
 - aturan structuring: dokumen blur / blank, kode wilayah salah, dan seterusnya tetap dijawab 400
@@ -190,7 +230,7 @@ Selesai dalam waktu tunggu, **200**:
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
 - `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
   `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
-- Flag dari aturan ekstraksi ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
+- Flag dari aturan extraction ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
   input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
   nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
   menolak dokumen dengan 400 (lihat di bawah).
@@ -231,7 +271,7 @@ Tahap pipeline gagal dalam waktu tunggu, **422**; request berakhir di sini, sama
 callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
 
     {"status_code": 422, "status_desc": "Unprocessable Entity",
-     "message": "ekstraksi OCR model is unavailable",
+     "message": "extraction OCR model is unavailable",
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
      "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
 
@@ -243,8 +283,8 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
-| 403 | `GUARDRAILS_SKIP_NOT_ALLOWED` | `skip_guardrails=true`, tetapi service tidak mengizinkannya | tidak |
-| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, `skip_guardrails` bukan boolean, atau field wajib tidak dikirim | tidak |
+| 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
+| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
@@ -280,16 +320,16 @@ tidak datang.
   letter di outbox kami) hanya tercatat di callback `FAILED` dan di tabel kalian; endpoint ini tetap
   menjawab 202 untuk request itu. Untuk keadaan final, callback dan tabel kalian yang berlaku.
 
-## 5. Service ekstraksi (port 8030)
+## 5. Service extraction (port 8030)
 
 Tahap OCR. Backend OCR-nya PaddleOCR yang berjalan di VM terpisah; service ini yang
 memanggilnya.
 
-`POST /v1/ekstraksi/jobs` dipanggil oleh orchestrator, bukan oleh kalian. Setelah dijawab
+`POST /v1/extraction/jobs` dipanggil oleh orchestrator, bukan oleh kalian. Setelah dijawab
 202, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, lalu job diserahkan ke
 structuring, yang kemudian menyerahkan ke scoring.
 
-### GET /v1/ekstraksi/jobs/{request_id} — status tahap OCR (internal)
+### GET /v1/extraction/jobs/{request_id} — status tahap OCR (internal)
 
 Dibaca orchestrator untuk `GET /v1/extract-ocr/{request_id}`; dicantumkan sebagai latar.
 
@@ -300,7 +340,7 @@ Dibaca orchestrator untuk `GET /v1/extract-ocr/{request_id}`; dicantumkan sebaga
 `status` bernilai `PROCESSING`, `DONE`, atau `FAILED`. `404` berarti tahap ini belum
 pernah menerima job dengan `request_id` tersebut.
 
-### POST /v1/ekstraksi/extract — OCR mentah, sinkron (internal)
+### POST /v1/extraction/extract — OCR mentah, sinkron (internal)
 
 Menjalankan OCR saja dan langsung mengembalikan hasilnya. Tidak membuat job, tidak
 mengirim callback, tidak menyentuh tahap lain. Untuk debugging kami.
@@ -312,8 +352,8 @@ Keduanya dipanggil berantai oleh service sebelumnya dan internal; kalian tidak m
 | Service | Endpoint | Siapa yang memanggil |
 |---|---|---|
 | guardrails | `POST /v1/guardrails/check` | orchestrator, untuk tiap dokumen |
-| ekstraksi | `POST /v1/ekstraksi/jobs` | orchestrator, otomatis |
-| structuring | `POST /v1/structuring/jobs` | ekstraksi, otomatis |
+| extraction | `POST /v1/extraction/jobs` | orchestrator, otomatis |
+| structuring | `POST /v1/structuring/jobs` | extraction, otomatis |
 | structuring | `GET /v1/structuring/jobs/{request_id}` | orchestrator (status) |
 | structuring | `POST /v1/structuring/structure` | debugging, sinkron |
 | scoring | `POST /v1/scoring/jobs` | structuring, otomatis |
@@ -369,6 +409,19 @@ laporan model guardrails untuk dokumen itu.
 Callback dikirim oleh tahap-tahap pipeline sendiri (scoring, atau tahap yang berhenti), bukan oleh
 orchestrator; alamat dan key-nya tidak berubah.
 
+Selesai lebih awal (`pipeline_name_sequence` berakhir sebelum `scoring`, dikirim oleh service
+terakhirnya): `result` adalah hasil service itu apa adanya, sama dengan `data` di respons
+`extract-ocr`, dan `guardrails` kosong:
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "completed",
+      "result": {"fields": {...}, "flag": false, "flag_reason": null, "reject_reason": null},
+      "guardrails": {}
+    }
+
+Request `[guardrails]` saja tidak mendapat callback: jawaban `extract-ocr`-nya sudah final.
+
 Gagal atau ditolak (dikirim oleh tahap yang berhenti):
 
     {
@@ -406,9 +459,12 @@ Body untuk OCR dan STRUCTURING:
 
 Dua hal yang paling sering disalahpahami:
 
-1. **`result` selalu null untuk OCR dan STRUCTURING.** Hasil antara tidak dibuka ke luar;
-   keadaan request dibaca lewat `GET /v1/extract-ocr/{request_id}` di orchestrator.
-2. **Hanya callback SCORING yang membawa hasil akhir.**
+1. **`result` null untuk OCR dan STRUCTURING, kecuali tahap itu yang terakhir.** Hasil antara
+   tidak dibuka ke luar; keadaan request dibaca lewat `GET /v1/extract-ocr/{request_id}` di
+   orchestrator. Kalau `pipeline_name_sequence` berakhir di tahap itu, callback `DONE`-nya membawa
+   `"final": true` dan `result` berisi hasilnya apa adanya.
+2. **Hanya callback dengan `"final": true` yang membawa hasil akhir.** Dengan urutan penuh, itu
+   callback SCORING (juga bertanda `"final": true`).
 
 Body callback SCORING saat sukses:
 
@@ -493,7 +549,6 @@ penjelasan yang aman untuk di-log.
 | 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
 | 413 | file lebih dari 2,5 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
-| 403 | `skip_guardrails=true` tanpa izin di service (`GUARDRAILS_SKIP_NOT_ALLOWED`) |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |
@@ -503,11 +558,11 @@ penjelasan yang aman untuk di-log.
 
 ## 11. Kontrak lama (sinkron): sudah dihapus
 
-Sejak 24 September 2026, endpoint kontrak lama di service ekstraksi (port 8030) sudah
+Sejak 24 September 2026, endpoint kontrak lama di service extraction (port 8030) sudah
 dihapus:
 
     POST /v1/generate-request-id
-    POST /v1/extract-ocr                  (versi ekstraksi, port 8030)
+    POST /v1/extract-ocr                  (versi extraction, port 8030)
     GET  /v1/get-ocr-result/{request_id}
 
 Sejak orchestrator ada (24 September 2026), `POST /v1/extract-ocr` di guardrails (port 8031)

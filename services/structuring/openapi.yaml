@@ -513,7 +513,7 @@ paths:
       tags:
       - Structuring
       summary: Turn OCR lines into named fields, synchronous (no job, no callback)
-      description: 'Maps raw text lines (e.g. from the ekstraksi service) to named document fields with
+      description: 'Maps raw text lines (e.g. from the extraction service) to named document fields with
         per-field confidence, using the ML team''s rules (`npwp_rules`). Nothing is rejected on content:
         a bundled second document, a CAPTCHA or lookup screenshot, a missing or single-word name, a letter
         in the number, an invalid Kode Wilayah / birthdate / KPP code or more than 2 pages set `flag`
@@ -971,7 +971,7 @@ components:
           description: Active implementation per concern (model backend, storage). Useful to confirm a
             deployment
           examples:
-          - ekstraksi: paddle
+          - extraction: paddle
             storage: postgres
       type: object
       required:
@@ -1356,7 +1356,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
@@ -1606,6 +1606,23 @@ components:
           - type: 'null'
           description: 'Result of the OCR stage. Left out when the OCR service hands off by reference
             (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `ocr_results` of the shared database'
+        pipeline_name_sequence:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, in order, from the central orchestrator (forwarded
+            by the orchestrator NPWP and each stage): `guardrails`, `extraction`, `structuring`, `scoring`,
+            guardrails optional at the front and the end cut off, never one skipped in the middle. The
+            last one ends the request: its result is the answer, as it is, and nothing is handed on. Omitted:
+            the full pipeline'
+          examples:
+          - - guardrails
+            - extraction
+            - structuring
+            - scoring
       type: object
       required:
       - request_id
@@ -1658,6 +1675,20 @@ components:
           description: Last status change (ISO 8601, UTC)
           examples:
           - '2026-09-18T04:00:01+00:00'
+        pipeline_name_sequence:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, as the job was submitted with them; the last one
+            ends the request. Null for a job submitted without it: the full pipeline'
+          examples:
+          - - guardrails
+            - extraction
+            - structuring
+            - scoring
         result:
           anyOf:
           - $ref: '#/components/schemas/StructuredDocument'

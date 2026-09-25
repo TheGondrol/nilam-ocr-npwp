@@ -1,11 +1,11 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import BadRequest, UnprocessableEntity
 from ocr_common.npwp import DOCUMENT_TYPE, contract_fields, final_result
-from ocr_common.pipeline import StagePipeline, Work
+from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import FinalResult, ScoringResult
 
@@ -35,7 +35,10 @@ class ScoringJobService:
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any] | None,
+        sequence: Sequence[str] | None = None,
     ) -> dict[str, Any]:
+        """Scoring is always the last service of a pipeline_name_sequence, so it ends every request it runs
+        for; `sequence` is only kept with the job for the orchestrator's GET."""
         if structuring is None and self._results is None:
             raise UnprocessableEntity(
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
@@ -47,7 +50,11 @@ class ScoringJobService:
             work,
             callback_result=final,
             outcome_data=lambda scoring: contract_fields(final(scoring), self._confidence_threshold),
-            input={"document_type": document_type, "guardrails": guardrails},
+            input={
+                "document_type": document_type,
+                "guardrails": guardrails,
+                "pipeline_name_sequence": stored(sequence),
+            },
         )
 
     async def resume(self, request_id: str, input: dict[str, Any] | None) -> None:

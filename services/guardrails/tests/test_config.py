@@ -34,7 +34,7 @@ def test_localhost_model_service_is_refused_outside_local():
 def test_settings_of_the_pipeline_are_ignored(monkeypatch):
     """The entry-point settings moved to the orchestrator NPWP; an environment that still sets them (an old
     ConfigMap, a local .env) must not stop guardrails from starting."""
-    monkeypatch.setenv("EKSTRAKSI_SERVICE_URL", "http://127.0.0.1:8030")
+    monkeypatch.setenv("EXTRACTION_SERVICE_URL", "http://127.0.0.1:8030")
     monkeypatch.setenv("PIPELINE_WAIT_SECONDS", "15")
     settings = Settings(api_key="x", _env_file=None, environment="production", guardrails_backend="efficientnet")
     assert not hasattr(settings, "pipeline_wait_seconds")

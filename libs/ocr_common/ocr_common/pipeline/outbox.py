@@ -63,12 +63,13 @@ def callback_message(
     result: dict[str, Any] | None = None,
     error_message: str | None = None,
     error_code: str | None = None,
+    final: bool = False,
 ) -> OutboxMessage:
     """The callback body for `(stage, status)` of `request_id`, as a message."""
     return OutboxMessage(
         KIND_CALLBACK,
         stage_callback_body(
-            request_id, stage, status, result=result, error_message=error_message, error_code=error_code
+            request_id, stage, status, result=result, error_message=error_message, error_code=error_code, final=final
         ),
     )
 

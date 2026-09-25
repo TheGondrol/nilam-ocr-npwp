@@ -6,7 +6,7 @@ from ocr_common.pipeline.database import check_connection, dispose_engines
 from ocr_common.pipeline.schemas import StageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import ekstraksi, jobs, testing
+from app.api import extraction, jobs, testing
 from app.config import get_settings
 from app.dependencies import (
     get_next_stage,
@@ -62,27 +62,27 @@ async def lifespan(app: FastAPI):
 app = create_app(
     settings=settings,
     title="OCR NPWP API",
-    service_name="ekstraksi",
+    service_name="extraction",
     description=(
         "OCR service for Indonesian NPWP (tax ID card) documents; ServiceOCR in the pipeline. "
-        "**Async pipeline:** the orchestrator NPWP POSTs /v1/ekstraksi/jobs once a document passed the guardrails "
+        "**Async pipeline:** the orchestrator NPWP POSTs /v1/extraction/jobs once a document passed the guardrails "
         "check and gets 202; this service runs OCR in the background, stores the result, reports to the central "
         "orchestrator (callback / its tables), and hands the job to the structuring service. "
-        "The raw OCR step is also exposed as /v1/ekstraksi/extract. "
+        "The raw OCR step is also exposed as /v1/extraction/extract. "
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
         {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback, hand-off"},
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
-        {"name": "Ekstraksi", "description": "Raw OCR text, synchronous"},
+        {"name": "Extraction", "description": "Raw OCR text, synchronous"},
     ],
-    routers=[jobs.router, ekstraksi.router, *([testing.router] if settings.testing_endpoints else [])],
+    routers=[jobs.router, extraction.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
-        "ekstraksi": settings.ekstraksi_backend,
+        "extraction": settings.extraction_backend,
         "storage": "postgres" if settings.database_url else "memory",
     },
     readiness=database_readiness(settings.database_url),
-    backends_example={"ekstraksi": "paddle", "storage": "postgres"},
+    backends_example={"extraction": "paddle", "storage": "postgres"},
     readiness_example={"database": "ok"},
     lifespan=lifespan,
 )
@@ -91,7 +91,7 @@ add_stage_callback_webhook(
     app,
     body_model=StageCallback,
     sent=(
-        "Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once the OCR result is "
+        "Once per job of `POST /v1/extraction/jobs`: `stage: OCR` with `status: DONE` once the OCR result is "
         "stored, or `status: FAILED` with `error_message` when the document could not be read (the chain stops "
         "there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR succeeded but the structuring "
         "service could not be reached after retries. Without `PIPELINE_OUTBOX` the `OCR` callback is sent before "

@@ -64,7 +64,7 @@ FLAGGED_EXAMPLE = {
     operation_id="structureLines",
     summary="Turn OCR lines into named fields, synchronous (no job, no callback)",
     description=(
-        "Maps raw text lines (e.g. from the ekstraksi service) to named document fields with per-field "
+        "Maps raw text lines (e.g. from the extraction service) to named document fields with per-field "
         "confidence, using the ML team's rules (`npwp_rules`). Nothing is rejected on content: a bundled "
         "second document, a CAPTCHA or lookup screenshot, a missing or single-word name, a letter in the number, "
         "an invalid Kode Wilayah / birthdate / KPP code or more than 2 pages set `flag` and `flag_reason` for the "

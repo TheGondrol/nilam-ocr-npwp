@@ -4,7 +4,7 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 
 set_test_env(AUTH_DISABLED="false")
 
-from app.dependencies import get_ekstraksi_client, get_guardrails_client, get_pipeline_waiter  # noqa: E402
+from app.dependencies import get_extraction_client, get_guardrails_client, get_pipeline_waiter  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.pipeline_waiter import WaitOutcome  # noqa: E402
 
@@ -66,15 +66,24 @@ class StubGuardrails:
         pass
 
 
-class StubEkstraksi:
+class StubExtraction:
     def __init__(self) -> None:
         self.submitted: list[dict] = []
+        self.error: Exception | None = None
 
     async def submit(
-        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None
+        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None, sequence=None
     ) -> dict:
+        if self.error is not None:
+            raise self.error
         self.submitted.append(
-            {"request_id": request_id, "document_type": document_type, "guardrails": guardrails, "file_url": file_url}
+            {
+                "request_id": request_id,
+                "document_type": document_type,
+                "guardrails": guardrails,
+                "file_url": file_url,
+                "sequence": list(sequence) if sequence else None,
+            }
         )
         return {"request_id": request_id, "stage": "OCR", "status": "PROCESSING", "duplicate": False}
 
@@ -88,10 +97,12 @@ class StubWaiter:
         self.snapshot_outcome: WaitOutcome | None = DONE
         self.snapshot_error: Exception | None = None
         self.calls: list[tuple[str, float]] = []
+        self.last_stages: list[str | None] = []
         self.snapshots: list[str] = []
 
-    async def wait(self, request_id: str, timeout: float) -> WaitOutcome:
+    async def wait(self, request_id: str, timeout: float, *, last_stage: str | None = None) -> WaitOutcome:
         self.calls.append((request_id, timeout))
+        self.last_stages.append(last_stage)
         return self.outcome
 
     async def snapshot(self, request_id: str) -> WaitOutcome | None:
@@ -120,11 +131,11 @@ def stub_guardrails():
 
 
 @pytest.fixture(autouse=True)
-def stub_ekstraksi():
-    stub = StubEkstraksi()
-    app.dependency_overrides[get_ekstraksi_client] = lambda: stub
+def stub_extraction():
+    stub = StubExtraction()
+    app.dependency_overrides[get_extraction_client] = lambda: stub
     yield stub
-    app.dependency_overrides.pop(get_ekstraksi_client, None)
+    app.dependency_overrides.pop(get_extraction_client, None)
 
 
 @pytest.fixture(autouse=True)

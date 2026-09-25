@@ -9,7 +9,7 @@ from ocr_common.types import OcrEngineResult
 from app.config import Settings
 from app.ml.mock import MockOcrEngine
 from app.ml.paddle import PaddleOcrEngine
-from app.services.ekstraksi_service import EkstraksiService
+from app.services.extraction_service import ExtractionService
 
 SETTINGS = Settings(api_key="x", _env_file=None)
 
@@ -65,13 +65,13 @@ class StubEngine:
 
 def _paddle_engine(handler) -> PaddleOcrEngine:
     client = RemoteModelClient(
-        "http://ocr.test", 5.0, name="ekstraksi OCR model", transport=httpx.MockTransport(handler)
+        "http://ocr.test", 5.0, name="extraction OCR model", transport=httpx.MockTransport(handler)
     )
     return PaddleOcrEngine(client)
 
 
 async def test_service_wraps_engine_output_with_metadata():
-    result = await EkstraksiService(StubEngine(), SETTINGS).extract("x.jpg", "image/jpeg", b"abc")
+    result = await ExtractionService(StubEngine(), SETTINGS).extract("x.jpg", "image/jpeg", b"abc")
     assert result["engine"] == "stub"
     assert result["model"] == "stub-v1"
     assert result["full_text"] == "A\nB"
@@ -141,8 +141,8 @@ async def test_mock_engine_shape_matches_contract():
 
 
 def test_http_extract_is_deterministic_per_content(client, auth):
-    first = client.post("/v1/ekstraksi/extract", files=image_upload(content=b"same"), headers=auth).json()["data"]
-    second = client.post("/v1/ekstraksi/extract", files=image_upload(content=b"same"), headers=auth).json()["data"]
+    first = client.post("/v1/extraction/extract", files=image_upload(content=b"same"), headers=auth).json()["data"]
+    second = client.post("/v1/extraction/extract", files=image_upload(content=b"same"), headers=auth).json()["data"]
     assert first["blocks"] == second["blocks"]
     assert first["engine"] == "mock"
     assert first["model"] is None
@@ -154,13 +154,13 @@ def test_http_extract_is_deterministic_per_content(client, auth):
 
 def test_http_extract_accepts_pdf(client, auth):
     response = client.post(
-        "/v1/ekstraksi/extract", files=image_upload("npwp.pdf", b"%PDF-1.4 fake", "application/pdf"), headers=auth
+        "/v1/extraction/extract", files=image_upload("npwp.pdf", b"%PDF-1.4 fake", "application/pdf"), headers=auth
     )
     assert response.status_code == 200
 
 
 def test_http_extract_empty_file_returns_400(client, auth):
-    response = client.post("/v1/ekstraksi/extract", files=image_upload(content=b""), headers=auth)
+    response = client.post("/v1/extraction/extract", files=image_upload(content=b""), headers=auth)
     assert response.status_code == 400
     assert response.json()["message"] == "Uploaded file is empty"
 
@@ -172,7 +172,7 @@ def test_http_file_url_is_fetched_by_service(client, auth, monkeypatch):
 
     monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
     response = client.post(
-        "/v1/ekstraksi/extract", data={"file_url": "http://minio.local/bucket/npwp.jpg"}, headers=auth
+        "/v1/extraction/extract", data={"file_url": "http://minio.local/bucket/npwp.jpg"}, headers=auth
     )
     assert response.status_code == 200
     assert response.json()["data"]["engine"] == "mock"
@@ -183,8 +183,8 @@ def test_http_extract_surfaces_model_unavailable_as_503(client, auth, use_engine
         raise httpx.ConnectError("refused", request=request)
 
     use_engine(_paddle_engine(handler))
-    response = client.post("/v1/ekstraksi/extract", files=image_upload(), headers=auth)
+    response = client.post("/v1/extraction/extract", files=image_upload(), headers=auth)
     assert response.status_code == 503
     body = response.json()
     assert body["status_desc"] == "Service Unavailable"
-    assert body["message"] == "ekstraksi OCR model is unavailable"
+    assert body["message"] == "extraction OCR model is unavailable"

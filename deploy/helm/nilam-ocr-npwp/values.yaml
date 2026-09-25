@@ -70,7 +70,7 @@ commonEnv:
 #   upstreams  : service lain yang dipanggil; chart mengisi <NAMA>_SERVICE_URL dan NetworkPolicy dari sini.
 # Nama service dipakai sebagai nama port Kubernetes: maksimal 15 karakter, huruf kecil/angka, tanpa `-`.
 services:
-  # Pintu masuk tunggal: POST /v1/extract-ocr (cek guardrails, hand-off ke ekstraksi, tunggu pipeline)
+  # Pintu masuk tunggal: POST /v1/extract-ocr (cek guardrails, hand-off ke extraction, tunggu pipeline)
   # dan GET /v1/extract-ocr/{request_id}. Stateless: tanpa DB, tanpa callback.
   orchestrator:
     enabled: true
@@ -80,7 +80,7 @@ services:
     port: 8034
     entrypoint: true
     pipeline: false
-    upstreams: [guardrails, ekstraksi, structuring, scoring]
+    upstreams: [guardrails, extraction, structuring, scoring]
     replicaCount: 2
     startupFailureThreshold: 15
     # Satu POST bisa memakan cek guardrails (GUARDRAILS_TIMEOUT_SECONDS) + tunggu pipeline + hand-off;
@@ -90,9 +90,6 @@ services:
       # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
       PIPELINE_WAIT_SECONDS: "15"
       GUARDRAILS_TIMEOUT_SECONDS: "20"
-      # Boleh tidaknya Orkestrasi pusat melewati model guardrails per request (skip_guardrails=true).
-      # "false" = request seperti itu ditolak 403. Pengecekan file dan aturan structuring tetap jalan.
-      GUARDRAILS_SKIP_ALLOWED: "false"
     # Tiap request menahan dokumennya (maks. MAX_UPLOAD_BYTES, 2,5 MB) selama menunggu pipeline.
     resources:
       requests:
@@ -138,10 +135,10 @@ services:
         cpu: "2"
         memory: 2Gi
 
-  ekstraksi:
+  extraction:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-ekstraksi
+      repository: ms-bribrain-nilam-ocr-npwp-extraction
       tag: ""
     port: 8030
     entrypoint: false
@@ -150,9 +147,9 @@ services:
     replicaCount: 1
     startupFailureThreshold: 15
     env:
-      EKSTRAKSI_BACKEND: paddle
-      EKSTRAKSI_OCR_URL: ""
-      EKSTRAKSI_OCR_TIMEOUT_SECONDS: "60"
+      EXTRACTION_BACKEND: paddle
+      EXTRACTION_OCR_URL: ""
+      EXTRACTION_OCR_TIMEOUT_SECONDS: "60"
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
     resources:
       requests:

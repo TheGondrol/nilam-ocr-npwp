@@ -16,14 +16,14 @@ services:
     environment:
       PORT: "8034"
       GUARDRAILS_SERVICE_URL: http://guardrails:8031
-      EKSTRAKSI_SERVICE_URL: http://ekstraksi:8030
+      EXTRACTION_SERVICE_URL: http://extraction:8030
       STRUCTURING_SERVICE_URL: http://structuring:8032
       SCORING_SERVICE_URL: http://scoring:8033
     ports:
       - "127.0.0.1:8034:8034"
     depends_on:
       - guardrails
-      - ekstraksi
+      - extraction
 
   guardrails:
     <<: *common
@@ -67,14 +67,14 @@ services:
     ports:
       - "127.0.0.1:8033:8033"
 
-  ekstraksi:
+  extraction:
     <<: *common
     build:
       context: .
-      dockerfile: services/ekstraksi/Dockerfile
-    image: nilam-ocr-ekstraksi:latest
-    container_name: nilam-ocr-ekstraksi
-    env_file: services/ekstraksi/.env
+      dockerfile: services/extraction/Dockerfile
+    image: nilam-ocr-extraction:latest
+    container_name: nilam-ocr-extraction
+    env_file: services/extraction/.env
     environment:
       PORT: "8030"
       STRUCTURING_SERVICE_URL: http://structuring:8032

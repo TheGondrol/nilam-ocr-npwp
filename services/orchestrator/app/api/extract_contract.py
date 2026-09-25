@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ocr_common.npwp import REJECTED_CODE, contract_fields
-from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED
+from ocr_common.pipeline import EXTRACTION, GUARDRAILS, SERVICE_OF_STAGE, STAGE_SCORING, STATUS_DONE, STATUS_FAILED
 from ocr_common.web.envelope import envelope
 
 from app.services.pipeline_waiter import STATUS_REJECTED
@@ -22,19 +22,34 @@ def extract_body(
     job_status: str | None = None,
     guardrails: int | None = None,
     params: Any = None,
+    pipeline_last_stage: str | None = None,
 ) -> dict[str, Any]:
     return {
         **envelope(status_code, message, dict(data) if data is not None else None, request_id, errors=errors),
         "document_type": document_type,
         "job_status": job_status,
         "guardrails": guardrails,
+        "pipeline_last_stage": pipeline_last_stage,
         "params": params,
     }
+
+
+def last_stage(outcome: dict[str, Any]) -> str | None:
+    """The pipeline service this answer comes from: guardrails when it rejected, else the stage the
+    pipeline reached (the one that finished it, failed, rejected, or is still running), and extraction
+    right after the hand-off when there was no wait."""
+    if not outcome["passed"]:
+        return GUARDRAILS
+    pipeline = outcome.get("pipeline")
+    if pipeline:
+        return SERVICE_OF_STAGE.get(pipeline["stage"])
+    return EXTRACTION if outcome.get("job") else None
 
 
 def extract_response(
     outcome: dict[str, Any], *, request_id: str, document_type: str, params: Any, threshold: float
 ) -> tuple[int, dict[str, Any]]:
+    stage_name = last_stage(outcome)
     if not outcome["passed"]:
         body = extract_body(
             400,
@@ -45,6 +60,7 @@ def extract_response(
             request_id=request_id,
             document_type=document_type,
             params=params,
+            pipeline_last_stage=stage_name,
         )
         return 400, body
     pipeline = outcome["pipeline"] or {}
@@ -60,9 +76,13 @@ def extract_response(
             request_id=request_id,
             document_type=document_type,
             params=params,
+            pipeline_last_stage=stage_name,
         )
     if pipeline.get("status") == STATUS_DONE:
-        data = contract_fields(outcome["result"], threshold)
+        # Scoring ended the request: the contract's fields. An earlier last service of the
+        # pipeline_name_sequence: its result as it is.
+        result = outcome["result"]
+        data = contract_fields(result, threshold) if pipeline.get("stage") == STAGE_SCORING else result
         return 200, extract_body(
             200,
             COMPLETED_MESSAGE,
@@ -72,6 +92,7 @@ def extract_response(
             request_id=request_id,
             document_type=document_type,
             params=params,
+            pipeline_last_stage=stage_name,
         )
     if pipeline.get("status") == STATUS_FAILED:
         stage = pipeline["stage"]
@@ -85,6 +106,7 @@ def extract_response(
             request_id=request_id,
             document_type=document_type,
             params=params,
+            pipeline_last_stage=stage_name,
         )
     return 202, extract_body(
         202,
@@ -93,4 +115,5 @@ def extract_response(
         request_id=request_id,
         document_type=document_type,
         params=params,
+        pipeline_last_stage=stage_name,
     )

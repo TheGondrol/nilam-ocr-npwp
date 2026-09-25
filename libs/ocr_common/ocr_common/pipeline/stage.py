@@ -193,7 +193,8 @@ class StagePipeline:
                     request_id, self.stage, STATUS_FAILED, error_message=reason, error_code=REJECTED_CODE
                 )
             elif self.callbacks:
-                await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final)
+                # No next stage: this one ends the request (the last of its pipeline_name_sequence).
+                await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final, final=next_stage is None)
             if payload is not None:
                 await self._hand_off(payload)
         except asyncio.CancelledError:
@@ -219,7 +220,9 @@ class StagePipeline:
                 callback_message(request_id, self.stage, STATUS_FAILED, error_message=reason, error_code=REJECTED_CODE)
             )
         elif self.callbacks:
-            messages.append(callback_message(request_id, self.stage, STATUS_DONE, result=final))
+            messages.append(
+                callback_message(request_id, self.stage, STATUS_DONE, result=final, final=next_stage is None)
+            )
         if payload is not None and next_stage is not None:
             messages.append(handoff_message(next_stage, payload))
         return messages

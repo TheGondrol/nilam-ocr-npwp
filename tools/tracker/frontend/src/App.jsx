@@ -4,7 +4,7 @@ import './App.css'
 const STAGES = ['GUARDRAILS', 'OCR', 'STRUCTURING', 'SCORING']
 const LABELS = {
   GUARDRAILS: 'Orchestrator + guardrails',
-  OCR: 'Ekstraksi OCR',
+  OCR: 'Extraction OCR',
   STRUCTURING: 'Structuring',
   SCORING: 'Scoring',
 }

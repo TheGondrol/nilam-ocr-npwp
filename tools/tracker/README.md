@@ -28,7 +28,7 @@ dan dua simulasi:
 
 | Simulasi | Cara kerja | Yang terlihat |
 |---|---|---|
-| **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; ekstraksi menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): orchestrator menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
+| **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; extraction menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): orchestrator menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
 | **Callback orkestrasi mati (503)** | tracker menjawab 503 untuk setiap callback yang datang | baris callback jadi RETRY dengan backoff (0,5 dtk ×2 … maks 5 menit), attempt bertambah, **handoff tetap terkirim dan tahap berikutnya tetap jalan**; orchestrator tetap 200 kalau pipeline cepat. Kembalikan ke *normal*: retry berikutnya 200, baris dihapus |
 | **Callback orkestrasi menolak (422)** | tracker menjawab 422 | baris jadi DEAD setelah satu attempt, tetap ada di tabel, backlog service menunjukkan `dead_letters`; tombol *Lepaskan* mengirimnya lagi |
 
@@ -76,7 +76,7 @@ Aturnya lewat `TRACKER_POLL_INTERVAL` (default 2 detik) dan
     # prasyarat GKE: kredensial cluster sudah ada
     #   gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 \
     #     --project ddb-kubecluster-dev-01 --location asia-southeast2
-    # prasyarat lokal: kelima service jalan; ketiga tahap pipeline (ekstraksi, structuring, scoring) dengan
+    # prasyarat lokal: kelima service jalan; ketiga tahap pipeline (extraction, structuring, scoring) dengan
     #   ORCHESTRATION_URL=http://host.docker.internal:8090 (container) / http://127.0.0.1:8090 (bare)
     #   dan, untuk melihat outbox, DATABASE_URL + PIPELINE_OUTBOX=true
 
@@ -126,6 +126,6 @@ tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NET
 (ocr_default), K6_TARGET (http://orchestrator:8034), K6_TRACKER (http://host.docker.internal:PORT),
 K6_API_KEY, LOAD_TESTER_DIR.
 
-Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EKSTRAKSI_URL, STRUCTURING_URL,
+Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EXTRACTION_URL, STRUCTURING_URL,
 SCORING_URL (default 127.0.0.1:8030-8034), TRACKER_POLL, REDIS_URL, API_KEY, PORT,
 TRACKER_DATABASE_URL, TRACKER_DB_INTERVAL (0.25), TRACKER_WAIT_SECONDS (15, label saja).

@@ -25,6 +25,9 @@ class JobRecord(TypedDict):
     error_message: str | None
     created_at: str
     updated_at: str
+    # The pipeline_name_sequence the job was submitted with (None for jobs from before it existed: the
+    # full pipeline). Read by the orchestrator to know which stage ends the request.
+    pipeline_name_sequence: list[str] | None
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,12 @@ class JobRepository(Protocol):
         ...
 
 
+def stored_sequence(input: dict[str, Any] | None) -> list[str] | None:
+    """The pipeline_name_sequence stored in a job's `input`, if any."""
+    sequence = (input or {}).get("pipeline_name_sequence")
+    return list(sequence) if isinstance(sequence, list | tuple) else None
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -104,6 +113,7 @@ class InMemoryJobRepository:
                 "error_message": None,
                 "created_at": now,
                 "updated_at": now,
+                "pipeline_name_sequence": stored_sequence(input),
             }
             self._inputs[request_id] = input
             return True
@@ -112,7 +122,12 @@ class InMemoryJobRepository:
             and datetime.fromisoformat(record["updated_at"]) < current - self._lease
         )
         if record["status"] == STATUS_FAILED or expired:
-            record.update(status=STATUS_PROCESSING, error_message=None, updated_at=now)
+            record.update(
+                status=STATUS_PROCESSING,
+                error_message=None,
+                updated_at=now,
+                pipeline_name_sequence=stored_sequence(input),
+            )
             self._inputs[request_id] = input
             return True
         return False

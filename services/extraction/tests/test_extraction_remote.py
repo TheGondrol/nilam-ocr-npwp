@@ -12,7 +12,7 @@ from ocr_common.testing import image_upload
 from app.config import Settings
 from app.dependencies import OCR_BACKENDS
 from app.ml.remote import RemoteOcrEngine
-from app.services.ekstraksi_service import EkstraksiService
+from app.services.extraction_service import ExtractionService
 
 JPEG = b"\xff\xd8fake-jpeg-bytes"
 SAMPLE: list[dict[str, Any]] = json.loads(
@@ -29,7 +29,7 @@ def _engine(handler) -> RemoteOcrEngine:
         RemoteModelClient(
             "http://ocr-model:8082",
             5.0,
-            name="ekstraksi OCR model",
+            name="extraction OCR model",
             headers={"X-API-Key": "dummy-key"},
             transport=httpx.MockTransport(handler),
         )
@@ -94,7 +94,7 @@ async def test_real_npwp_sample_maps_parallel_arrays_to_blocks():
 
 
 async def test_service_output_for_real_sample():
-    data = await EkstraksiService(_engine(_reply(SAMPLE)), _settings()).extract("sample_npwp.jpg", "image/jpeg", JPEG)
+    data = await ExtractionService(_engine(_reply(SAMPLE)), _settings()).extract("sample_npwp.jpg", "image/jpeg", JPEG)
     assert data["engine"] == "remote"
     assert data["model"] is None
     assert data["full_text"].splitlines()[2:4] == ["95.844.800.1-805.000", "RAHMAT HIDAYAT"]
@@ -167,7 +167,7 @@ async def test_ocr_params_are_sent_as_form_fields():
 
     engine = RemoteOcrEngine(
         RemoteModelClient(
-            "http://ocr-model:8082", 5.0, name="ekstraksi OCR model", transport=httpx.MockTransport(handler)
+            "http://ocr-model:8082", 5.0, name="extraction OCR model", transport=httpx.MockTransport(handler)
         ),
         params={"document_type": "npwp", "scale": 3.5},
     )
@@ -203,14 +203,14 @@ async def test_misaligned_or_unexpected_response_is_500_not_a_guess(body):
     with pytest.raises(ServiceError) as exc:
         await _engine(_reply(body)).extract("a.jpg", JPEG, "image/jpeg")
     assert exc.value.status_code == 500
-    assert exc.value.message == "ekstraksi OCR model returned an unexpected response"
+    assert exc.value.message == "extraction OCR model returned an unexpected response"
 
 
 async def test_model_error_status_becomes_500_with_detail():
     engine = _engine(_reply({"status_code": 401, "message": "Invalid API key"}, status_code=401))
     with pytest.raises(ServiceError) as exc:
         await engine.extract("a.jpg", JPEG, "image/jpeg")
-    assert (exc.value.status_code, exc.value.message) == (500, "ekstraksi OCR model error (401): Invalid API key")
+    assert (exc.value.status_code, exc.value.message) == (500, "extraction OCR model error (401): Invalid API key")
 
 
 async def test_unreachable_model_is_503_and_slow_model_is_504():
@@ -222,25 +222,25 @@ async def test_unreachable_model_is_503_and_slow_model_is_504():
 
     with pytest.raises(ServiceError) as exc:
         await _engine(refuse).extract("a.jpg", JPEG, "image/jpeg")
-    assert (exc.value.status_code, exc.value.message) == (503, "ekstraksi OCR model is unavailable")
+    assert (exc.value.status_code, exc.value.message) == (503, "extraction OCR model is unavailable")
 
     with pytest.raises(ServiceError) as exc:
         await _engine(stall).extract("a.jpg", JPEG, "image/jpeg")
-    assert (exc.value.status_code, exc.value.message) == (504, "ekstraksi OCR model timed out after 5.0s")
+    assert (exc.value.status_code, exc.value.message) == (504, "extraction OCR model timed out after 5.0s")
 
 
 def test_remote_backend_requires_url():
-    with pytest.raises(RuntimeError, match="EKSTRAKSI_OCR_URL is required when EKSTRAKSI_BACKEND=remote"):
-        OCR_BACKENDS["remote"](_settings(ekstraksi_backend="remote"))
+    with pytest.raises(RuntimeError, match="EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=remote"):
+        OCR_BACKENDS["remote"](_settings(extraction_backend="remote"))
 
 
 async def test_remote_backend_is_built_from_settings():
     engine = OCR_BACKENDS["remote"](
         _settings(
-            ekstraksi_backend="remote",
-            ekstraksi_ocr_url="http://localhost:8082/",
-            ekstraksi_ocr_api_key="dummy-key",
-            ekstraksi_ocr_params={"document_type": "npwp"},
+            extraction_backend="remote",
+            extraction_ocr_url="http://localhost:8082/",
+            extraction_ocr_api_key="dummy-key",
+            extraction_ocr_params={"document_type": "npwp"},
         )
     )
     try:
@@ -254,7 +254,7 @@ async def test_remote_backend_is_built_from_settings():
 
 def test_http_extract_with_remote_backend(client, auth, use_engine):
     use_engine(_engine(_reply(SAMPLE)))
-    response = client.post("/v1/ekstraksi/extract", headers=auth, files=image_upload("sample_npwp.jpg", JPEG))
+    response = client.post("/v1/extraction/extract", headers=auth, files=image_upload("sample_npwp.jpg", JPEG))
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["engine"] == "remote"

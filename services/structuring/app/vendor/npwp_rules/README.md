@@ -1,6 +1,6 @@
 # vendor/npwp_rules
 
-Aturan ekstraksi NPWP (regex + posisi) dari ML engineer. Versi ini dari repo `nilamnpwp` folder
+Aturan extraction NPWP (regex + posisi) dari ML engineer. Versi ini dari repo `nilamnpwp` folder
 `regex/` (commit `30c48c8`, 23 September 2026), menggantikan kiriman dua file lepas tanggal 20 September.
 Dipakai oleh backend structuring `npwp_rules` (`app/ml/npwp_rules.py`), yang meniru cara `regex/main.py`
 mereka merangkai modul-modul ini.

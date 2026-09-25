@@ -15,6 +15,7 @@ from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, J
 from ocr_common.pipeline.database import get_engine
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage
 from ocr_common.pipeline.outcomes import StageOutcome
+from ocr_common.pipeline.repository import stored_sequence
 from ocr_common.pipeline.tables import pipeline_tables
 
 
@@ -194,7 +195,14 @@ class SqlJobRepository:
         async with self.engine.connect() as conn:
             row = (
                 await conn.execute(
-                    select(jobs.c.status, jobs.c.error_message, jobs.c.created_at, jobs.c.updated_at, results.c.result)
+                    select(
+                        jobs.c.status,
+                        jobs.c.error_message,
+                        jobs.c.created_at,
+                        jobs.c.updated_at,
+                        jobs.c.input,
+                        results.c.result,
+                    )
                     .select_from(jobs.outerjoin(results, results.c.request_id == jobs.c.request_id))
                     .where(jobs.c.request_id == request_id)
                 )
@@ -208,4 +216,5 @@ class SqlJobRepository:
             "error_message": row.error_message,
             "created_at": _iso(row.created_at),
             "updated_at": _iso(row.updated_at),
+            "pipeline_name_sequence": stored_sequence(row.input),
         }

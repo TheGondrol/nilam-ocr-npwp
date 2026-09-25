@@ -37,11 +37,29 @@ class ExtractOcrResponse(BaseModel):
         description="Human-readable; its wording may change, so branch on `errors` instead",
         examples=["OCR extraction completed successfully"],
     )
-    data: NpwpData | None = Field(None, description="The OCR fields when `job_status` is `completed`; null otherwise")
+    data: NpwpData | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "The result when `job_status` is `completed`; null otherwise. The fields (`nomor_npwp`, `nama`) when "
+            "scoring ended the request; the result of the last service of `pipeline_name_sequence`, as it is, "
+            "when the sequence ends earlier (the guardrails report, the OCR result, or the structuring result)"
+        ),
+    )
     errors: str | None = Field(
         None, description="Failure code when the request failed or was refused; null otherwise", examples=[None]
     )
     request_id: str | None = Field(None, description="The request_id this response belongs to")
+    pipeline_last_stage: Literal["guardrails", "extraction", "structuring", "scoring"] | None = Field(
+        None,
+        description=(
+            "The pipeline service this answer comes from, named as in `pipeline_name_sequence`: the last service "
+            "of the sequence when `completed`; the one that rejected (`guardrails`, `structuring`) or failed; the "
+            "one still running on 202; the one that could not be reached or answered an error. Null when this "
+            "service refused the request before any pipeline service was called (file checks, "
+            "`pipeline_name_sequence`, `params`, `document_type`)"
+        ),
+        examples=["scoring"],
+    )
     document_type: str | None = Field(None, description="Document type of the request", examples=["npwp"])
     job_status: JobStatus | None = Field(
         None,

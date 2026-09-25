@@ -6,9 +6,8 @@ import pytest
 
 from ocr_common.clients.remote import RemoteModelClient
 
-from app.clients.ekstraksi import EkstraksiJobClient
-from app.config import get_settings
-from app.dependencies import get_ekstraksi_client
+from app.clients.extraction import ExtractionJobClient
+from app.dependencies import get_extraction_client
 from app.main import app
 from tests.conftest import JPEG
 
@@ -29,7 +28,7 @@ def _accepted(request: httpx.Request) -> httpx.Response:
     )
 
 
-class Ekstraksi:
+class Extraction:
     def __init__(self, *responses):
         self._responses = list(responses)
         self.requests: list[httpx.Request] = []
@@ -43,22 +42,22 @@ class Ekstraksi:
 
 
 @pytest.fixture
-def ekstraksi():
-    def install(*responses) -> Ekstraksi:
-        handler = Ekstraksi(*responses)
+def extraction():
+    def install(*responses) -> Extraction:
+        handler = Extraction(*responses)
         remote = RemoteModelClient(
-            "http://ekstraksi:8030",
+            "http://extraction:8030",
             5.0,
-            name="ekstraksi service",
+            name="extraction service",
             headers={"X-API-Key": "k"},
             passthrough_client_errors=True,
             transport=httpx.MockTransport(handler),
         )
-        app.dependency_overrides[get_ekstraksi_client] = lambda: EkstraksiJobClient(remote, attempts=3, delay=0)
+        app.dependency_overrides[get_extraction_client] = lambda: ExtractionJobClient(remote, attempts=3, delay=0)
         return handler
 
     yield install
-    app.dependency_overrides.pop(get_ekstraksi_client, None)
+    app.dependency_overrides.pop(get_extraction_client, None)
 
 
 def _submit(client, auth, filename="npwp.jpg"):
@@ -88,8 +87,8 @@ def _form(request: httpx.Request) -> tuple[dict[str, str], bytes]:
     return fields, file_bytes
 
 
-def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
-    handler = ekstraksi(_accepted)
+def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
+    handler = extraction(_accepted)
 
     response = _submit(client, auth)
 
@@ -98,7 +97,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
     assert (body["status_code"], body["job_status"], body["guardrails"]) == (200, "completed", 0)
 
     [sent] = handler.requests
-    assert sent.url.path == "/v1/ekstraksi/jobs"
+    assert sent.url.path == "/v1/extraction/jobs"
     assert sent.headers["X-API-Key"] == "k"
     fields, file_bytes = _form(sent)
     assert fields["request_id"] == RID
@@ -110,29 +109,31 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
     assert file_bytes == JPEG
 
 
-def test_a_document_that_skipped_guardrails_is_handed_over_without_a_guardrails_field(client, auth, ekstraksi):
-    """ekstraksi refuses a `guardrails` that is not a JSON object, so no report means no field, not `null`."""
-    handler = ekstraksi(_accepted)
-    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
-    try:
-        response = client.post(
-            "/v1/extract-ocr",
-            headers=auth,
-            data={"request_id": RID, "document_type": "npwp", "skip_guardrails": "true"},
-            files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
-        )
-    finally:
-        app.dependency_overrides.pop(get_settings, None)
+def test_a_document_without_guardrails_is_handed_over_without_a_guardrails_field(client, auth, extraction):
+    """extraction refuses a `guardrails` that is not a JSON object, so no report means no field, not `null`."""
+    handler = extraction(_accepted)
+    response = client.post(
+        "/v1/extract-ocr",
+        headers=auth,
+        data={
+            "request_id": RID,
+            "document_type": "npwp",
+            "pipeline_name_sequence": ["extraction", "structuring"],
+        },
+        files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
+    )
 
     assert response.status_code == 200
     [sent] = handler.requests
     fields, file_bytes = _form(sent)
     assert "guardrails" not in fields
     assert (fields["request_id"], file_bytes) == (RID, JPEG)
+    # The stages learn from it where the chain stops.
+    assert json.loads(fields["pipeline_name_sequence"]) == ["extraction", "structuring"]
 
 
-def test_rejected_document_stops_here(client, auth, ekstraksi):
-    handler = ekstraksi(_accepted)
+def test_rejected_document_stops_here(client, auth, extraction):
+    handler = extraction(_accepted)
 
     response = _submit(client, auth, filename="notnpwp.jpg")
 
@@ -148,17 +149,17 @@ def test_rejected_document_stops_here(client, auth, ekstraksi):
     assert handler.requests == []
 
 
-def test_ekstraksi_unreachable_is_503(client, auth, ekstraksi):
-    ekstraksi(httpx.ConnectError("refused"))
+def test_extraction_unreachable_is_503(client, auth, extraction):
+    extraction(httpx.ConnectError("refused"))
 
     response = _submit(client, auth)
 
     assert response.status_code == 503
-    assert response.json()["message"] == "ekstraksi service is unavailable"
+    assert response.json()["message"] == "extraction service is unavailable"
 
 
-def test_ekstraksi_client_error_is_passed_through(client, auth, ekstraksi):
-    ekstraksi(httpx.Response(400, json={"detail": "Uploaded file is empty"}))
+def test_extraction_client_error_is_passed_through(client, auth, extraction):
+    extraction(httpx.Response(400, json={"detail": "Uploaded file is empty"}))
 
     response = _submit(client, auth)
 
@@ -166,8 +167,8 @@ def test_ekstraksi_client_error_is_passed_through(client, auth, ekstraksi):
     assert response.json()["message"] == "Uploaded file is empty"
 
 
-def test_ekstraksi_server_error_is_retried(client, auth, ekstraksi):
-    handler = ekstraksi(httpx.Response(502, text="bad gateway"), _accepted)
+def test_extraction_server_error_is_retried(client, auth, extraction):
+    handler = extraction(httpx.Response(502, text="bad gateway"), _accepted)
 
     response = _submit(client, auth)
 
@@ -176,9 +177,9 @@ def test_ekstraksi_server_error_is_retried(client, auth, ekstraksi):
 
 
 def test_a_document_sent_as_file_url_is_judged_here_and_handed_over_as_the_same_url(
-    client, auth, ekstraksi, stub_guardrails, monkeypatch
+    client, auth, extraction, stub_guardrails, monkeypatch
 ):
-    handler = ekstraksi(_accepted)
+    handler = extraction(_accepted)
     url = "http://minio.local/bucket/npwp.jpg?X-Amz-Signature=abc"
 
     async def fake_fetch(fetched, *, limit, timeout=10.0, policy):
@@ -192,7 +193,7 @@ def test_a_document_sent_as_file_url_is_judged_here_and_handed_over_as_the_same_
 
     assert response.status_code == 200
     [sent] = handler.requests
-    assert sent.url.path == "/v1/ekstraksi/jobs"
+    assert sent.url.path == "/v1/extraction/jobs"
     assert sent.headers["content-type"] == "application/x-www-form-urlencoded", "no bytes: the OCR stage downloads it"
     form = {key: value[0] for key, value in parse_qs(sent.content.decode()).items()}
     assert form["request_id"] == RID

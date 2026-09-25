@@ -67,27 +67,33 @@ paths:
       summary: Judge a document, run the pipeline, answer with the OCR result or 202
       description: '**The call the central orchestrator makes.** Checks the file, has the guardrails service
         judge it, hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring
-        for up to `PIPELINE_WAIT_SECONDS` (15 s by default), counted from when this request arrived. The
-        response follows the central orchestrator''s `extract-ocr` contract ("Finished" meaning finished
-        within the wait):
+        (or the services `pipeline_name_sequence` names, see below) for up to `PIPELINE_WAIT_SECONDS`
+        (15 s by default), counted from when this request arrived. The response follows the central orchestrator''s
+        `extract-ocr` contract ("Finished" meaning finished within the wait):
 
 
-        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
+        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
 
-        |---|---|---|---|---|---|
+        |---|---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |
 
-        | Still running | 202 | `processing` | null | null | null |
+        | Still running | 202 | `processing` | null | null | null | the service still running |
 
         | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
+        | `guardrails` |
 
         | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
+        | `structuring` |
 
         | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        | the service that failed |
+
+
+        `pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence`
+        names it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504
+        from calling one of them. It is null when this service refused the request before calling any
+        (file checks, `pipeline_name_sequence`, `params`, `document_type`).
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
@@ -109,11 +115,17 @@ paths:
         both with an Indonesian `message` the client can show as is.
 
 
-        **Skipping guardrails.** `skip_guardrails=true` leaves the guardrails model out for this one request,
-        when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise `403` `GUARDRAILS_SKIP_NOT_ALLOWED`
-        and nothing runs). The file checks above still run, and the structuring rules still reject, so
-        `guardrails: 1` can then only come from them. The trust model gets no guardrails probability and
-        works with that input missing.
+        **Which services run: `pipeline_name_sequence`.** The services of this request, in order: `guardrails`,
+        `extraction`, `structuring`, `scoring`. Guardrails may be left out at the front and the end cut
+        off, never one skipped in the middle or the order changed (else `422` `INVALID_PIPELINE_SEQUENCE`
+        and nothing runs). Omitted: all four. The last service ends the request and its result is `data`,
+        **as it is**: the guardrails report (`{passed, reason, document, pages}`) when only `guardrails`
+        runs, the OCR result (`{text, blocks, ...}`) after `extraction`, the structuring result (`{fields,
+        flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. The
+        rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving
+        `guardrails` out is the central orchestrator''s call: the file checks above always run, and the
+        trust model then works without a guardrails probability. A `guardrails`-only request stores nothing:
+        its POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.
 
 
         On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
@@ -159,6 +171,33 @@ paths:
                       nama:
                         value: BUDI SANTOSO
                         confidence: 1
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: completed
+                    guardrails: 0
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+                guardrails_only:
+                  summary: '`pipeline_name_sequence: ["guardrails"]`: the guardrails report as it is'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OCR extraction completed successfully
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                        reject_threshold: 0.5
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
@@ -217,20 +256,6 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
-        '403':
-          description: '`skip_guardrails=true` while `GUARDRAILS_SKIP_ALLOWED` is off (`GUARDRAILS_SKIP_NOT_ALLOWED`);
-            nothing was started'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExtractOcrResponse'
-              example:
-                status_code: 403
-                status_desc: Forbidden
-                message: 'skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off'
-                errors: GUARDRAILS_SKIP_NOT_ALLOWED
-                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
           content:
@@ -244,8 +269,8 @@ paths:
                 errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
-            `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is
-            missing (`VALIDATION_ERROR`)
+            `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence`
+            breaks the order rules (`INVALID_PIPELINE_SEQUENCE`), or a required field is missing (`VALIDATION_ERROR`)
           content:
             application/json:
               schema:
@@ -263,39 +288,50 @@ paths:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
         '500':
-          description: The guardrails or ekstraksi service failed, or answered in an unexpected shape
+          description: The guardrails or extraction service failed, or answered in an unexpected shape;
+            `pipeline_last_stage` names which
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
               example:
                 status_code: 500
                 status_desc: Internal Server Error
                 message: guardrails service returned an unexpected response
                 errors: guardrails service returned an unexpected response
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: guardrails
         '503':
-          description: The guardrails service, its model, or the ekstraksi service is unreachable; nothing
-            was started
+          description: The guardrails service, its model, or the extraction service is unreachable; nothing
+            was started. `pipeline_last_stage` names which
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
               example:
                 status_code: 503
                 status_desc: Service Unavailable
-                message: ekstraksi service is unavailable
-                errors: ekstraksi service is unavailable
+                message: extraction service is unavailable
+                errors: extraction service is unavailable
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: extraction
         '504':
-          description: The guardrails service, its model, or the ekstraksi service did not answer in time
+          description: The guardrails service, its model, or the extraction service did not answer in
+            time; `pipeline_last_stage` names which
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
               example:
                 status_code: 504
                 status_desc: Gateway Timeout
-                message: ekstraksi service timed out after 10.0s
-                errors: ekstraksi service timed out after 10.0s
+                message: extraction service timed out after 10.0s
+                errors: extraction service timed out after 10.0s
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: extraction
       security:
       - APIKeyHeader: []
       servers: &id001
@@ -325,22 +361,28 @@ paths:
         by now):
 
 
-        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
+        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
 
-        |---|---|---|---|---|---|
+        |---|---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |
 
-        | Still running | 202 | `processing` | null | null | null |
+        | Still running | 202 | `processing` | null | null | null | the service still running |
 
         | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
+        | `guardrails` |
 
         | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
+        | `structuring` |
 
         | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        | the service that failed |
+
+
+        `pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence`
+        names it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504
+        from calling one of them. It is null when this service refused the request before calling any
+        (file checks, `pipeline_name_sequence`, `params`, `document_type`).
 
 
         Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
@@ -463,7 +505,7 @@ paths:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
           description: A stage answered in an unexpected shape, or refused this service (e.g. a wrong
-            API key)
+            API key); `pipeline_last_stage` names which
           content:
             application/json:
               example:
@@ -471,10 +513,13 @@ paths:
                 status_desc: Internal Server Error
                 message: 'structuring service error (401): Invalid or missing API key'
                 errors: 'structuring service error (401): Invalid or missing API key'
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: structuring
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
         '503':
-          description: A stage service is unreachable
+          description: A stage service is unreachable; `pipeline_last_stage` names which
           content:
             application/json:
               example:
@@ -482,10 +527,13 @@ paths:
                 status_desc: Service Unavailable
                 message: structuring service is unavailable
                 errors: structuring service is unavailable
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: structuring
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
         '504':
-          description: A stage service did not answer in time
+          description: A stage service did not answer in time; `pipeline_last_stage` names which
           content:
             application/json:
               example:
@@ -493,8 +541,11 @@ paths:
                 status_desc: Gateway Timeout
                 message: structuring service timed out after 10.0s
                 errors: structuring service timed out after 10.0s
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                pipeline_last_stage: structuring
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ExtractOcrResponse'
       servers: *id001
 webhooks:
   stageCallback:
@@ -513,10 +564,10 @@ webhooks:
         **When.** Once per stage, from the service that ran it:
 
 
-        - **ekstraksi**: Once per job of `POST /v1/ekstraksi/jobs`: `stage: OCR` with `status: DONE` once
-        the OCR result is stored, or `status: FAILED` with `error_message` when the document could not
-        be read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when OCR
-        succeeded but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX`
+        - **extraction**: Once per job of `POST /v1/extraction/jobs`: `stage: OCR` with `status: DONE`
+        once the OCR result is stored, or `status: FAILED` with `error_message` when the document could
+        not be read (the chain stops there). Additionally `stage: STRUCTURING`, `status: FAILED` when
+        OCR succeeded but the structuring service could not be reached after retries. Without `PIPELINE_OUTBOX`
         the `OCR` callback is sent before the hand-off to structuring; with it the hand-off goes first,
         so the `STRUCTURING` callback may arrive before this one.
 
@@ -617,13 +668,22 @@ components:
           description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
             Omit when uploading file. The host must be listed in the service's `FILE_URL_ALLOWED_HOSTS`,
             or resolve to a public address when that is empty; redirects are not followed.
-        skip_guardrails:
-          type: boolean
-          title: Skip Guardrails
-          description: '`true` leaves the guardrails model out for this request; only when this service
-            allows it (`GUARDRAILS_SKIP_ALLOWED`), else `403` `GUARDRAILS_SKIP_NOT_ALLOWED`. The file
-            checks still run and the structuring rules still reject'
-          default: false
+        pipeline_name_sequence:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services to run, in order: `guardrails`, `extraction`, `structuring`, `scoring`;
+            guardrails optional at the front, the end may be cut off, nothing skipped in the middle. Repeated
+            form fields, or one JSON array string. Omitted: all four. The last one''s result is `data`,
+            as it is'
+          examples:
+          - - guardrails
+            - extraction
+            - structuring
+            - scoring
       type: object
       required:
       - request_id
@@ -723,8 +783,14 @@ components:
         data:
           anyOf:
           - $ref: '#/components/schemas/NpwpData'
+          - additionalProperties: true
+            type: object
           - type: 'null'
-          description: The OCR fields when `job_status` is `completed`; null otherwise
+          title: Data
+          description: The result when `job_status` is `completed`; null otherwise. The fields (`nomor_npwp`,
+            `nama`) when scoring ended the request; the result of the last service of `pipeline_name_sequence`,
+            as it is, when the sequence ends earlier (the guardrails report, the OCR result, or the structuring
+            result)
         errors:
           anyOf:
           - type: string
@@ -739,6 +805,23 @@ components:
           - type: 'null'
           title: Request Id
           description: The request_id this response belongs to
+        pipeline_last_stage:
+          anyOf:
+          - type: string
+            enum:
+            - guardrails
+            - extraction
+            - structuring
+            - scoring
+          - type: 'null'
+          title: Pipeline Last Stage
+          description: 'The pipeline service this answer comes from, named as in `pipeline_name_sequence`:
+            the last service of the sequence when `completed`; the one that rejected (`guardrails`, `structuring`)
+            or failed; the one still running on 202; the one that could not be reached or answered an
+            error. Null when this service refused the request before any pipeline service was called (file
+            checks, `pipeline_name_sequence`, `params`, `document_type`)'
+          examples:
+          - scoring
         document_type:
           anyOf:
           - type: string
@@ -1051,7 +1134,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:
@@ -1105,7 +1188,7 @@ components:
         request_id:
           type: string
           title: Request Id
-          description: The request_id you submitted with `POST /v1/ekstraksi/jobs`
+          description: The request_id you submitted with `POST /v1/extraction/jobs`
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
         stage:

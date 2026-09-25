@@ -11,7 +11,7 @@ from ocr_common.web.app import API_CONVENTIONS
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "api" / "gateway.openapi.yaml"
 # The orchestrator owns every operation; the stages are listed for the callback webhook they send.
-SERVICES = ("orchestrator", "ekstraksi", "structuring", "scoring")
+SERVICES = ("orchestrator", "extraction", "structuring", "scoring")
 
 OPERATIONS: list[tuple[str, str, str, str]] = [
     ("orchestrator", "post", "/v1/extract-ocr", "1. Start the pipeline"),
@@ -169,7 +169,7 @@ def build() -> dict[str, Any]:
 
     if shared_description is None:
         raise SystemExit("no service spec publishes the stageCallback webhook: regenerate the service specs first")
-    webhook_template = copy.deepcopy(specs["ekstraksi"]["webhooks"]["stageCallback"]["post"])
+    webhook_template = copy.deepcopy(specs["extraction"]["webhooks"]["stageCallback"]["post"])
     webhook_template["tags"] = [CALLBACK_TAG]
     webhook_template["description"] = re.sub(
         r"\*\*When\.\*\* .*?\n\n",
@@ -187,7 +187,7 @@ def build() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "NILAM OCR NPWP: gateway integration API",
-            "version": specs["ekstraksi"]["info"]["version"],
+            "version": specs["extraction"]["info"]["version"],
             "description": DESCRIPTION.strip() + "\n" + API_CONVENTIONS,
         },
         "tags": TAGS,
@@ -195,7 +195,7 @@ def build() -> dict[str, Any]:
         "webhooks": {"stageCallback": {"post": webhook_template}},
         "components": {
             "schemas": dict(sorted(merged_schemas.items())),
-            "securitySchemes": specs["ekstraksi"]["components"]["securitySchemes"],
+            "securitySchemes": specs["extraction"]["components"]["securitySchemes"],
         },
     }
 
