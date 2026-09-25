@@ -373,3 +373,13 @@ async def test_without_callbacks_a_failed_job_is_not_reported_by_callback():
     assert callback.calls == []
     record = await repository.get("REQ_nocb3")
     assert record is not None and record["status"] == "FAILED"
+
+
+async def test_the_record_carries_the_sequence_stored_in_the_input(repository):
+    await repository.claim("REQ_seq", input={"pipeline_name_sequence": ["guardrails", "extraction"]})
+    await repository.claim("REQ_plain", input={"document_type": "npwp"})
+
+    record, plain = await repository.get("REQ_seq"), await repository.get("REQ_plain")
+
+    assert record is not None and record["pipeline_name_sequence"] == ["guardrails", "extraction"]
+    assert plain is not None and plain["pipeline_name_sequence"] is None

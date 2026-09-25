@@ -37,7 +37,7 @@ networkPolicy:
 services:
   orchestrator:
     env:
-      # Dev: Orkestrasi pusat boleh melewati model guardrails per request (skip_guardrails=true).
+      # Dev: Orkestrasi pusat boleh melewati model guardrails per request (pipeline_name_sequence tanpa guardrails).
       GUARDRAILS_SKIP_ALLOWED: "true"
   extraction:
     env:

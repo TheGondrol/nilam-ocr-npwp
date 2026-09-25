@@ -82,7 +82,7 @@ def test_testing_endpoint_refuses_a_run_id_that_would_garble_the_request_id(test
     assert response.json()["errors"] == "VALIDATION_ERROR"
 
 
-def test_testing_endpoint_takes_skip_guardrails_like_the_live_one(auth):
+def test_testing_endpoint_takes_the_sequence_like_the_live_one(auth):
     guardrails, extraction, waiter = StubGuardrails(), StubExtraction(), StubWaiter()
     app = create_app(settings=get_settings(), title="Orchestrator", description="testing", routers=testing.routers)
     app.dependency_overrides[get_guardrails_client] = lambda: guardrails
@@ -90,14 +90,15 @@ def test_testing_endpoint_takes_skip_guardrails_like_the_live_one(auth):
     app.dependency_overrides[get_testing_pipeline_waiter] = lambda: waiter
     client = make_client(app)
 
-    refused = _submit(client, auth, "/v1/extract-ocr-test", skip_guardrails="true")
+    without_guardrails = ["extraction", "structuring", "scoring"]
+    refused = _submit(client, auth, "/v1/extract-ocr-test", pipeline_name_sequence=without_guardrails)
     app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
-    skipped = _submit(client, auth, "/v1/extract-ocr-test", skip_guardrails="true")
+    skipped = _submit(client, auth, "/v1/extract-ocr-test", pipeline_name_sequence=without_guardrails)
 
     assert refused.status_code == 403
     assert skipped.status_code == 200
     assert guardrails.checked == []
-    assert [job["guardrails"] for job in extraction.submitted] == [None]
+    assert [(job["guardrails"], job["sequence"]) for job in extraction.submitted] == [(None, without_guardrails)]
 
 
 def test_live_endpoint_keeps_the_callers_request_id(client, auth):

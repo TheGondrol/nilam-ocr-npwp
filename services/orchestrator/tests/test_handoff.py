@@ -110,7 +110,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
     assert file_bytes == JPEG
 
 
-def test_a_document_that_skipped_guardrails_is_handed_over_without_a_guardrails_field(client, auth, extraction):
+def test_a_document_without_guardrails_is_handed_over_without_a_guardrails_field(client, auth, extraction):
     """extraction refuses a `guardrails` that is not a JSON object, so no report means no field, not `null`."""
     handler = extraction(_accepted)
     app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
@@ -118,7 +118,11 @@ def test_a_document_that_skipped_guardrails_is_handed_over_without_a_guardrails_
         response = client.post(
             "/v1/extract-ocr",
             headers=auth,
-            data={"request_id": RID, "document_type": "npwp", "skip_guardrails": "true"},
+            data={
+                "request_id": RID,
+                "document_type": "npwp",
+                "pipeline_name_sequence": ["extraction", "structuring"],
+            },
             files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
         )
     finally:
@@ -129,6 +133,8 @@ def test_a_document_that_skipped_guardrails_is_handed_over_without_a_guardrails_
     fields, file_bytes = _form(sent)
     assert "guardrails" not in fields
     assert (fields["request_id"], file_bytes) == (RID, JPEG)
+    # The stages learn from it where the chain stops.
+    assert json.loads(fields["pipeline_name_sequence"]) == ["extraction", "structuring"]
 
 
 def test_rejected_document_stops_here(client, auth, extraction):

@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
-from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING
+from ocr_common.pipeline import (
+    STAGE_OF,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_PROCESSING,
+    InvalidSequence,
+    validate_sequence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +36,7 @@ class WaitOutcome:
 
 
 class PipelineWait(Protocol):
-    async def wait(self, request_id: str, timeout: float) -> WaitOutcome: ...
+    async def wait(self, request_id: str, timeout: float, *, last_stage: str | None = None) -> WaitOutcome: ...
 
     async def snapshot(self, request_id: str) -> WaitOutcome | None: ...
 
@@ -41,15 +48,18 @@ class PipelineWaiter:
         self._stages = tuple(stages)
         self._poll_interval = poll_interval
 
-    async def wait(self, request_id: str, timeout: float) -> WaitOutcome:
-        """Polls until the pipeline ends (DONE, FAILED or rejected) or `timeout` runs out (PROCESSING)."""
+    async def wait(self, request_id: str, timeout: float, *, last_stage: str | None = None) -> WaitOutcome:
+        """Polls until the pipeline ends (DONE, FAILED or rejected) or `timeout` runs out (PROCESSING).
+        `last_stage` is the stage that ends this request (the last of its pipeline_name_sequence); None: the
+        last stage there is."""
         results: dict[str, dict[str, Any]] = {}
-        current = self._stages[0].stage
+        stages = self._through(last_stage)
+        current = stages[0].stage
         if timeout <= 0:
             return WaitOutcome(current, STATUS_PROCESSING, results=results)
         try:
             async with asyncio.timeout(timeout):
-                for stage in self._stages:
+                for stage in stages:
                     current = stage.stage
                     record = await self._until_finished(stage, request_id)
                     ended = _ended(current, record, results)
@@ -66,12 +76,20 @@ class PipelineWaiter:
         A stage that cannot be read raises (503/504/500) instead of being reported as still running. A
         hand-off that failed for good (retries exhausted, or an outbox dead letter) leaves the next stage
         without a job, so it reads as PROCESSING: the FAILED callback and the orchestrator's tables hold
-        that final state."""
+        that final state.
+
+        The stage that ends the request comes from the pipeline_name_sequence stored with the first stage's
+        job (this service keeps nothing itself)."""
         results: dict[str, dict[str, Any]] = {}
-        for index, stage in enumerate(self._stages):
-            record = await stage.get(request_id)
-            if record is None:
-                return None if index == 0 else WaitOutcome(stage.stage, STATUS_PROCESSING, results=results)
+        record = await self._stages[0].get(request_id)
+        if record is None:
+            return None
+        stages = self._through(_last_stage(record.get("pipeline_name_sequence")))
+        for index, stage in enumerate(stages):
+            if index > 0:
+                record = await stage.get(request_id)
+                if record is None:
+                    return WaitOutcome(stage.stage, STATUS_PROCESSING, results=results)
             status = record.get("status")
             if status not in (STATUS_PROCESSING, STATUS_DONE, STATUS_FAILED):
                 raise InternalError(f"{stage.stage} job has an unexpected status: {status}")
@@ -80,7 +98,14 @@ class PipelineWaiter:
             ended = _ended(stage.stage, record, results)
             if ended is not None:
                 return ended
-        return WaitOutcome(self._stages[-1].stage, STATUS_DONE, results=results)
+        return WaitOutcome(stages[-1].stage, STATUS_DONE, results=results)
+
+    def _through(self, last_stage: str | None) -> tuple[StageStatus, ...]:
+        """The stages up to and including `last_stage`; all of them when None or unknown."""
+        names = [stage.stage for stage in self._stages]
+        if last_stage not in names:
+            return self._stages
+        return self._stages[: names.index(last_stage) + 1]
 
     async def _until_finished(self, stage: StageStatus, request_id: str) -> dict[str, Any]:
         while True:
@@ -92,6 +117,17 @@ class PipelineWaiter:
             if record is not None and record.get("status") in (STATUS_DONE, STATUS_FAILED):
                 return record
             await asyncio.sleep(self._poll_interval)
+
+
+def _last_stage(sequence: Any) -> str | None:
+    """The stage that ends a request, from the pipeline_name_sequence stored with its job; None (the whole
+    pipeline) for a job from before it existed, or a sequence that is not a valid one."""
+    if not isinstance(sequence, list) or not sequence:
+        return None
+    try:
+        return STAGE_OF[validate_sequence(sequence)[-1]]
+    except InvalidSequence:
+        return None
 
 
 def _ended(stage: str, record: dict[str, Any], results: dict[str, dict[str, Any]]) -> WaitOutcome | None:

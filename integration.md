@@ -147,9 +147,36 @@ kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, d
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
-| `skip_guardrails` | tidak | boolean, default `false`. `true` = lewati model guardrails untuk request ini (lihat di bawah) |
+| `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
 
-**Melewati guardrails.** Dengan `skip_guardrails=true`, dokumen tidak dinilai model guardrails dan
+**Memilih service: `pipeline_name_sequence`.** Isinya nama service yang dijalankan, berurutan:
+`guardrails`, `extraction`, `structuring`, `scoring`. Kirim sebagai field form berulang
+(`pipeline_name_sequence=guardrails`, `pipeline_name_sequence=extraction`, ...) atau satu string
+JSON array (`["guardrails", "extraction"]`). Tanpa field ini keempat service dijalankan, sama seperti
+sebelumnya.
+
+Aturannya: urutan tidak boleh diubah, `guardrails` boleh dilewati dari depan, dan service di
+belakang boleh dipotong, tetapi service di tengah tidak boleh dilewati (setiap service setelah
+guardrails butuh hasil service sebelumnya).
+
+| `pipeline_name_sequence` | Boleh? | Isi `data` saat selesai |
+|---|---|---|
+| (tidak dikirim) atau `[guardrails, extraction, structuring, scoring]` | ya | `{nomor_npwp, nama}` seperti biasa |
+| `[guardrails, extraction, structuring]` | ya | hasil structuring apa adanya: `{fields, flag, flag_reason, reject_reason, ...}` |
+| `[guardrails, extraction]` | ya | hasil OCR apa adanya: `{full_text, blocks, ...}` |
+| `[guardrails]` | ya | laporan guardrails apa adanya: `{passed, reason, document, pages}` |
+| `[extraction, structuring, scoring]`, `[extraction, structuring]`, `[extraction]` | ya, kalau guardrails boleh dilewati (lihat di bawah) | seperti baris yang sama di atas |
+| `[extraction, scoring]`, `[guardrails, structuring]` | tidak: ada yang dilewati di tengah | **422** `INVALID_PIPELINE_SEQUENCE` |
+| `[structuring, scoring]`, `[scoring]` | tidak: tidak ada input untuk service pertama | **422** `INVALID_PIPELINE_SEQUENCE` |
+| urutan terbalik, nama dobel, nama tidak dikenal (mis. `ekstraksi`) | tidak | **422** `INVALID_PIPELINE_SEQUENCE` |
+
+Selain `data`, bentuk jawabannya tetap sama (`status_code`, `job_status`, `guardrails`, `params`,
+dan seterusnya), begitu juga kode 200 / 202 / 400 / 422-nya. Service terakhir di urutan mengakhiri
+request: hasilnya jadi `data`, dan tidak ada yang diteruskan ke service berikutnya. Aturan structuring
+tetap bisa menolak (400) selama `structuring` ada di urutan. Request `[guardrails]` saja tidak
+menyimpan apa pun: jawaban POST-nya final, dan `GET /v1/extract-ocr/{request_id}` untuknya dijawab 404.
+
+**Melewati guardrails.** Urutan tanpa `guardrails` membuat dokumen tidak dinilai model guardrails dan
 langsung masuk pipeline. Ini hanya berlaku kalau service mengizinkannya (`GUARDRAILS_SKIP_ALLOWED`,
 nyala di dev). Kalau tidak diizinkan, jawabannya **403** `GUARDRAILS_SKIP_NOT_ALLOWED` dan tidak ada
 yang dijalankan. Yang tetap berlaku:
@@ -243,8 +270,9 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
-| 403 | `GUARDRAILS_SKIP_NOT_ALLOWED` | `skip_guardrails=true`, tetapi service tidak mengizinkannya | tidak |
-| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, `skip_guardrails` bukan boolean, atau field wajib tidak dikirim | tidak |
+| 403 | `GUARDRAILS_SKIP_NOT_ALLOWED` | `pipeline_name_sequence` tanpa `guardrails`, tetapi service tidak mengizinkannya | tidak |
+| 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
+| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
@@ -369,6 +397,19 @@ laporan model guardrails untuk dokumen itu.
 Callback dikirim oleh tahap-tahap pipeline sendiri (scoring, atau tahap yang berhenti), bukan oleh
 orchestrator; alamat dan key-nya tidak berubah.
 
+Selesai lebih awal (`pipeline_name_sequence` berakhir sebelum `scoring`, dikirim oleh service
+terakhirnya): `result` adalah hasil service itu apa adanya, sama dengan `data` di respons
+`extract-ocr`, dan `guardrails` kosong:
+
+    {
+      "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
+      "status": "completed",
+      "result": {"fields": {...}, "flag": false, "flag_reason": null, "reject_reason": null},
+      "guardrails": {}
+    }
+
+Request `[guardrails]` saja tidak mendapat callback: jawaban `extract-ocr`-nya sudah final.
+
 Gagal atau ditolak (dikirim oleh tahap yang berhenti):
 
     {
@@ -406,9 +447,12 @@ Body untuk OCR dan STRUCTURING:
 
 Dua hal yang paling sering disalahpahami:
 
-1. **`result` selalu null untuk OCR dan STRUCTURING.** Hasil antara tidak dibuka ke luar;
-   keadaan request dibaca lewat `GET /v1/extract-ocr/{request_id}` di orchestrator.
-2. **Hanya callback SCORING yang membawa hasil akhir.**
+1. **`result` null untuk OCR dan STRUCTURING, kecuali tahap itu yang terakhir.** Hasil antara
+   tidak dibuka ke luar; keadaan request dibaca lewat `GET /v1/extract-ocr/{request_id}` di
+   orchestrator. Kalau `pipeline_name_sequence` berakhir di tahap itu, callback `DONE`-nya membawa
+   `"final": true` dan `result` berisi hasilnya apa adanya.
+2. **Hanya callback dengan `"final": true` yang membawa hasil akhir.** Dengan urutan penuh, itu
+   callback SCORING (juga bertanda `"final": true`).
 
 Body callback SCORING saat sukses:
 
@@ -493,7 +537,7 @@ penjelasan yang aman untuk di-log.
 | 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
 | 413 | file lebih dari 2,5 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
-| 403 | `skip_guardrails=true` tanpa izin di service (`GUARDRAILS_SKIP_NOT_ALLOWED`) |
+| 403 | `pipeline_name_sequence` tanpa `guardrails`, tanpa izin di service (`GUARDRAILS_SKIP_NOT_ALLOWED`) |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |

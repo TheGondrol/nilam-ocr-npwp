@@ -13,8 +13,9 @@ class Settings(BaseServiceSettings):
     guardrails_service_url: str = "http://127.0.0.1:8031"
     guardrails_api_key: str | None = None
     guardrails_timeout_seconds: float = 20.0
-    # Whether a request may skip the guardrails model with `skip_guardrails=true`. Off: such a request is
-    # refused with 403, so an API key alone does not bypass guardrails. The file checks below always run.
+    # Whether a request may leave the guardrails model out (a pipeline_name_sequence without `guardrails`).
+    # Off: such a request is refused with 403, so an API key alone does not bypass guardrails. The file
+    # checks below always run.
     guardrails_skip_allowed: bool = False
 
     # A PDF with more pages is refused with 400 here, before guardrails or any stage runs (a genuine NPWP

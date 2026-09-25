@@ -173,3 +173,26 @@ async def test_a_stale_job_is_run_again_from_what_the_database_holds():
     assert (call["stage"], call["status"]) == ("SCORING", "DONE")
     assert call["result"]["guardrails"] == GUARDRAILS
     assert call["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+
+
+def test_scoring_ends_every_request_it_runs_for(harness, auth):
+    client, callback = harness
+    sequence = ["extraction", "structuring", "scoring"]
+
+    client.post("/v1/scoring/jobs", headers=auth, json={**_payload("REQ_seq"), "pipeline_name_sequence": sequence})
+
+    job = wait_for_job(client, "/v1/scoring/jobs/REQ_seq")
+    assert (job["status"], job["pipeline_name_sequence"]) == ("DONE", sequence)
+    [done] = callback.calls
+    assert (done["stage"], done["status"], done["final"]) == ("SCORING", "DONE", True)
+
+
+@pytest.mark.parametrize("sequence", [["guardrails", "extraction", "structuring"], ["extraction", "scoring"]])
+def test_a_sequence_without_scoring_or_out_of_order_is_422(harness, auth, sequence):
+    client, _ = harness
+
+    response = client.post(
+        "/v1/scoring/jobs", headers=auth, json={**_payload("REQ_seq_bad"), "pipeline_name_sequence": sequence}
+    )
+
+    assert response.status_code == 422

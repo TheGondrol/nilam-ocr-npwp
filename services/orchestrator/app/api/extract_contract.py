@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ocr_common.npwp import REJECTED_CODE, contract_fields
-from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED
+from ocr_common.pipeline import STAGE_SCORING, STATUS_DONE, STATUS_FAILED
 from ocr_common.web.envelope import envelope
 
 from app.services.pipeline_waiter import STATUS_REJECTED
@@ -62,7 +62,10 @@ def extract_response(
             params=params,
         )
     if pipeline.get("status") == STATUS_DONE:
-        data = contract_fields(outcome["result"], threshold)
+        # Scoring ended the request: the contract's fields. An earlier last service of the
+        # pipeline_name_sequence: its result as it is.
+        result = outcome["result"]
+        data = contract_fields(result, threshold) if pipeline.get("stage") == STAGE_SCORING else result
         return 200, extract_body(
             200,
             COMPLETED_MESSAGE,

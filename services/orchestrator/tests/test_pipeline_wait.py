@@ -257,3 +257,17 @@ async def test_stage_status_client_quotes_the_request_id_and_maps_404_to_none():
     assert await stage.get("a/b?c") == {"status": "DONE", "result": {"fields": {}}}
     assert paths[0] == b"/v1/structuring/jobs/a%2Fb%3Fc"
     assert await stage.get("missing") is None
+
+
+async def test_waiter_stops_at_the_last_stage_of_the_sequence():
+    stages = [
+        FakeStage("OCR", _job("DONE", {"blocks": []})),
+        FakeStage("STRUCTURING", _job("DONE", {"fields": {}})),
+        FakeStage("SCORING", None),
+    ]
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).wait(RID, 5, last_stage="STRUCTURING")
+
+    assert (outcome.stage, outcome.status) == ("STRUCTURING", "DONE")
+    assert outcome.results == {"OCR": {"blocks": []}, "STRUCTURING": {"fields": {}}}
+    assert stages[2].calls == 0, "scoring is not part of this request: never read"

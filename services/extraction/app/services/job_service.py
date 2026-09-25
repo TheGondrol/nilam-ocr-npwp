@@ -1,11 +1,11 @@
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ocr_common.clients.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, fetch
 from ocr_common.errors import BadRequest
 from ocr_common.npwp import DOCUMENT_TYPE
-from ocr_common.pipeline import STAGE_STRUCTURING, HandoffPayload, StagePipeline, Work
+from ocr_common.pipeline import EXTRACTION, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.simulation import simulated_delay_seconds
 from ocr_common.types import OcrResult
 
@@ -40,18 +40,25 @@ class ExtractionJobService:
         self._handoff_by_reference = handoff_by_reference
 
     async def submit(
-        self, request_id: str, document_type: str, guardrails: dict[str, Any] | None, source: Source
+        self,
+        request_id: str,
+        document_type: str,
+        guardrails: dict[str, Any] | None,
+        source: Source,
+        sequence: Sequence[str] | None = None,
     ) -> dict[str, Any]:
-        work, handoff = self._spec(request_id, document_type, guardrails, source)
+        """`sequence` (pipeline_name_sequence, None = the full pipeline) decides whether the job is handed to
+        structuring or ends here with the OCR result as the answer."""
+        work, handoff = self._spec(request_id, document_type, guardrails, source, sequence)
         return await self._pipeline.submit(
             request_id,
             work,
-            handoff_payload=handoff,
-            next_stage=STAGE_STRUCTURING,
+            **chain(sequence, EXTRACTION, handoff),
             input={
                 "document_type": document_type,
                 "guardrails": guardrails,
                 "file_url": source if isinstance(source, str) else None,
+                "pipeline_name_sequence": stored(sequence),
             },
         )
 
@@ -67,16 +74,22 @@ class ExtractionJobService:
 
             await self._pipeline.resume(request_id, gone)
             return
+        sequence = input.get("pipeline_name_sequence")
         work, handoff = self._spec(
-            request_id, input.get("document_type") or DOCUMENT_TYPE, input.get("guardrails"), file_url
+            request_id, input.get("document_type") or DOCUMENT_TYPE, input.get("guardrails"), file_url, sequence
         )
-        await self._pipeline.resume(request_id, work, handoff_payload=handoff, next_stage=STAGE_STRUCTURING)
+        await self._pipeline.resume(request_id, work, **chain(sequence, EXTRACTION, handoff))
 
     async def get(self, request_id: str) -> dict[str, Any]:
         return await self._pipeline.get(request_id)
 
     def _spec(
-        self, request_id: str, document_type: str, guardrails: dict[str, Any] | None, source: Source
+        self,
+        request_id: str,
+        document_type: str,
+        guardrails: dict[str, Any] | None,
+        source: Source,
+        sequence: Sequence[str] | None = None,
     ) -> tuple[Work, Handoff]:
         async def work() -> OcrResult:
             content, filename, content_type = await self._load(source)
@@ -87,6 +100,8 @@ class ExtractionJobService:
 
         def handoff(ocr: Mapping[str, Any]) -> dict[str, Any]:
             body: dict[str, Any] = {"request_id": request_id, "document_type": document_type, "guardrails": guardrails}
+            if sequence:
+                body["pipeline_name_sequence"] = stored(sequence)
             if not self._handoff_by_reference:
                 body["ocr"] = dict(ocr)
             return body

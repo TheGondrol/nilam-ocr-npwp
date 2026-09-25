@@ -77,7 +77,7 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "STRUCTURING", "created_at": 
 async def submit_job(body: StructuringJobRequest, service: StructuringJobService = Depends(get_job_service)):
     guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
     ocr = body.ocr.model_dump(exclude_unset=True) if body.ocr is not None else None
-    data = await service.submit(body.request_id, body.document_type, guardrails, ocr)
+    data = await service.submit(body.request_id, body.document_type, guardrails, ocr, body.pipeline_name_sequence)
     return envelope(202, "Accepted", data, body.request_id)
 
 

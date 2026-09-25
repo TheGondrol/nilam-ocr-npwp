@@ -1,9 +1,10 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from ocr_common.pipeline import STRUCTURING, checked_sequence
 from ocr_common.pipeline.schemas import GuardrailsResult, OcrPayload
-from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnvelope
+from ocr_common.web.schemas import PIPELINE_SEQUENCE_DESCRIPTION, REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnvelope
 
 
 class BoundingBox(BaseModel):
@@ -126,6 +127,16 @@ class StructuringJobRequest(BaseModel):
             "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `ocr_results` of the shared database"
         ),
     )
+    pipeline_name_sequence: list[str] | None = Field(
+        None,
+        description=PIPELINE_SEQUENCE_DESCRIPTION,
+        examples=[["guardrails", "extraction", "structuring", "scoring"]],
+    )
+
+    @field_validator("pipeline_name_sequence")
+    @classmethod
+    def _sequence_includes_this_stage(cls, value: list[str] | None) -> list[str] | None:
+        return checked_sequence(value, STRUCTURING)
 
 
 class StructuringJobStatus(JobStatusBase):

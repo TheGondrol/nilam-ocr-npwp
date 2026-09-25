@@ -210,3 +210,53 @@ async def test_a_stale_job_of_an_inline_upload_fails_with_a_reason():
     assert "uploaded inline" in job["error_message"]
     assert [(c["stage"], c["status"]) for c in callback.calls] == [("OCR", "FAILED")]
     assert next_stage.payloads == []
+
+
+def _submit_with_sequence(client, auth, request_id, sequence):
+    data = {
+        "request_id": request_id,
+        "document_type": "npwp",
+        "guardrails": json.dumps(GUARDRAILS),
+        "pipeline_name_sequence": json.dumps(sequence),
+    }
+    return client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
+
+
+def test_a_sequence_ending_here_stops_with_the_ocr_result_as_the_answer(harness, auth):
+    client, callback, next_stage = harness
+
+    assert _submit_with_sequence(client, auth, "REQ_seq_end", ["guardrails", "extraction"]).status_code == 202
+
+    job = wait_for_job(client, "/v1/extraction/jobs/REQ_seq_end")
+    assert job["status"] == "DONE"
+    assert job["pipeline_name_sequence"] == ["guardrails", "extraction"]
+    assert next_stage.payloads == [], "nothing is handed on after the last service"
+    [done] = callback.calls
+    assert (done["stage"], done["status"], done["final"], done["result"]) == ("OCR", "DONE", True, job["result"])
+
+
+def test_a_longer_sequence_is_handed_on_with_the_job(harness, auth):
+    client, callback, next_stage = harness
+    sequence = ["extraction", "structuring"]
+
+    assert _submit_with_sequence(client, auth, "REQ_seq_on", sequence).status_code == 202
+
+    job = wait_for_job(client, "/v1/extraction/jobs/REQ_seq_on")
+    [payload] = next_stage.payloads
+    assert payload["pipeline_name_sequence"] == sequence
+    assert [(c["stage"], c["status"], c.get("final")) for c in callback.calls] == [("OCR", "DONE", None)]
+    assert job["pipeline_name_sequence"] == sequence
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['["guardrails"]', '["structuring", "scoring"]', '["extraction", "scoring"]', '"extraction"', "not json"],
+)
+def test_an_invalid_sequence_is_400(harness, auth, raw):
+    client, _, _ = harness
+    data = {"request_id": "REQ_seq_bad", "document_type": "npwp", "pipeline_name_sequence": raw}
+
+    response = client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
+
+    assert response.status_code == 400
+    assert "pipeline_name_sequence" in response.json()["message"]

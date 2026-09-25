@@ -184,7 +184,12 @@ paths:
 
         **Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run
         OCR twice, unless the earlier attempt `FAILED` or has been `PROCESSING` for longer than the job
-        lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default), in which case it is run again.'
+        lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default), in which case it is run again.
+
+
+        **Where the chain stops.** `pipeline_name_sequence` decides: when `extraction` is its last service,
+        the job ends here, nothing is handed on, and the OCR result is the request''s answer, as it is
+        (the `OCR` callback then carries `final: true`).'
       operationId: submitOcrJob
       requestBody:
         content:
@@ -226,7 +231,8 @@ paths:
                       duplicate: true
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Neither or both of file / file_url, or `guardrails` is not a JSON object
+          description: Neither or both of file / file_url, `guardrails` is not a JSON object, or `pipeline_name_sequence`
+            is not a valid sequence that includes `extraction`
           content:
             application/json:
               schema:
@@ -804,6 +810,18 @@ components:
           - '{"passed": true, "reason": null, "document": {"verdict": "accepted", "confidence": 0.9821,
             "n_pages": 1, "n_approve": 1, "n_reject": 0}, "pages": [{"page_index": 0, "proba_approve":
             0.9821, "proba_reject": 0.0179, "verdict": "accepted"}]}'
+        pipeline_name_sequence:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, in order, from the central orchestrator (forwarded
+            by the orchestrator NPWP and each stage): `guardrails`, `extraction`, `structuring`, `scoring`,
+            guardrails optional at the front and the end cut off, never one skipped in the middle. The
+            last one ends the request: its result is the answer, as it is, and nothing is handed on. Omitted:
+            the full pipeline. Serialised as a JSON array string'
+          examples:
+          - '["guardrails", "extraction", "structuring", "scoring"]'
         file:
           anyOf:
           - type: string
@@ -1120,6 +1138,20 @@ components:
           description: Last status change (ISO 8601, UTC)
           examples:
           - '2026-09-18T04:00:01+00:00'
+        pipeline_name_sequence:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Pipeline Name Sequence
+          description: 'The services this request runs, as the job was submitted with them; the last one
+            ends the request. Null for a job submitted without it: the full pipeline'
+          examples:
+          - - guardrails
+            - extraction
+            - structuring
+            - scoring
         result:
           anyOf:
           - $ref: '#/components/schemas/OcrResult'

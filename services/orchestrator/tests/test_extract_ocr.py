@@ -6,7 +6,7 @@ from ocr_common.testing import image_upload
 from app.config import get_settings
 from app.main import app
 from app.services.pipeline_waiter import STATUS_REJECTED, WaitOutcome
-from tests.conftest import JPEG
+from tests.conftest import ACCEPTED_REPORT, JPEG, STRUCTURING_RESULT
 
 TOO_MANY_PAGES = "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
 
@@ -193,14 +193,99 @@ def settings_override():
     app.dependency_overrides.pop(get_settings, None)
 
 
-def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_extraction):
-    response = _submit(client, auth, skip_guardrails="true")
+NO_GUARDRAILS = ["extraction", "structuring", "scoring"]
+FULL = ["guardrails", "extraction", "structuring", "scoring"]
+
+
+def test_without_a_sequence_the_whole_pipeline_runs(client, auth, stub_guardrails, stub_extraction, stub_waiter):
+    response = _submit(client, auth)
+
+    assert response.status_code == 200
+    assert len(stub_guardrails.checked) == 1
+    assert stub_extraction.submitted[0]["sequence"] == FULL
+    assert stub_waiter.last_stages == ["SCORING"]
+
+
+def test_the_sequence_is_taken_as_repeated_fields_or_as_a_json_array(client, auth, stub_extraction, stub_waiter):
+    repeated = _submit(client, auth, pipeline_name_sequence=["guardrails", "extraction"])
+    as_json = _submit(client, auth, pipeline_name_sequence='["guardrails", "extraction"]')
+
+    assert (repeated.status_code, as_json.status_code) == (200, 200)
+    assert [handed["sequence"] for handed in stub_extraction.submitted] == [["guardrails", "extraction"]] * 2
+    assert stub_waiter.last_stages == ["OCR", "OCR"]
+
+
+@pytest.mark.parametrize(
+    ("sequence", "reason"),
+    [
+        (["extraction", "scoring"], "without skipping one in the middle"),
+        (["guardrails", "structuring", "scoring"], "without skipping one in the middle"),
+        (["structuring", "scoring"], "structuring cannot come first"),
+        (["guardrails", "scoring", "structuring", "extraction"], "without skipping one in the middle"),
+        (["guardrails", "guardrails"], "listed twice"),
+        (["guardrails", "ekstraksi"], "unknown service 'ekstraksi'"),
+        ('["guardrails", ', "JSON array of strings"),
+    ],
+)
+def test_an_invalid_sequence_is_422_before_anything_runs(
+    client, auth, stub_guardrails, stub_extraction, sequence, reason
+):
+    response = _submit(client, auth, pipeline_name_sequence=sequence)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["errors"] == "INVALID_PIPELINE_SEQUENCE"
+    assert body["message"].startswith("Invalid pipeline_name_sequence: ") and reason in body["message"]
+    assert stub_guardrails.checked == [] and stub_extraction.submitted == []
+
+
+def test_guardrails_only_answers_with_the_report_as_it_is(client, auth, stub_extraction, stub_waiter):
+    response = _submit(client, auth, pipeline_name_sequence=["guardrails"])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert body["data"] == ACCEPTED_REPORT
+    assert stub_extraction.submitted == [] and stub_waiter.calls == []
+
+
+def test_guardrails_only_still_rejects(client, auth):
+    response = _submit(client, auth, filename="notnpwp.jpg", pipeline_name_sequence=["guardrails"])
+
+    assert response.status_code == 400
+    assert (response.json()["errors"], response.json()["guardrails"]) == ("DOWNSTREAM_VALIDATION_ERROR", 1)
+
+
+def test_a_sequence_ending_at_extraction_answers_with_the_ocr_result_as_it_is(client, auth, stub_waiter):
+    ocr = {"text": "NPWP 12.345.678.9-012.345", "blocks": [{"text": "NPWP", "confidence": 0.99, "page": 0}]}
+    stub_waiter.outcome = WaitOutcome("OCR", "DONE", results={"OCR": ocr})
+
+    response = _submit(client, auth, pipeline_name_sequence=["guardrails", "extraction"])
+
+    assert response.status_code == 200
+    assert (response.json()["job_status"], response.json()["data"]) == ("completed", ocr)
+
+
+def test_a_sequence_ending_at_structuring_answers_with_its_result_as_it_is(client, auth, stub_waiter):
+    stub_waiter.outcome = WaitOutcome(
+        "STRUCTURING", "DONE", results={"OCR": {"blocks": []}, "STRUCTURING": STRUCTURING_RESULT}
+    )
+
+    response = _submit(client, auth, pipeline_name_sequence=["guardrails", "extraction", "structuring"])
+
+    assert response.status_code == 200
+    assert response.json()["data"] == STRUCTURING_RESULT
+    assert stub_waiter.last_stages == ["STRUCTURING"]
+
+
+def test_leaving_guardrails_out_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_extraction):
+    response = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
 
     assert response.status_code == 403
     assert response.json() == {
         "status_code": 403,
         "status_desc": "Forbidden",
-        "message": "skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off",
+        "message": "a pipeline_name_sequence without guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off",
         "data": None,
         "errors": "GUARDRAILS_SKIP_NOT_ALLOWED",
         "request_id": "OCR_1",
@@ -212,42 +297,27 @@ def test_skip_guardrails_is_refused_with_403_while_not_allowed(client, auth, stu
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 
-def test_skip_guardrails_false_is_never_refused(client, auth, stub_guardrails):
-    response = _submit(client, auth, skip_guardrails="false")
-
-    assert response.status_code == 200
-    assert len(stub_guardrails.checked) == 1
-
-
-def test_skip_guardrails_must_be_a_boolean(client, auth, stub_guardrails):
-    response = _submit(client, auth, skip_guardrails="maybe")
-
-    assert response.status_code == 422
-    assert response.json()["errors"] == "VALIDATION_ERROR"
-    assert stub_guardrails.checked == []
-
-
-def test_skipped_guardrails_hand_the_document_on_without_a_report(
+def test_without_guardrails_the_document_is_handed_on_without_a_report(
     client, auth, settings_override, stub_guardrails, stub_extraction
 ):
     settings_override(guardrails_skip_allowed=True)
 
-    # A file name the guardrails model rejects: with the check skipped it never gets to judge it.
-    response = _submit(client, auth, filename="notnpwp.jpg", skip_guardrails="true")
+    # A file name the guardrails model rejects: left out of the sequence, it never gets to judge it.
+    response = _submit(client, auth, filename="notnpwp.jpg", pipeline_name_sequence=NO_GUARDRAILS)
 
     assert response.status_code == 200
     body = response.json()
     assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
     assert stub_guardrails.checked == []
     [handed] = stub_extraction.submitted
-    assert handed["guardrails"] is None
+    assert (handed["guardrails"], handed["sequence"]) == (None, NO_GUARDRAILS)
 
 
-def test_with_guardrails_skipped_the_structuring_rules_still_reject(client, auth, settings_override, stub_waiter):
+def test_without_guardrails_the_structuring_rules_still_reject(client, auth, settings_override, stub_waiter):
     settings_override(guardrails_skip_allowed=True)
     stub_waiter.outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, "dokumen blur / blank")
 
-    response = _submit(client, auth, skip_guardrails="true")
+    response = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
 
     assert response.status_code == 400
     body = response.json()
@@ -258,13 +328,18 @@ def test_with_guardrails_skipped_the_structuring_rules_still_reject(client, auth
     )
 
 
-def test_with_guardrails_skipped_the_file_checks_still_run(client, auth, settings_override, stub_extraction):
+def test_without_guardrails_the_file_checks_still_run(client, auth, settings_override, stub_extraction):
     settings_override(guardrails_skip_allowed=True)
     pages = _submit(
-        client, auth, filename="scan.pdf", content=_pdf(3), content_type="application/pdf", skip_guardrails="true"
+        client,
+        auth,
+        filename="scan.pdf",
+        content=_pdf(3),
+        content_type="application/pdf",
+        pipeline_name_sequence=NO_GUARDRAILS,
     )
     settings_override(guardrails_skip_allowed=True, max_upload_bytes=10)
-    size = _submit(client, auth, skip_guardrails="true")
+    size = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
 
     assert (pages.status_code, pages.json()["message"]) == (400, TOO_MANY_PAGES)
     assert size.status_code == 413

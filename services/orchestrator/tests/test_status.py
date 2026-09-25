@@ -236,3 +236,37 @@ def test_the_stage_clients_pass_only_404_through():
     for stage in build_stage_status_clients(get_settings()):
         assert stage._client._passthrough_statuses == frozenset({404})
         assert stage._client._passthrough is False
+
+
+async def test_snapshot_stops_at_the_last_stage_of_the_stored_sequence():
+    ocr = {**_job("DONE", {"blocks": []}), "pipeline_name_sequence": ["guardrails", "extraction"]}
+    stages = _stages(ocr, _job("DONE", {}), _job("DONE", {}))
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+
+    assert outcome is not None
+    assert (outcome.stage, outcome.status, outcome.results) == ("OCR", "DONE", {"OCR": {"blocks": []}})
+    assert [stage.calls for stage in stages] == [1, 0, 0]
+
+
+async def test_snapshot_of_a_job_without_a_sequence_reads_the_whole_pipeline():
+    """Jobs submitted before pipeline_name_sequence existed, or with an unreadable one."""
+    ocr = {**_job("DONE", {"blocks": []}), "pipeline_name_sequence": ["extraction", "scoring"]}
+    stages = _stages(ocr, _job("DONE", {}), _job("PROCESSING"))
+
+    outcome = await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
+
+    assert outcome is not None
+    assert (outcome.stage, outcome.status) == ("SCORING", "PROCESSING")
+
+
+def test_a_request_that_ended_before_scoring_is_answered_with_that_result(client, auth, stub_waiter):
+    structuring = {"fields": {"nomor_npwp": {"value": "12.345.678.9-012.345"}}, "flag": False}
+    stub_waiter.snapshot_outcome = WaitOutcome(
+        "STRUCTURING", "DONE", results={"OCR": {"blocks": []}, "STRUCTURING": structuring}
+    )
+
+    response = _get(client, auth)
+
+    assert response.status_code == 200
+    assert (response.json()["job_status"], response.json()["data"]) == ("completed", structuring)

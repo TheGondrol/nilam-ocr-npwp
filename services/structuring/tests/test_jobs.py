@@ -206,3 +206,48 @@ async def test_a_rejected_document_stops_at_structuring_with_a_failed_callback()
             "DOWNSTREAM_VALIDATION_ERROR",
         )
     ]
+
+
+def test_a_sequence_ending_here_stops_with_the_structuring_result_as_the_answer(harness, auth):
+    client, callback, next_stage = harness
+    sequence = ["guardrails", "extraction", "structuring"]
+
+    response = client.post(
+        "/v1/structuring/jobs", headers=auth, json={**_payload("REQ_seq_end"), "pipeline_name_sequence": sequence}
+    )
+    assert response.status_code == 202
+
+    job = wait_for_job(client, "/v1/structuring/jobs/REQ_seq_end")
+    assert (job["status"], job["pipeline_name_sequence"]) == ("DONE", sequence)
+    assert next_stage.payloads == [], "scoring is not part of this request"
+    [done] = callback.calls
+    assert (done["stage"], done["status"], done["final"], done["result"]) == (
+        "STRUCTURING",
+        "DONE",
+        True,
+        job["result"],
+    )
+
+
+def test_the_full_sequence_is_handed_on_to_scoring(harness, auth):
+    client, _, next_stage = harness
+    sequence = ["extraction", "structuring", "scoring"]
+
+    client.post(
+        "/v1/structuring/jobs", headers=auth, json={**_payload("REQ_seq_on"), "pipeline_name_sequence": sequence}
+    )
+
+    wait_for_job(client, "/v1/structuring/jobs/REQ_seq_on")
+    [payload] = next_stage.payloads
+    assert payload["pipeline_name_sequence"] == sequence
+
+
+@pytest.mark.parametrize("sequence", [["guardrails", "extraction"], ["extraction", "scoring"], ["scoring"]])
+def test_a_sequence_without_this_stage_or_out_of_order_is_422(harness, auth, sequence):
+    client, _, _ = harness
+
+    response = client.post(
+        "/v1/structuring/jobs", headers=auth, json={**_payload("REQ_seq_bad"), "pipeline_name_sequence": sequence}
+    )
+
+    assert response.status_code == 422

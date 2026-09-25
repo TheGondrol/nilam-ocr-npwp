@@ -102,6 +102,22 @@ class JobStatusBase(BaseModel):
     updated_at: str = Field(
         ..., description="Last status change (ISO 8601, UTC)", examples=["2026-09-18T04:00:01+00:00"]
     )
+    pipeline_name_sequence: list[str] | None = Field(
+        None,
+        description=(
+            "The services this request runs, as the job was submitted with them; the last one ends the request. "
+            "Null for a job submitted without it: the full pipeline"
+        ),
+        examples=[["guardrails", "extraction", "structuring", "scoring"]],
+    )
+
+
+PIPELINE_SEQUENCE_DESCRIPTION = (
+    "The services this request runs, in order, from the central orchestrator (forwarded by the orchestrator "
+    "NPWP and each stage): `guardrails`, `extraction`, `structuring`, `scoring`, guardrails optional at the "
+    "front and the end cut off, never one skipped in the middle. The last one ends the request: its result is "
+    "the answer, as it is, and nothing is handed on. Omitted: the full pipeline"
+)
 
 
 class HealthResponse(BaseModel):

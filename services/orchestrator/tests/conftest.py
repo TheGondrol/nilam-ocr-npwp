@@ -71,10 +71,16 @@ class StubExtraction:
         self.submitted: list[dict] = []
 
     async def submit(
-        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None
+        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None, sequence=None
     ) -> dict:
         self.submitted.append(
-            {"request_id": request_id, "document_type": document_type, "guardrails": guardrails, "file_url": file_url}
+            {
+                "request_id": request_id,
+                "document_type": document_type,
+                "guardrails": guardrails,
+                "file_url": file_url,
+                "sequence": list(sequence) if sequence else None,
+            }
         )
         return {"request_id": request_id, "stage": "OCR", "status": "PROCESSING", "duplicate": False}
 
@@ -88,10 +94,12 @@ class StubWaiter:
         self.snapshot_outcome: WaitOutcome | None = DONE
         self.snapshot_error: Exception | None = None
         self.calls: list[tuple[str, float]] = []
+        self.last_stages: list[str | None] = []
         self.snapshots: list[str] = []
 
-    async def wait(self, request_id: str, timeout: float) -> WaitOutcome:
+    async def wait(self, request_id: str, timeout: float, *, last_stage: str | None = None) -> WaitOutcome:
         self.calls.append((request_id, timeout))
+        self.last_stages.append(last_stage)
         return self.outcome
 
     async def snapshot(self, request_id: str) -> WaitOutcome | None:

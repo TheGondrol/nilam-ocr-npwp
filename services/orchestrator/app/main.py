@@ -22,8 +22,8 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     if settings.guardrails_skip_allowed:
         logging.getLogger(__name__).warning(
-            "GUARDRAILS_SKIP_ALLOWED=true: a request with skip_guardrails=true enters the pipeline without the "
-            "guardrails model"
+            "GUARDRAILS_SKIP_ALLOWED=true: a request whose pipeline_name_sequence leaves guardrails out enters the "
+            "pipeline without the guardrails model"
         )
     yield
     # The clients are built on the first request that needs them; close only those that exist.

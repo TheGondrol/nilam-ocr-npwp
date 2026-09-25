@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import DOCUMENT_TYPE
+from ocr_common.pipeline import DEFAULT_SEQUENCE, GUARDRAILS, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
 from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
@@ -29,7 +30,10 @@ router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
 SKIP_NOT_ALLOWED_CODE = "GUARDRAILS_SKIP_NOT_ALLOWED"
-SKIP_NOT_ALLOWED_MESSAGE = "skip_guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off"
+SKIP_NOT_ALLOWED_MESSAGE = (
+    "a pipeline_name_sequence without guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off"
+)
+INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -75,6 +79,29 @@ _FAILED = extract_body(
     document_type="npwp",
     params=_PARAMS,
 )
+_GUARDRAILS_REPORT = {
+    "passed": True,
+    "reason": None,
+    "document": {
+        "verdict": "accepted",
+        "confidence": 0.9821,
+        "n_pages": 1,
+        "n_approve": 1,
+        "n_reject": 0,
+        "reject_threshold": 0.5,
+    },
+    "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
+}
+_GUARDRAILS_ONLY = extract_body(
+    200,
+    COMPLETED_MESSAGE,
+    data=_GUARDRAILS_REPORT,
+    job_status="completed",
+    guardrails=0,
+    request_id=RID,
+    document_type="npwp",
+    params=_PARAMS,
+)
 _SKIP_NOT_ALLOWED = extract_body(
     403,
     SKIP_NOT_ALLOWED_MESSAGE,
@@ -99,6 +126,22 @@ class _InvalidParams(Exception):
     pass
 
 
+def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
+    """`pipeline_name_sequence` as repeated form fields, or as one JSON array string; the full pipeline when
+    omitted. Raises `InvalidSequence`."""
+    if not values:
+        return DEFAULT_SEQUENCE
+    if len(values) == 1 and values[0].lstrip().startswith("["):
+        try:
+            parsed = json.loads(values[0])
+        except ValueError:
+            parsed = None
+        if not isinstance(parsed, list) or not all(isinstance(name, str) for name in parsed):
+            raise InvalidSequence("send it as a JSON array of strings, or as repeated form fields")
+        values = parsed
+    return validate_sequence(values)
+
+
 def _parse_params(raw: str | None) -> Any:
     if not raw:
         return None
@@ -118,7 +161,8 @@ def _parse_params(raw: str | None) -> Any:
     summary="Judge a document, run the pipeline, answer with the OCR result or 202",
     description=(
         "**The call the central orchestrator makes.** Checks the file, has the guardrails service judge it, "
-        "hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring for up to "
+        "hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring (or the services "
+        "`pipeline_name_sequence` names, see below) for up to "
         "`PIPELINE_WAIT_SECONDS` (15 s by default), counted from when this request arrived. The response follows "
         'the central orchestrator\'s `extract-ocr` contract ("Finished" meaning finished within the wait):\n\n'
         + _CONTRACT_TABLE
@@ -135,11 +179,18 @@ def _parse_params(raw: str | None) -> Any:
         "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
         "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
-        "**Skipping guardrails.** `skip_guardrails=true` leaves the guardrails model out for this one request, "
-        "when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise `403` "
-        f"`{SKIP_NOT_ALLOWED_CODE}` and nothing runs). The file checks above still run, and the structuring rules "
-        "still reject, so `guardrails: 1` can then only come from them. The trust model gets no guardrails "
-        "probability and works with that input missing.\n\n"
+        "**Which services run: `pipeline_name_sequence`.** The services of this request, in order: `guardrails`, "
+        "`extraction`, `structuring`, `scoring`. Guardrails may be left out at the front and the end cut off, "
+        "never one skipped in the middle or the order changed (else `422` "
+        f"`{INVALID_SEQUENCE_CODE}` and nothing runs). Omitted: all four. The last service ends the request and "
+        "its result is `data`, **as it is**: the guardrails report (`{passed, reason, document, pages}`) when "
+        "only `guardrails` runs, the OCR result (`{text, blocks, ...}`) after `extraction`, the structuring result "
+        "(`{fields, flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. "
+        "The rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving "
+        "`guardrails` out is only allowed when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise "
+        f"`403` `{SKIP_NOT_ALLOWED_CODE}` and nothing runs); the file checks above always run, and the trust "
+        "model then works without a guardrails probability. A `guardrails`-only request stores nothing: its "
+        "POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
         "(e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -156,6 +207,10 @@ def _parse_params(raw: str | None) -> Any:
         200: success_examples(
             "Accepted and finished within the wait",
             completed=("The OCR result", _COMPLETED),
+            guardrails_only=(
+                '`pipeline_name_sequence: ["guardrails"]`: the guardrails report as it is',
+                _GUARDRAILS_ONLY,
+            ),
         ),
         202: {
             **success_examples(
@@ -178,8 +233,8 @@ def _parse_params(raw: str | None) -> Any:
         403: {
             "model": ExtractOcrResponse,
             "description": (
-                f"`skip_guardrails=true` while `GUARDRAILS_SKIP_ALLOWED` is off (`{SKIP_NOT_ALLOWED_CODE}`); "
-                "nothing was started"
+                "A `pipeline_name_sequence` without `guardrails` while `GUARDRAILS_SKIP_ALLOWED` is off "
+                f"(`{SKIP_NOT_ALLOWED_CODE}`); nothing was started"
             ),
             "content": {"application/json": {"example": _SKIP_NOT_ALLOWED}},
         },
@@ -192,8 +247,8 @@ def _parse_params(raw: str | None) -> Any:
             "model": ExtractOcrResponse,
             "description": (
                 "A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`; "
-                "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is "
-                "missing (`VALIDATION_ERROR`)"
+                "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence` breaks "
+                f"the order rules (`{INVALID_SEQUENCE_CODE}`), or a required field is missing (`VALIDATION_ERROR`)"
             ),
             "content": {"application/json": {"example": _FAILED}},
         },
@@ -230,13 +285,15 @@ async def extract_ocr(
     ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
-    skip_guardrails: bool = Form(
-        False,
+    pipeline_name_sequence: list[str] | None = Form(
+        None,
         description=(
-            "`true` leaves the guardrails model out for this request; only when this service allows it "
-            f"(`GUARDRAILS_SKIP_ALLOWED`), else `403` `{SKIP_NOT_ALLOWED_CODE}`. The file checks still run and the "
-            "structuring rules still reject"
+            "The services to run, in order: `guardrails`, `extraction`, `structuring`, `scoring`; guardrails "
+            "optional at the front, the end may be cut off, nothing skipped in the middle. Repeated form fields, or "
+            "one JSON array string. Omitted: all four. The last one's result is `data`, as it is. Without "
+            f"`guardrails` only when `GUARDRAILS_SKIP_ALLOWED` is on, else `403` `{SKIP_NOT_ALLOWED_CODE}`"
         ),
+        examples=[["guardrails", "extraction", "structuring", "scoring"]],
     ),
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
@@ -262,7 +319,18 @@ async def extract_ocr(
             request_id=request_id,
             document_type=document_type,
         )
-    if skip_guardrails and not settings.guardrails_skip_allowed:
+    try:
+        sequence = _parse_sequence(pipeline_name_sequence)
+    except InvalidSequence as exc:
+        response.status_code = 422
+        return extract_body(
+            422,
+            f"Invalid pipeline_name_sequence: {exc}",
+            errors=INVALID_SEQUENCE_CODE,
+            request_id=request_id,
+            document_type=document_type,
+        )
+    if GUARDRAILS not in sequence and not settings.guardrails_skip_allowed:
         response.status_code = 403
         return extract_body(
             403,
@@ -286,7 +354,7 @@ async def extract_ocr(
             content,
             received_at=received_at,
             file_url=file_url,
-            skip_guardrails=skip_guardrails,
+            sequence=sequence,
         )
     finally:
         reset_request_id(token)

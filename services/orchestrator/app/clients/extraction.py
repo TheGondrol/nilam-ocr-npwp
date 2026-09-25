@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
@@ -35,14 +36,19 @@ class ExtractionJobClient:
         content: bytes,
         *,
         file_url: str | None = None,
+        sequence: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Hand the document to the OCR stage. When the request came as `file_url`, that URL is forwarded
         instead of the bytes: the OCR service downloads it itself, and a job left behind by a dead process
         can be run again from the URL stored with the job. `guardrails` is None when the check was skipped:
-        the field is then left out (extraction refuses a `guardrails` that is not a JSON object)."""
+        the field is then left out (extraction refuses a `guardrails` that is not a JSON object).
+        `sequence` (pipeline_name_sequence) goes along as a JSON array, so each stage knows whether to hand
+        the job on."""
         fields = {"request_id": request_id, "document_type": document_type}
         if guardrails is not None:
             fields["guardrails"] = json.dumps(guardrails)
+        if sequence:
+            fields["pipeline_name_sequence"] = json.dumps(list(sequence))
         if file_url:
             call = lambda: self._client.post_form(self._jobs_path, data={**fields, "file_url": file_url})  # noqa: E731
         else:

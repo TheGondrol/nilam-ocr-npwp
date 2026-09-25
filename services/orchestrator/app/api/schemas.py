@@ -37,7 +37,14 @@ class ExtractOcrResponse(BaseModel):
         description="Human-readable; its wording may change, so branch on `errors` instead",
         examples=["OCR extraction completed successfully"],
     )
-    data: NpwpData | None = Field(None, description="The OCR fields when `job_status` is `completed`; null otherwise")
+    data: NpwpData | dict[str, Any] | None = Field(
+        None,
+        description=(
+            "The result when `job_status` is `completed`; null otherwise. The fields (`nomor_npwp`, `nama`) when "
+            "scoring ended the request; the result of the last service of `pipeline_name_sequence`, as it is, "
+            "when the sequence ends earlier (the guardrails report, the OCR result, or the structuring result)"
+        ),
+    )
     errors: str | None = Field(
         None, description="Failure code when the request failed or was refused; null otherwise", examples=[None]
     )
