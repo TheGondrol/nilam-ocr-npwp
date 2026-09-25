@@ -4,6 +4,27 @@ x-common: &common
     - "host.docker.internal:host-gateway"
 
 services:
+  # Pintu masuk: satu-satunya service yang dipanggil Orkestrasi pusat.
+  orchestrator:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    image: nilam-ocr-orchestrator:latest
+    container_name: nilam-ocr-orchestrator
+    env_file: services/orchestrator/.env
+    environment:
+      PORT: "8034"
+      GUARDRAILS_SERVICE_URL: http://guardrails:8031
+      EKSTRAKSI_SERVICE_URL: http://ekstraksi:8030
+      STRUCTURING_SERVICE_URL: http://structuring:8032
+      SCORING_SERVICE_URL: http://scoring:8033
+    ports:
+      - "127.0.0.1:8034:8034"
+    depends_on:
+      - guardrails
+      - ekstraksi
+
   guardrails:
     <<: *common
     build:
@@ -14,9 +35,6 @@ services:
     env_file: services/guardrails/.env
     environment:
       PORT: "8031"
-      EKSTRAKSI_SERVICE_URL: http://ekstraksi:8030
-      STRUCTURING_SERVICE_URL: http://structuring:8032
-      SCORING_SERVICE_URL: http://scoring:8033
     ports:
       - "127.0.0.1:8031:8031"
 

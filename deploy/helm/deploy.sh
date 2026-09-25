@@ -11,7 +11,7 @@ REGISTRY="${REGISTRY:-asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribr
 IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 TIMEOUT="${TIMEOUT:-10m}"
-ALL_SERVICES=(guardrails ekstraksi structuring scoring)
+ALL_SERVICES=(orchestrator guardrails ekstraksi structuring scoring)
 
 usage() {
   cat <<EOF

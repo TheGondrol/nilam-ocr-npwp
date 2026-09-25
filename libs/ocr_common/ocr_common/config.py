@@ -1,6 +1,6 @@
 """Settings of every service, read from the environment (and `.env` locally) with pydantic-settings.
 
-`BaseServiceSettings` is what all four services share; `PipelineSettings` adds what the three
+`BaseServiceSettings` is what all five services share; `PipelineSettings` adds what the three
 asynchronous stages need. Guards on `ENVIRONMENT` make a deployed service refuse to start with a
 laptop-only configuration (mock backends, auth disabled, localhost addresses).
 """
@@ -41,7 +41,7 @@ class BaseServiceSettings(BaseSettings):
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
     file_url_allowed_hosts: str = ""
     field_confidence_threshold: float = Field(0.5, ge=0, le=1)
-    # The `-test` endpoints (guardrails `/v1/extract-ocr-test`, `/v1/<stage>/jobs-test`): the same pipeline on
+    # The `-test` endpoints (orchestrator `/v1/extract-ocr-test`, `/v1/<stage>/jobs-test`): the same pipeline on
     # the `testing_*` tables, without callbacks or writes to the orchestrator's tables. For the ML team's
     # load tests on dev; off everywhere else, and then the routes do not exist.
     testing_endpoints: bool = False

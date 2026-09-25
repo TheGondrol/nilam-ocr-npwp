@@ -34,3 +34,16 @@ def test_every_gateway_operation_names_the_service_that_owns_it():
         for method, operation in item.items():
             assert operation["servers"], f"{method.upper()} {path} has no servers"
             assert operation["operationId"], f"{method.upper()} {path} has no operationId"
+
+
+def test_the_gateway_calls_only_the_orchestrator_through_the_entry_service():
+    """The guardrails and stage services are internal: the central orchestrator must not be pointed at them."""
+    paths = _builder().build()["paths"]
+    assert {(method, path) for path, item in paths.items() for method in item} == {
+        ("post", "/v1/extract-ocr"),
+        ("get", "/v1/extract-ocr/{request_id}"),
+    }
+    for item in paths.values():
+        for operation in item.values():
+            first = operation["servers"][0]
+            assert first["url"] == "http://nilam-ocr-npwp.{namespace}.svc.cluster.local:8034"

@@ -2,7 +2,7 @@
 Tracker pipeline untuk uji coba lokal. Memerankan ORKESTRASI di sequence
 diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 
-    POST /api/requests               upload dokumen -> guardrails /v1/extract-ocr (menunggu maks. PIPELINE_WAIT_SECONDS)
+    POST /api/requests               upload dokumen -> orchestrator /v1/extract-ocr (tunggu PIPELINE_WAIT_SECONDS)
     POST /v1/callbacks/stage         dipanggil relay ekstraksi / structuring / scoring (ORCHESTRATION_URL)
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
@@ -13,7 +13,7 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 Redis Streams sebagai bus event: tiap request punya stream `ocr:events:<request_id>`.
 Setiap event punya `type`:
     client    upload diterima
-    http      jawaban guardrails /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya
+    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED), `source`: db | callback
     outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n dan jawaban tracker
@@ -62,7 +62,10 @@ def _load_env_file() -> None:
 
 _load_env_file()
 
+# Pintu masuk; langkah GUARDRAILS di UI adalah jawabannya (cek guardrails + menunggu pipeline).
+ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8034")
 SERVICES = {
+    "ORCHESTRATOR": ORCHESTRATOR_URL,
     "GUARDRAILS": os.environ.get("GUARDRAILS_URL", "http://127.0.0.1:8031"),
     "OCR": os.environ.get("EKSTRAKSI_URL", "http://127.0.0.1:8030"),
     "STRUCTURING": os.environ.get("STRUCTURING_URL", "http://127.0.0.1:8032"),
@@ -80,7 +83,7 @@ TARGET = os.environ.get("TRACKER_TARGET", "local")
 POLL = os.environ.get("TRACKER_POLL") == "1"
 POLL_INTERVAL = float(os.environ.get("TRACKER_POLL_INTERVAL", "2"))
 POLL_TIMEOUT = float(os.environ.get("TRACKER_POLL_TIMEOUT", "300"))
-WAIT_SECONDS = float(os.environ.get("TRACKER_WAIT_SECONDS", "15"))  # = PIPELINE_WAIT_SECONDS guardrails, untuk label
+WAIT_SECONDS = float(os.environ.get("TRACKER_WAIT_SECONDS", "15"))  # = PIPELINE_WAIT_SECONDS orchestrator, untuk label
 DB_URL = os.environ.get("TRACKER_DATABASE_URL") or (
     f"postgresql://postgres:changeme@127.0.0.1:{os.environ.get('POSTGRES_HOST_PORT', '5433')}/bribrain_ocr_nilam"
     if TARGET == "local"
@@ -207,7 +210,7 @@ def _outbox_view(row: Any) -> dict[str, Any]:
 
 
 async def guardrails_answered(request_id: str) -> bool:
-    """True kalau jawaban HTTP guardrails untuk request ini sudah dicatat di ringkasan."""
+    """True kalau jawaban HTTP orchestrator untuk request ini sudah dicatat di ringkasan."""
     summary = json.loads(await redis.hget("ocr:requests", request_id) or "{}")
     return summary.get("http_status") is not None
 
@@ -275,7 +278,7 @@ async def watch_db(request_id: str) -> None:
         finished = statuses.get("SCORING") == "DONE" or "FAILED" in statuses.values()
         pending = [v for v in current.values() if not v["failed_at"]]
         dead = [v for v in current.values() if v["failed_at"]]
-        # Jalur 200: guardrails baru menjawab setelah pipeline selesai, jadi jawabannya bisa tiba
+        # Jalur 200: orchestrator baru menjawab setelah pipeline selesai, jadi jawabannya bisa tiba
         # sepersekian detik setelah scoring DONE. END menutup SSE; tunda sampai jawaban itu tercatat
         # supaya event GUARDRAILS DONE tidak tertulis di belakang END dan kartu tidak tersangkut PENDING.
         if finished and not pending and await guardrails_answered(request_id):
@@ -337,7 +340,7 @@ async def submit(
     filename = file.filename or "upload"
     if slow_seconds > 0:
         # Hook lokal di ekstraksi (ENVIRONMENT=local): tahap OCR ditunda sebelum bekerja,
-        # supaya pipeline melewati PIPELINE_WAIT_SECONDS dan guardrails menjawab 202.
+        # supaya pipeline melewati PIPELINE_WAIT_SECONDS dan orchestrator menjawab 202.
         filename = f"delay{slow_seconds}s-{filename}"
     content_type = file.content_type or "image/jpeg"
     await emit(
@@ -357,15 +360,15 @@ async def submit(
     started = time.perf_counter()
     try:
         r = await http.post(
-            f"{SERVICES['GUARDRAILS']}/v1/extract-ocr",
+            f"{ORCHESTRATOR_URL}/v1/extract-ocr",
             data={"request_id": request_id, "document_type": document_type},
             files={"file": (filename, content, content_type)},
         )
         body = r.json()
     except (httpx.HTTPError, ValueError) as exc:
-        await emit(request_id, "GUARDRAILS", "FAILED", error_message=f"guardrails unreachable: {exc}")
+        await emit(request_id, "GUARDRAILS", "FAILED", error_message=f"orchestrator unreachable: {exc}")
         await emit(request_id, "PIPELINE", "END", type="pipeline")
-        raise HTTPException(status_code=503, detail="guardrails service unavailable") from exc
+        raise HTTPException(status_code=503, detail="orchestrator service unavailable") from exc
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     await emit(
         request_id,
@@ -390,7 +393,7 @@ async def submit(
         return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
     await emit(request_id, "GUARDRAILS", "DONE", elapsed_ms=elapsed_ms)
     if pool is None:
-        await emit(request_id, "OCR", "PROCESSING", source="guardrails")
+        await emit(request_id, "OCR", "PROCESSING", source="orchestrator")
     if POLL:
         asyncio.create_task(poll_stages(request_id))
     return {

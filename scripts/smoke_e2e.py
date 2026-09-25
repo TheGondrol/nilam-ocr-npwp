@@ -27,6 +27,7 @@ def _key_from_env_file() -> str:
 
 
 URLS = {
+    "orchestrator": os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8034"),
     "guardrails": os.environ.get("GUARDRAILS_URL", "http://127.0.0.1:8031"),
     "ekstraksi": os.environ.get("EKSTRAKSI_URL", "http://127.0.0.1:8030"),
     "structuring": os.environ.get("STRUCTURING_URL", "http://127.0.0.1:8032"),
@@ -85,11 +86,15 @@ def _image() -> bytes:
 
 def _submit(client: httpx.Client, request_id: str, filename: str, content: bytes) -> httpx.Response:
     return client.post(
-        f"{URLS['guardrails']}/v1/extract-ocr",
+        f"{URLS['orchestrator']}/v1/extract-ocr",
         headers=HEADERS,
         data={"request_id": request_id, "document_type": "npwp"},
         files={"file": (filename, content, "image/jpeg")},
     )
+
+
+def _status(client: httpx.Client, request_id: str) -> httpx.Response:
+    return client.get(f"{URLS['orchestrator']}/v1/extract-ocr/{request_id}", headers=HEADERS)
 
 
 def _poll(client: httpx.Client, request_id: str) -> dict[str, dict]:
@@ -118,7 +123,7 @@ def async_pipeline(client: httpx.Client) -> bool:
     elapsed = time.monotonic() - started
     body = submitted.json()
     print(
-        f"guardrails extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s job_status={body.get('job_status')} "
+        f"orchestrator extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s job_status={body.get('job_status')} "
         f"guardrails={body.get('guardrails')} errors={body.get('errors')} message={body.get('message')!r}"
     )
     if submitted.status_code not in (200, 202):
@@ -145,6 +150,15 @@ def async_pipeline(client: httpx.Client) -> bool:
             print(f"  {name:<12} {field['value']!r:<35} conf={field['confidence']}")
         score = jobs["scoring"]["result"]
         print(f"  npwp_confidence = {score['npwp_confidence']}  name_confidence = {score['name_confidence']}")
+
+    status = _status(client, request_id)
+    read_back = status.json()
+    print(
+        f"GET status -> {status.status_code} job_status={read_back.get('job_status')} params={read_back.get('params')}"
+    )
+    ok = ok and status.status_code == 200 and read_back.get("job_status") == "completed"
+    if finished_in_time:
+        ok = ok and read_back["data"] == body["data"]
 
     again = _submit(client, request_id, "npwp.jpg", image)
     repeated = again.json()
@@ -196,7 +210,7 @@ def latency(client: httpx.Client, runs: int) -> bool:
         totals.append(answered if response.status_code == 200 else time.monotonic() - started)
         for stage in STAGES:
             per_stage[stage].append(_stage_seconds(jobs[stage]))
-    print("  HTTP guardrails:", ", ".join(f"{code} x{count}" for code, count in sorted(codes.items())))
+    print("  HTTP orchestrator:", ", ".join(f"{code} x{count}" for code, count in sorted(codes.items())))
     if totals:
         print(
             f"  end-to-end (klien): p50={_percentile(totals, 0.5):.2f}s  p95={_percentile(totals, 0.95):.2f}s  "
@@ -211,12 +225,20 @@ def latency(client: httpx.Client, runs: int) -> bool:
 
 
 def guardrails_reject(client: httpx.Client) -> bool:
+    """Butuh GUARDRAILS_BACKEND=mock: model mock menolak nama file yang mengandung `notnpwp`."""
     print("== guardrails menolak ==")
-    response = _submit(client, f"REQ_{uuid.uuid4()}", "notnpwp.jpg", _image())
+    request_id = f"REQ_{uuid.uuid4()}"
+    response = _submit(client, request_id, "notnpwp.jpg", _image())
     body = response.json()
     print(f"notnpwp.jpg -> {response.status_code} errors={body.get('errors')} guardrails={body.get('guardrails')}")
     print(f"  message={body.get('message')!r}")
-    return response.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR"
+    status = _status(client, request_id)
+    print(f"  GET status -> {status.status_code} (tidak ada tahap yang jalan)")
+    return (
+        response.status_code == 400
+        and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR"
+        and status.status_code == 404
+    )
 
 
 def main() -> int:

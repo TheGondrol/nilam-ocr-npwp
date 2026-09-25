@@ -41,10 +41,10 @@ externalSecret:
     # Kosong = tidak diambil dari Secret Manager.
     callbackKey: ""
 
-# Callback tahap ke Orkestrasi. Kosong = tidak ada callback yang dikirim maupun diantrekan;
-# hasil sampai ke Orkestrasi lewat tabelnya sendiri (ORCHESTRATION_OUTCOME_TABLE dan/atau
-# ORCHESTRATION_API_EVENTS_TABLE di commonEnv) dan GET /v1/<tahap>/jobs/{request_id}.
-# Service menolak start kalau semuanya kosong.
+# Callback tahap ke Orkestrasi pusat, dikirim oleh ketiga tahap pipeline (bukan oleh orchestrator).
+# Kosong = tidak ada callback yang dikirim maupun diantrekan; hasil sampai ke Orkestrasi lewat tabelnya
+# sendiri (ORCHESTRATION_OUTCOME_TABLE dan/atau ORCHESTRATION_API_EVENTS_TABLE di commonEnv) dan
+# GET /v1/extract-ocr/{request_id} di orchestrator. Tahap pipeline menolak start kalau semuanya kosong.
 orchestration:
   url: ""
   callbackPath: /v1/callbacks/stage
@@ -58,25 +58,57 @@ commonEnv:
   # Host yang boleh dipakai file_url (presigned MinIO), dipisah koma; ".example.internal" = semua subdomain.
   # Kosong = hanya host yang resolve ke alamat publik, jadi MinIO di jaringan internal ditolak: isi sebelum deploy.
   FILE_URL_ALLOWED_HOSTS: ""
-  # Endpoint -test untuk load test tim ML (guardrails /v1/extract-ocr-test, /v1/<tahap>/jobs-test): pipeline
+  # Endpoint -test untuk load test tim ML (orchestrator /v1/extract-ocr-test, /v1/<tahap>/jobs-test): pipeline
   # yang sama di tabel testing_*, tanpa callback dan tanpa menulis ke tabel Orkestrasi. Hanya untuk dev.
   TESTING_ENDPOINTS: "false"
 
 # Tiap service = satu Deployment + satu Service `<release>-<nama>` + satu ConfigMap.
-#   entrypoint : dipanggil dari luar release (Orkestrasi). Ikut di Service gabungan `<release>`
-#                dan NetworkPolicy-nya menerima namespace di networkPolicy.clientNamespaces.
+#   entrypoint : dipanggil dari luar release (Orkestrasi pusat). Ikut di Service gabungan `<release>`
+#                dan NetworkPolicy-nya menerima namespace di networkPolicy.clientNamespaces. Hanya
+#                orchestrator; yang lain internal.
 #   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
 #   upstreams  : service lain yang dipanggil; chart mengisi <NAMA>_SERVICE_URL dan NetworkPolicy dari sini.
+# Nama service dipakai sebagai nama port Kubernetes: maksimal 15 karakter, huruf kecil/angka, tanpa `-`.
 services:
+  # Pintu masuk tunggal: POST /v1/extract-ocr (cek guardrails, hand-off ke ekstraksi, tunggu pipeline)
+  # dan GET /v1/extract-ocr/{request_id}. Stateless: tanpa DB, tanpa callback.
+  orchestrator:
+    enabled: true
+    image:
+      repository: ms-bribrain-nilam-ocr-npwp-orchestrator
+      tag: ""
+    port: 8034
+    entrypoint: true
+    pipeline: false
+    upstreams: [guardrails, ekstraksi, structuring, scoring]
+    replicaCount: 2
+    startupFailureThreshold: 15
+    # Satu POST bisa memakan cek guardrails (GUARDRAILS_TIMEOUT_SECONDS) + tunggu pipeline + hand-off;
+    # shutdown menunggu request yang sedang ditahan selesai.
+    terminationGracePeriodSeconds: 60
+    env:
+      # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
+      PIPELINE_WAIT_SECONDS: "15"
+      GUARDRAILS_TIMEOUT_SECONDS: "20"
+    # Tiap request menahan dokumennya (maks. MAX_UPLOAD_BYTES, 2,5 MB) selama menunggu pipeline.
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  # Model guardrails, internal: hanya orchestrator yang memanggil POST /v1/guardrails/check.
   guardrails:
     enabled: true
     image:
       repository: ms-bribrain-nilam-ocr-npwp-guardrails
       tag: ""
     port: 8031
-    entrypoint: true
+    entrypoint: false
     pipeline: false
-    upstreams: [ekstraksi, structuring, scoring]
+    upstreams: []
     replicaCount: 1
     # Satu-satunya service CPU-bound (torch). Nyalakan di produksi; replicaCount diabaikan saat aktif.
     autoscaling:
@@ -92,8 +124,6 @@ services:
       GUARDRAILS_DEVICE: cpu
       # Samakan dengan limits.cpu; tanpa ini torch membuat thread sebanyak core node.
       GUARDRAILS_TORCH_THREADS: "2"
-      # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
-      PIPELINE_WAIT_SECONDS: "15"
     resources:
       requests:
         cpu: "1"
@@ -108,7 +138,7 @@ services:
       repository: ms-bribrain-nilam-ocr-npwp-ekstraksi
       tag: ""
     port: 8030
-    entrypoint: true
+    entrypoint: false
     pipeline: true
     upstreams: [structuring]
     replicaCount: 1
@@ -175,15 +205,15 @@ services:
 service:
   type: ClusterIP
   annotations: {}
-  # Service gabungan bernama `<release>` yang membuka port semua service ber-entrypoint.
-  # Ini alamat yang dipublikasikan ke Orkestrasi (integration.md); internal pipeline memakai
-  # Service per komponen.
+  # Service gabungan bernama `<release>` yang membuka port semua service ber-entrypoint (hanya
+  # orchestrator, 8034). Ini alamat yang dipublikasikan ke Orkestrasi pusat (integration.md); internal
+  # pipeline memakai Service per komponen.
   entrypoint:
     enabled: true
 
 # Ingress default-deny untuk semua pod release; tiap service hanya menerima dari pemanggilnya
-# (dihitung dari upstreams). Service ber-entrypoint juga menerima dari clientNamespaces dan dari
-# semua pod release (callback mode uji coba). Egress belum dibatasi. Cluster tanpa enforcement
+# (dihitung dari upstreams). Service ber-entrypoint menerima dari clientNamespaces dan dari semua
+# pod release. Egress belum dibatasi. Cluster tanpa enforcement
 # (GKE tanpa Dataplane V2 / Calico) mengabaikan policy ini diam-diam.
 networkPolicy:
   enabled: true

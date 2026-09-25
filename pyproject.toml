@@ -1,7 +1,7 @@
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-src = ["libs/ocr_common", "services/guardrails", "services/ekstraksi", "services/structuring", "services/scoring"]
+src = ["libs/ocr_common", "services/orchestrator", "services/guardrails", "services/ekstraksi", "services/structuring", "services/scoring"]
 extend-exclude = ["services/*/app/vendor"]
 
 [tool.ruff.lint]

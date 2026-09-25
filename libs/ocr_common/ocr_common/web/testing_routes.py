@@ -28,7 +28,7 @@ def build_testing_router(
     """A router with the twin of each route of `live` whose path is a key of `paths`, at the path it maps
     to. Every handler parameter named in `dependencies` gets `Depends(<the given one>)` as its source: a
     swapped dependency (`service=get_testing_job_service`), or a value made here instead of sent by the
-    caller (guardrails' `request_id`). `note` is added to the twins' description, after `TESTING_NOTE`.
+    caller (the orchestrator's `request_id`). `note` is added to the twins' description, after `TESTING_NOTE`.
     Raises when a path is not a route of `live`, so a renamed endpoint cannot lose its twin."""
     router = APIRouter(tags=[TESTING_TAG], dependencies=list(live.dependencies))
     routes = {route.path: route for route in live.routes if isinstance(route, APIRoute)}

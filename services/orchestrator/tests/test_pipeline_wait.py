@@ -1,32 +1,25 @@
-import io
 import time
 
 import httpx
-from PIL import Image
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
 
 from app.clients.ekstraksi import EkstraksiJobClient
+from app.clients.guardrails import GuardrailsClient
 from app.clients.stages import StageStatusClient
 from app.config import get_settings
-from app.dependencies import get_guardrails_service
 from app.main import app
-from app.services.job_service import GuardrailsJobService
+from app.services.extract_service import ExtractOcrService
 from app.services.pipeline_waiter import STATUS_REJECTED, PipelineWaiter, WaitOutcome
+from tests.conftest import ACCEPTED_REPORT, JPEG
 
 RID = "REQ_wait"
 
 
-def _jpeg() -> bytes:
-    buffer = io.BytesIO()
-    Image.new("RGB", (200, 100), "white").save(buffer, format="JPEG")
-    return buffer.getvalue()
-
-
 def _submit(client, auth, filename="npwp.jpg"):
     return client.post(
-        "/v1/extract-ocr", headers=auth, data={"request_id": RID}, files={"file": (filename, _jpeg(), "image/jpeg")}
+        "/v1/extract-ocr", headers=auth, data={"request_id": RID}, files={"file": (filename, JPEG, "image/jpeg")}
     )
 
 
@@ -133,11 +126,18 @@ async def test_the_wait_is_counted_from_the_arrival_of_the_request(stub_waiter):
             )
         ),
     )
-    service = GuardrailsJobService(
-        get_guardrails_service(), EkstraksiJobClient(remote, attempts=1, delay=0), stub_waiter, wait_seconds=15
+    guardrails = RemoteModelClient(
+        "http://guardrails:8031",
+        5.0,
+        name="guardrails service",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"data": ACCEPTED_REPORT})),
+    )
+    settings = get_settings().model_copy(update={"pipeline_wait_seconds": 15})
+    service = ExtractOcrService(
+        GuardrailsClient(guardrails), EkstraksiJobClient(remote, attempts=1, delay=0), stub_waiter, settings
     )
 
-    await service.submit(RID, "npwp", "npwp.jpg", "image/jpeg", _jpeg(), received_at=time.monotonic() - 10)
+    await service.submit(RID, "npwp", "npwp.jpg", "image/jpeg", JPEG, received_at=time.monotonic() - 10)
 
     [(_, timeout)] = stub_waiter.calls
     assert 4 < timeout <= 5

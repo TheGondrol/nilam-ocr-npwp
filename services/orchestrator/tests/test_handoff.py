@@ -1,24 +1,17 @@
-import io
 import json
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
-from PIL import Image
 
 from ocr_common.clients.remote import RemoteModelClient
 
 from app.clients.ekstraksi import EkstraksiJobClient
 from app.dependencies import get_ekstraksi_client
 from app.main import app
+from tests.conftest import JPEG
 
-RID = "REQ_guardrails_jobs"
-
-
-def _jpeg() -> bytes:
-    buffer = io.BytesIO()
-    Image.new("RGB", (200, 100), "white").save(buffer, format="JPEG")
-    return buffer.getvalue()
+RID = "REQ_orchestrator_jobs"
 
 
 def _accepted(request: httpx.Request) -> httpx.Response:
@@ -72,7 +65,7 @@ def _submit(client, auth, filename="npwp.jpg"):
         "/v1/extract-ocr",
         headers=auth,
         data={"request_id": RID, "document_type": "npwp"},
-        files={"file": (filename, _jpeg(), "image/jpeg")},
+        files={"file": (filename, JPEG, "image/jpeg")},
     )
 
 
@@ -113,7 +106,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, ekstraksi):
     assert guardrails["passed"] is True
     assert guardrails["document"]["verdict"] == "accepted"
     assert "job" not in guardrails
-    assert file_bytes == _jpeg()
+    assert file_bytes == JPEG
 
 
 def test_rejected_document_stops_here(client, auth, ekstraksi):
@@ -160,27 +153,15 @@ def test_ekstraksi_server_error_is_retried(client, auth, ekstraksi):
     assert len(handler.requests) == 2
 
 
-def test_check_endpoint_judges_only(client, auth, stub_ekstraksi, stub_waiter):
-    response = client.post(
-        "/v1/guardrails/check",
-        headers=auth,
-        data={"request_id": RID},
-        files={"file": ("npwp.jpg", _jpeg(), "image/jpeg")},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["passed"] is True
-    assert stub_ekstraksi.submitted == []
-    assert stub_waiter.calls == []
-
-
-def test_a_document_sent_as_file_url_is_handed_over_as_the_same_url(client, auth, ekstraksi, monkeypatch):
+def test_a_document_sent_as_file_url_is_judged_here_and_handed_over_as_the_same_url(
+    client, auth, ekstraksi, stub_guardrails, monkeypatch
+):
     handler = ekstraksi(_accepted)
     url = "http://minio.local/bucket/npwp.jpg?X-Amz-Signature=abc"
 
     async def fake_fetch(fetched, *, limit, timeout=10.0, policy):
         assert fetched == url
-        return _jpeg(), "npwp.jpg", "image/jpeg"
+        return JPEG, "npwp.jpg", "image/jpeg"
 
     monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
     response = client.post(
@@ -195,3 +176,4 @@ def test_a_document_sent_as_file_url_is_handed_over_as_the_same_url(client, auth
     assert form["request_id"] == RID
     assert "guardrails" in form
     assert form["file_url"] == url
+    assert stub_guardrails.checked == [{"request_id": RID, "filename": "npwp.jpg", "content_type": "image/jpeg"}]

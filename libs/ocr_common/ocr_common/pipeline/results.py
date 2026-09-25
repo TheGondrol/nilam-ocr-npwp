@@ -6,7 +6,7 @@ of the shared database instead. The payload then only carries `request_id`, `doc
 guardrails report.
 
 The SQLAlchemy implementation lives in `results_sql` so that this module, which the package exports,
-stays importable by a service without a database (guardrails)."""
+stays importable by a service without a database (the orchestrator)."""
 
 from typing import Any, Protocol
 

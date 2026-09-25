@@ -54,11 +54,12 @@ if [[ -f "$HERE/.env" ]]; then
 fi
 TRACKER_TARGET="${TRACKER_TARGET:-local}"
 
+ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:8034}"
 GUARDRAILS_URL="${GUARDRAILS_URL:-http://127.0.0.1:8031}"
 EKSTRAKSI_URL="${EKSTRAKSI_URL:-http://127.0.0.1:8030}"
 STRUCTURING_URL="${STRUCTURING_URL:-http://127.0.0.1:8032}"
 SCORING_URL="${SCORING_URL:-http://127.0.0.1:8033}"
-export GUARDRAILS_URL EKSTRAKSI_URL STRUCTURING_URL SCORING_URL
+export ORCHESTRATOR_URL GUARDRAILS_URL EKSTRAKSI_URL STRUCTURING_URL SCORING_URL
 
 if [[ "${1:-}" == "--stack" && "$TRACKER_TARGET" == "gke" ]]; then
   die "--stack hanya untuk mode lokal; komentari blok GKE di .env dulu"
@@ -90,9 +91,9 @@ if [[ "$TRACKER_TARGET" == "gke" ]]; then
     kubectl -n "$NS" port-forward "$GKE_WORKLOAD" 9030:8030 9031:8031 9032:8032 9033:8033 >>"$HERE/.port-forward.log" 2>&1 &
     PF_PIDS+=($!)
   else
-    # Chart 0.2.0: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
-    say "target GKE: $NS/svc/$RELEASE-{ekstraksi,guardrails,structuring,scoring} -> 127.0.0.1:9030-9033"
-    for pair in "ekstraksi|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033"; do
+    # Chart 0.2.0+: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
+    say "target GKE: $NS/svc/$RELEASE-{ekstraksi,guardrails,structuring,scoring,orchestrator} -> 127.0.0.1:9030-9034"
+    for pair in "ekstraksi|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033" "orchestrator|9034:8034"; do
       svc="${pair%%|*}"; ports="${pair##*|}"
       kubectl -n "$NS" get "svc/$RELEASE-$svc" >/dev/null 2>&1 \
         || die "svc/$RELEASE-$svc tidak ada di $NS. Release masih chart lama? Set GKE_WORKLOAD=deploy/$RELEASE di .env"
@@ -102,19 +103,19 @@ if [[ "$TRACKER_TARGET" == "gke" ]]; then
   fi
 
   for _ in $(seq 1 30); do
-    up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" && break
+    up "$ORCHESTRATOR_URL/health" && up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" && break
     sleep 0.5
   done
-  up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" \
+  up "$ORCHESTRATOR_URL/health" && up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" \
     || die "port-forward tidak siap; lihat $HERE/.port-forward.log"
   say "hasil tiap tahap diambil dengan polling (TRACKER_POLL=${TRACKER_POLL:-0}); callback pod tetap ke Orkestrasi di cluster"
 else
-  say "target lokal: container di 127.0.0.1:803x"
+  say "target lokal: container di 127.0.0.1:8030-8034"
   up "http://127.0.0.1:8070/health" \
     || warn "model OCR (:8070) tidak terjangkau; buka tunnel SSH ke VM (gcloud compute ssh ... -- -L 8070:localhost:8070)"
 fi
 
-for svc in "guardrails|$GUARDRAILS_URL" "ekstraksi|$EKSTRAKSI_URL" "structuring|$STRUCTURING_URL" "scoring|$SCORING_URL"; do
+for svc in "orchestrator|$ORCHESTRATOR_URL" "guardrails|$GUARDRAILS_URL" "ekstraksi|$EKSTRAKSI_URL" "structuring|$STRUCTURING_URL" "scoring|$SCORING_URL"; do
   name="${svc%%|*}"; url="${svc##*|}"
   up "$url/health" || warn "service $name ($url) tidak menjawab; tahap itu akan gagal"
 done

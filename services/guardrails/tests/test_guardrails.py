@@ -153,28 +153,6 @@ def test_health_lists_backend(client):
     assert body["backends"] == {"guardrails": "mock"}
 
 
-def test_extract_ocr_follows_the_orchestrator_contract(client, auth):
-    response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "status_code": 200,
-        "status_desc": "OK",
-        "message": "OCR extraction completed successfully",
-        "data": {
-            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-            "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-        },
-        "errors": None,
-        "request_id": "OCR_1",
-        "document_type": "npwp",
-        "job_status": "completed",
-        "guardrails": 1,
-        "params": None,
-    }
-
-
 def test_check_returns_the_guardrails_report(client, auth):
     response = client.post(
         "/v1/guardrails/check", data={"request_id": "OCR_1"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
@@ -216,52 +194,9 @@ def test_check_mock_scenarios_reject_with_200(client, auth, filename):
     assert data["reason"] == "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"
 
 
-def test_extract_ocr_rejection_is_400_with_guardrails_0(client, auth):
+def test_check_unsupported_content_type_returns_400(client, auth):
     response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_3"}, files=image_upload("notnpwp.jpg", _jpeg()), headers=auth
-    )
-    assert response.status_code == 400
-    assert response.json() == {
-        "status_code": 400,
-        "status_desc": "Bad Request",
-        "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
-        "data": None,
-        "errors": "DOWNSTREAM_VALIDATION_ERROR",
-        "request_id": "OCR_3",
-        "document_type": "npwp",
-        "job_status": "failed",
-        "guardrails": 0,
-        "params": None,
-    }
-
-
-def test_http_request_id_is_required(client, auth):
-    response = client.post("/v1/extract-ocr", files=image_upload("npwp.jpg", _jpeg()), headers=auth)
-    assert response.status_code == 422
-    body = response.json()
-    assert body["errors"] == "VALIDATION_ERROR"
-    assert body["message"] == "body.request_id: Field required"
-
-
-def test_http_file_url_is_fetched_by_service_and_forwarded_as_url(client, auth, monkeypatch, stub_ekstraksi):
-    async def fake_fetch(url, *, limit, timeout=10.0, policy):
-        assert url == "http://minio.local/bucket/npwp.jpg"
-        return _jpeg(), "npwp.jpg", "image/jpeg"
-
-    monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
-    response = client.post(
-        "/v1/extract-ocr",
-        data={"request_id": "OCR_4", "file_url": "http://minio.local/bucket/npwp.jpg"},
-        headers=auth,
-    )
-    assert response.status_code == 200
-    assert response.json()["job_status"] == "completed"
-    assert stub_ekstraksi.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
-
-
-def test_unsupported_content_type_returns_400(client, auth):
-    response = client.post(
-        "/v1/extract-ocr",
+        "/v1/guardrails/check",
         data={"request_id": "OCR_5"},
         files=image_upload(content_type="text/plain"),
         headers=auth,
@@ -270,9 +205,9 @@ def test_unsupported_content_type_returns_400(client, auth):
     assert response.json()["message"].startswith("Unsupported content type")
 
 
-def test_three_page_pdf_returns_400_with_the_ml_message(client, auth):
+def test_check_three_page_pdf_returns_400_with_the_ml_message(client, auth):
     response = client.post(
-        "/v1/extract-ocr",
+        "/v1/guardrails/check",
         data={"request_id": "OCR_8"},
         files=image_upload("scan.pdf", _pdf(3), "application/pdf"),
         headers=auth,
@@ -283,10 +218,10 @@ def test_three_page_pdf_returns_400_with_the_ml_message(client, auth):
     assert body["errors"] == body["message"]
 
 
-def test_oversized_document_returns_413(client, auth, use_classifier):
+def test_check_oversized_document_returns_413(client, auth, use_classifier):
     use_classifier(StubClassifier((0.98, 0.02)), max_upload_bytes=100)
     response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_9"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
+        "/v1/guardrails/check", data={"request_id": "OCR_9"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
     )
     assert response.status_code == 413
     body = response.json()
@@ -294,15 +229,23 @@ def test_oversized_document_returns_413(client, auth, use_classifier):
     assert body["message"].startswith("Ukuran dokumen melebihi batas")
 
 
-def test_unreadable_image_returns_400(client, auth):
+def test_check_unreadable_image_returns_400(client, auth):
     response = client.post(
-        "/v1/extract-ocr", data={"request_id": "OCR_6"}, files=image_upload("x.jpg", b"garbage"), headers=auth
+        "/v1/guardrails/check", data={"request_id": "OCR_6"}, files=image_upload("x.jpg", b"garbage"), headers=auth
     )
     assert response.status_code == 400
     assert response.json()["message"] == "Uploaded file is not a readable image"
 
 
 def test_missing_api_key_returns_401_envelope(client):
-    response = client.post("/v1/extract-ocr", data={"request_id": "OCR_7"}, files=image_upload())
+    response = client.post("/v1/guardrails/check", data={"request_id": "OCR_7"}, files=image_upload())
     assert response.status_code == 401
     assert response.json()["errors"] == "Invalid or missing API key"
+
+
+def test_the_entry_point_is_gone(client, auth):
+    """`POST /v1/extract-ocr` moved to the orchestrator NPWP; guardrails only judges."""
+    response = client.post(
+        "/v1/extract-ocr", data={"request_id": "OCR_10"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
+    )
+    assert response.status_code == 404

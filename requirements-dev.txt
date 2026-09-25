@@ -1,5 +1,6 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 -e libs/ocr_common[db]
+-r services/orchestrator/requirements.txt
 -r services/guardrails/requirements.txt
 -r services/ekstraksi/requirements.txt
 -r services/structuring/requirements.txt

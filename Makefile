@@ -1,5 +1,6 @@
-SERVICES := guardrails ekstraksi structuring scoring
+SERVICES := orchestrator guardrails ekstraksi structuring scoring
 PY ?= python
+PORT_orchestrator := 8034
 PORT_guardrails := 8031
 PORT_ekstraksi := 8030
 PORT_structuring := 8032
@@ -17,6 +18,8 @@ test: test-lib $(SERVICES:%=test-%)
 LOCK_FLAGS ?=
 LOCK := $(PY) -m uv pip compile --generate-hashes --python-version 3.11 --python-platform x86_64-unknown-linux-gnu --custom-compile-command "make lock" $(LOCK_FLAGS)
 lock: $(SERVICES:%=lock-%) lock-db
+lock-orchestrator:
+	$(LOCK) services/orchestrator/requirements.txt libs/ocr_common/pyproject.toml -o services/orchestrator/requirements.lock
 lock-guardrails:
 	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --emit-index-url -o services/guardrails/requirements.lock
 lock-ekstraksi lock-structuring lock-scoring: lock-%:

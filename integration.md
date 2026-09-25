@@ -1,8 +1,13 @@
 # Integrasi service OCR NPWP (nilam) di GKE
 
-Dokumen untuk tim Orkestrasi/Gateway. Isinya dokumentasi keempat service yang sudah
-berjalan di cluster, cara memanggilnya, apa yang dikirim balik, dan satu hal yang kami
-butuhkan dari kalian supaya callback nyambung.
+Dokumen untuk tim Orkestrasi/Gateway pusat. Isinya cara memanggil pipeline OCR NPWP yang
+berjalan di cluster, apa yang dikirim balik, dan apa yang kami butuhkan dari kalian.
+
+**Berubah sejak 24 September 2026: pintu masuknya pindah.** Kalian sekarang hanya memanggil satu
+service, **orchestrator** NPWP di port **8034** (`POST /v1/extract-ocr`, plus `GET` status baru).
+Kontraknya sama persis dengan `POST :8031/v1/extract-ocr` yang lama di guardrails; yang berubah hanya
+port-nya. Guardrails (8031) dan ketiga tahap pipeline sekarang internal: `:8031/v1/extract-ocr` sudah
+tidak ada, dan port 8030/8031 tidak lagi dibuka di Service `nilam-ocr-npwp`.
 
 Semua angka dan contoh respons di dokumen ini diambil dari request sungguhan ke service
 yang sedang berjalan, bukan karangan. Yang belum terbukti ditandai eksplisit.
@@ -11,7 +16,7 @@ yang sedang berjalan, bukan karangan. Yang belum terbukti ditandai eksplisit.
 
 Sudah terbukti jalan di cluster:
 
-- keempat service `/ready` menjawab 200, koneksi database normal
+- guardrails, ekstraksi, structuring, scoring `/ready` menjawab 200, koneksi database normal
 - satu kartu NPWP asli lewat rantai penuh dalam ±6 detik, hasil
   `npwp_confidence` 0.9926 dan `name_confidence` 0.9953
 - job tercatat `DONE` di ketiga tabel tahap
@@ -19,9 +24,10 @@ Sudah terbukti jalan di cluster:
 Belum pernah diuji: **callback ke service kalian**, karena alamatnya belum kami punya.
 Lihat bagian 9.
 
-Baru: pintu masuk tunggal `POST /v1/extract-ocr` di guardrails (bagian 3 dan 4).
-Angka di atas berasal dari alur lama, yaitu guardrails lalu ekstraksi dipanggil
-terpisah; tahap OCR sampai scoring tidak berubah.
+Baru: pintu masuk tunggal `POST /v1/extract-ocr` di orchestrator, port 8034 (bagian 3 dan 4).
+Angka di atas berasal dari alur sebelumnya; tahap OCR sampai scoring tidak berubah. Orchestrator
+sudah diuji lokal (unit test dan rantai lengkap di Docker Compose); di cluster dev baru berlaku
+setelah deploy berikutnya, yang kami kabari bersama waktu kalian pindah ke port 8034.
 
 ## 2. Akses
 
@@ -30,17 +36,15 @@ terpisah; tahap OCR sampai scoring tidak berubah.
 | Cluster | `gc-ddb-dev-gke-cluster-01` |
 | Project | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
 | Namespace | `nilam-ocr-npwp` |
-| Service (ClusterIP) | `nilam-ocr-npwp` (pintu masuk: ekstraksi + guardrails); `nilam-ocr-npwp-<tahap>` per tahap |
+| Service (ClusterIP) | `nilam-ocr-npwp`: pintu masuk, hanya port 8034 (orchestrator) |
 
-Tiap tahap adalah Deployment + Service sendiri (`nilam-ocr-npwp-<tahap>`). Service `nilam-ocr-npwp`
-menggabungkan dua pintu masuk yang kalian panggil: ekstraksi (8030) dan guardrails (8031).
+Satu-satunya alamat yang kalian pakai:
 
-| Tahap | Port | Base URL dari namespace lain |
-|---|---|---|
-| ekstraksi | 8030 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8030` |
-| guardrails | 8031 | `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8031` |
-| structuring | 8032 | `http://nilam-ocr-npwp-structuring.nilam-ocr-npwp.svc.cluster.local:8032` (internal pipeline) |
-| scoring | 8033 | `http://nilam-ocr-npwp-scoring.nilam-ocr-npwp.svc.cluster.local:8033` (internal pipeline) |
+    http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034
+
+Di belakangnya, tiap service punya Deployment + Service sendiri (`nilam-ocr-npwp-<service>`):
+orchestrator (8034), guardrails (8031), ekstraksi (8030), structuring (8032), scoring (8033). Selain
+orchestrator semuanya internal: hanya dipanggil orchestrator atau tahap sebelumnya.
 
 **Autentikasi.** Semua endpoint kecuali `/health` dan `/ready` memerlukan header:
 
@@ -48,26 +52,23 @@ menggabungkan dua pintu masuk yang kalian panggil: ekstraksi (8030) dan guardrai
 
 Nilai itu sementara dan akan diganti sebelum dipakai serius; kami kabari kalau berubah.
 
-**Jaringan.** NetworkPolicy di namespace kami mengizinkan ingress ke ekstraksi dan guardrails
-dari namespace `ocr-dev`; structuring dan scoring hanya menerima dari dalam pipeline. Cluster dev
-belum menegakkan NetworkPolicy, jadi saat ini tidak ada yang terblokir; kalau namespace kalian
-bukan `ocr-dev`, beri tahu kami supaya ditambahkan. Kami belum bisa menguji panggilan dari
-namespace kalian.
+**Jaringan.** NetworkPolicy di namespace kami mengizinkan ingress dari namespace `ocr-dev` hanya ke
+orchestrator; guardrails dan ketiga tahap hanya menerima dari orchestrator dan dari tahap sebelumnya.
+Cluster dev belum menegakkan NetworkPolicy, jadi saat ini tidak ada yang terblokir dan "internal" baru
+berlaku di atas kertas; tetap panggil hanya orchestrator. Kalau namespace kalian bukan `ocr-dev`, beri
+tahu kami supaya ditambahkan. Kami belum bisa menguji panggilan dari namespace kalian.
 
-**Dari laptop** (untuk coba-coba), forward per tahap (tiap tahap pod sendiri):
+**Dari laptop** (untuk coba-coba), cukup forward orchestrator:
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030 &
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-guardrails 8031:8031 &
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-structuring 8032:8032 &
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-scoring 8033:8033 &
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
 
 ## 3. Alur
 
 Hanya **satu panggilan** dari sisi kalian, dan jawabannya mengikuti kontrak `extract-ocr`
-orchestrator. Guardrails menunggu pipeline sampai `PIPELINE_WAIT_SECONDS` (default
-**15 detik**, dihitung sejak request diterima):
+kalian. Orchestrator memeriksa file, meminta guardrails menilainya, lalu menunggu pipeline sampai
+`PIPELINE_WAIT_SECONDS` (default **15 detik**, dihitung sejak request diterima):
 
-    POST :8031/v1/extract-ocr
+    POST :8034/v1/extract-ocr
       file > 2,5 MB              -> 413  message "Ukuran dokumen melebihi batas 2,5 MB, ..." (sebelum model)
       PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
       ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
@@ -112,32 +113,33 @@ default 15 detik: pemeriksaan guardrails dan hand-off ke OCR bisa menambah waktu
 `request_id` dibuat oleh kalian dan menjadi kunci di semua tahap. Bebas formatnya,
 string; contoh yang kami pakai saat uji: `REQ_a0e0fd34ed7a`.
 
-Kalian **tidak perlu** memanggil ekstraksi, structuring, dan scoring sendiri. Ketiganya
-dipanggil berantai oleh service sebelumnya. Dokumentasinya tetap kami sertakan di
-bagian 5 dan 6 supaya jelas apa yang terjadi dan bisa dipakai untuk rekonsiliasi.
+Kalian **tidak** memanggil guardrails, ekstraksi, structuring, dan scoring sendiri (dan sejak
+orchestrator ada, memang tidak bisa dari namespace kalian begitu NetworkPolicy ditegakkan). Keadaan
+sebuah request kapan saja: `GET :8034/v1/extract-ocr/{request_id}` (bagian 4). Bagian 5 dan 6
+menjelaskan apa yang terjadi di dalam, sebagai latar.
 
-## 4. Service guardrails (port 8031): pintu masuk
+## 4. Service orchestrator (port 8034): pintu masuk
 
-Menilai layak atau tidaknya dokumen dengan model guardrails (EfficientNet, di dalam
-container), dan kalau layak memulai pipeline lalu menunggu hasilnya sampai
-`PIPELINE_WAIT_SECONDS`. Guardrails sendiri tidak membuat job dan tidak mengirim callback;
-callback pertama datang dari tahap OCR.
+Memeriksa file, meminta guardrails (model EfficientNet, internal) menilai layak atau tidaknya
+dokumen, dan kalau layak memulai pipeline lalu menunggu hasilnya sampai `PIPELINE_WAIT_SECONDS`.
+Orchestrator sendiri tidak menyimpan apa pun dan tidak mengirim callback; callback datang dari
+tahap-tahap pipeline (bagian 7).
 
 ### POST /v1/extract-ocr — jalankan pipeline
 
 Kirim `request_id` plus dokumen sebagai `file` (multipart), **atau** sebagai `file_url`
 supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
-    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8031/v1/extract-ocr \
+    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034/v1/extract-ocr \
       -H "X-API-Key: changeme" \
       -F "request_id=REQ_001" \
       -F "document_type=npwp" \
       -F 'params={"nik": "3123456711950001", "refno": "PK19039Y8U"}' \
       -F "file=@npwp.jpg"
 
-Path ini sama dengan `extract-ocr` lama, tetapi di **port 8031 (guardrails)**, bukan 8030.
-Bentuk jawabannya mengikuti kontrak `extract-ocr` orchestrator: envelope standar ditambah
-`document_type`, `job_status`, `guardrails`, dan `params`.
+Path, field, dan bentuk jawabannya sama persis dengan `extract-ocr` yang dulu di guardrails port
+8031; hanya port-nya yang berubah ke **8034**. Bentuk jawabannya mengikuti kontrak `extract-ocr`
+kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`, dan `params`.
 
 | Field | Wajib | Keterangan |
 |---|---|---|
@@ -146,10 +148,11 @@ Bentuk jawabannya mengikuti kontrak `extract-ocr` orchestrator: envelope standar
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 
-`file_url` diunduh sekali di panggilan ini lalu diteruskan ke tahap OCR sebagai file,
-jadi presigned URL cukup hidup selama panggilan ini saja. Host-nya harus terdaftar di
-`FILE_URL_ALLOWED_HOSTS` service (atau, kalau itu kosong, resolve ke alamat publik), dan
-redirect tidak diikuti.
+`file_url` diunduh sekali di panggilan ini untuk penilaian guardrails, lalu **URL-nya** (bukan isi
+file) diteruskan ke tahap OCR, yang mengunduhnya lagi, juga saat menjalankan ulang job yang
+ditinggalkan pod yang mati. Presigned URL karena itu harus hidup lebih lama dari lease job
+(`PIPELINE_JOB_LEASE_SECONDS`, 5 menit). Host-nya harus terdaftar di `FILE_URL_ALLOWED_HOSTS`
+service (atau, kalau itu kosong, resolve ke alamat publik), dan redirect tidak diikuti.
 
 Selesai dalam waktu tunggu, **200**:
 
@@ -179,8 +182,8 @@ Selesai dalam waktu tunggu, **200**:
 - Pencocokan nama fuzzy terhadap nama nasabah (`refno`) dilakukan di sisi Orkestrasi, sesuai
   keputusan ML engineer; service ini tidak memakainya.
 
-Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback SCORING, atau
-baca dengan `GET /v1/scoring/jobs/{request_id}`:
+Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback, atau baca dengan
+`GET /v1/extract-ocr/{request_id}` (di bawah):
 
     {"status_code": 202, "status_desc": "Accepted", "message": "OCR job accepted; still processing",
      "data": null, "errors": null, "request_id": "REQ_001", "document_type": "npwp",
@@ -226,7 +229,7 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
-| 503 / 504 | = `message` | tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
+| 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
 tidak menjalankan apa pun dua kali, kecuali percobaan sebelumnya berstatus `FAILED`, atau sudah
@@ -235,22 +238,44 @@ mati di tengah jalan); dalam hal itu dijalankan ulang. Job yang masih jalan saat
 shutdown dilaporkan `FAILED` lewat callback, jadi cukup dikirim ulang. `request_id` yang sudah
 selesai dijawab 200 dengan hasil yang tersimpan.
 
-### POST /v1/guardrails/check — hanya menilai (internal)
+### GET /v1/extract-ocr/{request_id} — keadaan request sekarang
 
-Menjalankan model guardrails tanpa memulai apa pun dan mengembalikan laporan mentahnya
-(`passed`, `reason`, `document`, `pages[]` dengan probabilitas per halaman). Dipakai kontrak
-lama di ekstraksi dan untuk debugging; kalian tidak perlu memanggilnya.
+Kontrak yang sama dengan `POST`, tanpa menunggu: orchestrator membaca status tahap OCR, structuring,
+dan scoring sekali, berurutan. Pakai untuk request yang dijawab 202, misalnya kalau callback-nya
+tidak datang.
+
+    curl http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
+      -H "X-API-Key: changeme"
+
+| Keadaan | HTTP | `job_status` | `errors` |
+|---|---|---|---|
+| selesai | 200 | `completed` + `data` | null |
+| masih berjalan | 202 | `processing` | null |
+| ditolak aturan structuring | 400 | `failed`, `guardrails: 0` | `DOWNSTREAM_VALIDATION_ERROR` |
+| satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
+| tidak dikenal | 404 | – | = `message` |
+
+- `params` selalu `null` di sini (tidak disimpan); `document_type` selalu `npwp`.
+- **404** berarti tidak ada tahap yang punya job untuk `request_id` itu: dokumennya ditolak model
+  guardrails (jawaban 400 di `POST` adalah jawaban finalnya), ditolak sebelum dinilai, atau
+  `POST`-nya masih berjalan di tahap penilaian guardrails.
+- **503 / 504** berarti salah satu tahap tidak bisa dibaca saat itu; coba lagi.
+- **Batasan:** serah terima antar tahap yang gagal permanen (setelah semua retry, atau menjadi dead
+  letter di outbox kami) hanya tercatat di callback `FAILED` dan di tabel kalian; endpoint ini tetap
+  menjawab 202 untuk request itu. Untuk keadaan final, callback dan tabel kalian yang berlaku.
 
 ## 5. Service ekstraksi (port 8030)
 
 Tahap OCR. Backend OCR-nya PaddleOCR yang berjalan di VM terpisah; service ini yang
 memanggilnya.
 
-`POST /v1/ekstraksi/jobs` dipanggil oleh guardrails, bukan oleh kalian. Setelah dijawab
-202, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, callback `OCR`
-dikirim, lalu job diserahkan ke structuring, yang kemudian menyerahkan ke scoring.
+`POST /v1/ekstraksi/jobs` dipanggil oleh orchestrator, bukan oleh kalian. Setelah dijawab
+202, di background: dokumen dibaca, OCR dijalankan, hasil disimpan, lalu job diserahkan ke
+structuring, yang kemudian menyerahkan ke scoring.
 
-### GET /v1/ekstraksi/jobs/{request_id} — status tahap OCR
+### GET /v1/ekstraksi/jobs/{request_id} — status tahap OCR (internal)
+
+Dibaca orchestrator untuk `GET /v1/extract-ocr/{request_id}`; dicantumkan sebagai latar.
 
     {"data": {"request_id": "REQ_001", "stage": "OCR", "status": "DONE",
               "error_message": null, "result": { … hasil OCR mentah … },
@@ -259,24 +284,24 @@ dikirim, lalu job diserahkan ke structuring, yang kemudian menyerahkan ke scorin
 `status` bernilai `PROCESSING`, `DONE`, atau `FAILED`. `404` berarti tahap ini belum
 pernah menerima job dengan `request_id` tersebut.
 
-### POST /v1/ekstraksi/extract — OCR mentah, sinkron
+### POST /v1/ekstraksi/extract — OCR mentah, sinkron (internal)
 
 Menjalankan OCR saja dan langsung mengembalikan hasilnya. Tidak membuat job, tidak
-mengirim callback, tidak menyentuh tahap lain. Berguna untuk debugging.
+mengirim callback, tidak menyentuh tahap lain. Untuk debugging kami.
 
 ## 6. Service structuring (port 8032) dan scoring (port 8033)
 
-Keduanya dipanggil berantai oleh service sebelumnya. Kalian normalnya hanya memakai
-endpoint `GET` di bawah, untuk rekonsiliasi atau debugging.
+Keduanya dipanggil berantai oleh service sebelumnya dan internal; kalian tidak memanggilnya.
 
 | Service | Endpoint | Siapa yang memanggil |
 |---|---|---|
-| ekstraksi | `POST /v1/ekstraksi/jobs` | guardrails, otomatis |
+| guardrails | `POST /v1/guardrails/check` | orchestrator, untuk tiap dokumen |
+| ekstraksi | `POST /v1/ekstraksi/jobs` | orchestrator, otomatis |
 | structuring | `POST /v1/structuring/jobs` | ekstraksi, otomatis |
-| structuring | `GET /v1/structuring/jobs/{request_id}` | kalian, bila perlu |
+| structuring | `GET /v1/structuring/jobs/{request_id}` | orchestrator (status) |
 | structuring | `POST /v1/structuring/structure` | debugging, sinkron |
 | scoring | `POST /v1/scoring/jobs` | structuring, otomatis |
-| scoring | `GET /v1/scoring/jobs/{request_id}` | kalian, bila perlu |
+| scoring | `GET /v1/scoring/jobs/{request_id}` | orchestrator (status) |
 | scoring | `POST /v1/scoring/confidence` | debugging, sinkron |
 
 **structuring** mengubah baris OCR menjadi field bernama memakai aturan regex dan posisi
@@ -325,6 +350,9 @@ seperti di respons `extract-ocr`. Field yang tidak ditemukan: `value` kosong dan
 Probabilitas nama masuk ke `nama` atau `nama_badan`, mana pun yang berisi nama. `guardrails` adalah
 laporan model guardrails untuk dokumen itu.
 
+Callback dikirim oleh tahap-tahap pipeline sendiri (scoring, atau tahap yang berhenti), bukan oleh
+orchestrator; alamat dan key-nya tidak berubah.
+
 Gagal atau ditolak (dikirim oleh tahap yang berhenti):
 
     {
@@ -338,7 +366,8 @@ Gagal atau ditolak (dikirim oleh tahap yang berhenti):
 
 `error_code` bernilai `DOWNSTREAM_VALIDATION_ERROR` kalau dokumen ditolak aturan structuring, atau
 `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` kalau tahapnya gagal. Dokumen yang ditolak
-model guardrails tidak mendapat callback, karena sudah dijawab 400 langsung di `extract-ocr`.
+model guardrails tidak mendapat callback, karena sudah dijawab 400 langsung di `extract-ocr`
+orchestrator.
 Jawaban 5xx dan timeout dikirim ulang (3 kali tanpa outbox, seperti di dev sekarang; sampai 24 jam
 dengan `PIPELINE_OUTBOX`), 4xx tidak dikirim ulang.
 
@@ -361,8 +390,8 @@ Body untuk OCR dan STRUCTURING:
 
 Dua hal yang paling sering disalahpahami:
 
-1. **`result` selalu null untuk OCR dan STRUCTURING.** Kalau butuh hasil antaranya,
-   ambil sendiri lewat `GET /v1/<tahap>/jobs/{request_id}`.
+1. **`result` selalu null untuk OCR dan STRUCTURING.** Hasil antara tidak dibuka ke luar;
+   keadaan request dibaca lewat `GET /v1/extract-ocr/{request_id}` di orchestrator.
 2. **Hanya callback SCORING yang membawa hasil akhir.**
 
 Body callback SCORING saat sukses:
@@ -404,15 +433,12 @@ Endpoint callback kalian cukup menjawab 2xx. Isi jawabannya tidak kami baca.
 
 ## 8. Rekonsiliasi kalau callback hilang
 
-    GET :8030/v1/ekstraksi/jobs/{request_id}
-    GET :8032/v1/structuring/jobs/{request_id}
-    GET :8033/v1/scoring/jobs/{request_id}
+    GET :8034/v1/extract-ocr/{request_id}
 
-Masing-masing mengembalikan `status`, `error_message`, dan `result` tahap itu bila sudah
-`DONE`. `404` berarti tahap tersebut belum menerima job.
-
-Cara ini sudah kami pakai dan terbukti jalan: saat menguji dari laptop, kami menarik
-status tiap tahap dengan endpoint ini karena pod tidak bisa memanggil balik laptop.
+Jawabannya kontrak `extract-ocr` yang sama dengan `POST` (bagian 4): 200 dengan `data` kalau
+sudah selesai, 202 kalau masih berjalan, 400/422 kalau berhenti, 404 kalau tidak ada tahap yang
+pernah menerima `request_id` itu. Endpoint status per tahap (`GET /v1/<tahap>/jobs/{request_id}`)
+yang dulu kami sebut di sini sekarang internal; orchestrator yang membacanya untuk kalian.
 
 ## 9. Yang kami butuhkan dari kalian
 
@@ -455,8 +481,8 @@ penjelasan yang aman untuk di-log.
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |
 
-Guardrails adalah pengecualian: dokumen ditolak tetap dijawab 200, penolakannya ada di
-`data.passed`.
+`extract-ocr` menambah `document_type`, `job_status`, `guardrails`, dan `params` ke amplop ini
+(bagian 4).
 
 ## 11. Kontrak lama (sinkron): sudah dihapus
 
@@ -467,8 +493,9 @@ dihapus:
     POST /v1/extract-ocr                  (versi ekstraksi, port 8030)
     GET  /v1/get-ocr-result/{request_id}
 
-Pakai `POST /v1/extract-ocr` di service guardrails (port 8031, bagian 4). Status tiap
-tahap bisa dibaca di `GET /v1/<tahap>/jobs/{request_id}` (bagian 8).
+Sejak orchestrator ada (24 September 2026), `POST /v1/extract-ocr` di guardrails (port 8031)
+juga sudah dihapus. Pakai `POST /v1/extract-ocr` di orchestrator (port 8034, bagian 4), dan
+`GET /v1/extract-ocr/{request_id}` untuk keadaan sebuah request (bagian 8).
 
 ## 12. Database
 
@@ -483,18 +510,19 @@ permintaan supaya seragam.
 | `scoring_jobs`, `scoring_results` | confidence akhir |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
-di callback dan endpoint status. Kami cantumkan supaya jelas tabel mana milik kami, dan
+di callback dan di `GET /v1/extract-ocr/{request_id}`. Kami cantumkan supaya jelas tabel mana milik kami, dan
 supaya kalian tahu tabel `orchestration_*` serta `auth_*` milik kalian tidak kami sentuh.
 
 ## 13. Spesifikasi lengkap
 
-`api/gateway.openapi.yaml` di repo ini adalah spec OpenAPI gabungan keempat service,
-lengkap dengan skema, contoh, dan webhook `stageCallback`. Itu sumber kebenaran paling
-detail; dokumen ini ringkasannya.
+`api/gateway.openapi.yaml` di repo ini adalah spec OpenAPI yang berisi hanya yang kalian
+pakai: `POST` dan `GET /v1/extract-ocr` di orchestrator, lengkap dengan skema dan contoh, plus
+webhook `stageCallback` (format callback per tahap; format `result` yang dipakai di dev ada di
+bagian 7). Itu sumber kebenaran paling detail; dokumen ini ringkasannya.
 
-Swagger UI tiap service juga hidup di `/docs`:
+Swagger UI orchestrator juga hidup di `/docs`:
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030
-    # buka http://127.0.0.1:8030/docs
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+    # buka http://127.0.0.1:8034/docs
 
 Spec per service ada di `services/<nama>/openapi.yaml`.

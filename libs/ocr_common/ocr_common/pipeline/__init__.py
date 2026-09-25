@@ -15,7 +15,7 @@ Modules:
   factory         build_* helpers that wire all of the above from settings
   tables/database SQLAlchemy tables and engine (need the `db` extra)
 
-Nothing imported here may import SQLAlchemy at module level: guardrails uses this package without the
+Nothing imported here may import SQLAlchemy at module level: the orchestrator uses this package without the
 `db` extra. The SQL implementations (*_sql modules, database, tables) are imported lazily by the
 factory; tests/test_imports.py enforces it.
 """

@@ -1,6 +1,6 @@
 # tools/tracker — pelacak pipeline dan pola outbox (uji coba lokal, extra)
 
-UI React + backend kecil yang memerankan Orkestrasi: upload foto -> guardrails
+UI React + backend kecil yang memerankan Orkestrasi pusat: upload foto -> orchestrator
 `/v1/extract-ocr` (menunggu maks. `PIPELINE_WAIT_SECONDS`) -> tiap tahap, tiap baris
 `pipeline_outbox`, dan tiap callback tampil live di browser, dengan timeline `t+…`.
 Event lewat Redis Streams (`ocr:events:<request_id>`), UI menerimanya lewat SSE.
@@ -10,7 +10,7 @@ Ikut repo sebagai alat uji coba, bukan bagian dari yang di-deploy; `.env`-nya di
 
 Untuk satu request, dari kiri ke kanan di layar:
 
-1. **Jawaban guardrails**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
+1. **Jawaban orchestrator**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
    202 `processing` (batas tunggu habis, hasil menyusul lewat callback), 422 (tahap gagal),
    400 (ditolak guardrails), plus lamanya dibanding batas tunggu.
 2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `<tahap>_jobs` DONE,
@@ -28,8 +28,8 @@ dan dua simulasi:
 
 | Simulasi | Cara kerja | Yang terlihat |
 |---|---|---|
-| **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; ekstraksi menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): guardrails menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
-| **Callback orkestrasi mati (503)** | tracker menjawab 503 untuk setiap callback yang datang | baris callback jadi RETRY dengan backoff (0,5 dtk ×2 … maks 5 menit), attempt bertambah, **handoff tetap terkirim dan tahap berikutnya tetap jalan**; guardrails tetap 200 kalau pipeline cepat. Kembalikan ke *normal*: retry berikutnya 200, baris dihapus |
+| **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; ekstraksi menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): orchestrator menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
+| **Callback orkestrasi mati (503)** | tracker menjawab 503 untuk setiap callback yang datang | baris callback jadi RETRY dengan backoff (0,5 dtk ×2 … maks 5 menit), attempt bertambah, **handoff tetap terkirim dan tahap berikutnya tetap jalan**; orchestrator tetap 200 kalau pipeline cepat. Kembalikan ke *normal*: retry berikutnya 200, baris dihapus |
 | **Callback orkestrasi menolak (422)** | tracker menjawab 422 | baris jadi DEAD setelah satu attempt, tetap ada di tabel, backlog service menunjukkan `dead_letters`; tombol *Lepaskan* mengirimnya lagi |
 
 Urutan yang enak untuk presentasi: (1) kirim tanpa simulasi -> 200 dan semua baris outbox
@@ -48,6 +48,7 @@ komentari **seluruh** blok itu = kembali ke stack lokal.
 
     # ── GKE: gc-ddb-dev-gke-cluster-01 / namespace nilam-ocr-npwp ──
     TRACKER_TARGET=gke
+    ORCHESTRATOR_URL=http://127.0.0.1:9034
     GUARDRAILS_URL=http://127.0.0.1:9031
     ...
 
@@ -55,7 +56,7 @@ Yang berubah otomatis mengikuti saklar itu:
 
 | | GKE | lokal |
 |---|---|---|
-| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service, chart 0.2.0) di 9030-9033; release chart lama satu pod: set `GKE_WORKLOAD=deploy/nilam-ocr-npwp` | container di 127.0.0.1:803x |
+| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service, chart 0.2.0+) di 9030-9034; release chart lama satu pod: set `GKE_WORKLOAD=deploy/nilam-ocr-npwp` | container di 127.0.0.1:8030-8034 |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
 | baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5433}` |
@@ -120,9 +121,9 @@ Menu **Load testing** menjalankan [../load-tester](../load-tester) (k6 di Docker
 jawaban pintu masuk (200 selesai di dalam batas tunggu, 202 hasil menyusul, 4xx, 5xx, timeout)
 serta waktu end-to-end dari submit sampai callback SCORING DONE. Request uji berprefiks `LT_` dan
 tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NETWORK
-(ocr_default), K6_TARGET (http://guardrails:8031), K6_TRACKER (http://host.docker.internal:PORT),
+(ocr_default), K6_TARGET (http://orchestrator:8034), K6_TRACKER (http://host.docker.internal:PORT),
 K6_API_KEY, LOAD_TESTER_DIR.
 
-Env backend: TRACKER_TARGET, GUARDRAILS_URL, EKSTRAKSI_URL, STRUCTURING_URL,
-SCORING_URL (default 127.0.0.1:803x), TRACKER_POLL, REDIS_URL, API_KEY, PORT,
+Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EKSTRAKSI_URL, STRUCTURING_URL,
+SCORING_URL (default 127.0.0.1:8030-8034), TRACKER_POLL, REDIS_URL, API_KEY, PORT,
 TRACKER_DATABASE_URL, TRACKER_DB_INTERVAL (0.25), TRACKER_WAIT_SECONDS (15, label saja).

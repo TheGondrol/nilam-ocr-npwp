@@ -15,10 +15,6 @@ orchestration:
   url: http://ocr-orchestration.ocr-dev.svc.cluster.local
   callbackPath: /v1/ocr-callback
   callbackFormat: result
-  # Mode uji coba lama (callback per tahap berhenti di service ini sendiri, untuk tools/tracker):
-  # url: http://nilam-ocr-npwp:8030
-  # callbackPath: /v1/callbacks/stage
-  # callbackFormat: stage
 
 commonEnv:
   # Double write: selain tabel job kita sendiri, keadaan akhir tiap request (COMPLETED dari scoring,
@@ -29,7 +25,7 @@ commonEnv:
   # relay dengan backoff (sampai 5 menit sekali, selama 24 jam), jadi tidak hilang saat pod restart atau
   # penerima down. Dinyalakan di cluster 24 Sep 2026.
   PIPELINE_OUTBOX: "true"
-  # Load test tim ML lewat kubectl port-forward ke guardrails, /v1/extract-ocr-test. Butuh migrasi 0006
+  # Load test tim ML lewat kubectl port-forward ke orchestrator, /v1/extract-ocr-test. Butuh migrasi 0006
   # (tabel testing_*). Lihat README, "Endpoint testing".
   TESTING_ENDPOINTS: "true"
 

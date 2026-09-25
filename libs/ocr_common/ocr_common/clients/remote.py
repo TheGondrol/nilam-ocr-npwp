@@ -3,6 +3,7 @@
 """
 
 import json
+from collections.abc import Collection
 from typing import Any
 
 import httpx
@@ -13,8 +14,10 @@ from ocr_common.web.request_id import REQUEST_ID_HEADER, current_request_id
 
 class RemoteModelClient:
     """One httpx client per remote service. Timeouts become 504, connection errors 503, and an
-    error status becomes 500 with the remote's message, or the same 4xx when
-    `passthrough_client_errors` is set (a stage relaying another stage's validation error).
+    error status becomes 500 with the remote's message, or the same status with the remote's message
+    when it is a 4xx and `passthrough_client_errors` is set (a stage relaying another stage's
+    validation error), or when it is listed in `passthrough_statuses` (e.g. `(400, 413, 503, 504)`
+    to relay a model service's refusals and outages as they are, but not its 401).
     """
 
     def __init__(
@@ -25,12 +28,14 @@ class RemoteModelClient:
         name: str,
         headers: dict[str, str] | None = None,
         passthrough_client_errors: bool = False,
+        passthrough_statuses: Collection[int] = (),
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.name = name
         self._passthrough = passthrough_client_errors
+        self._passthrough_statuses = frozenset(passthrough_statuses)
         self._client = httpx.AsyncClient(
             base_url=self.base_url, timeout=timeout, headers=headers or {}, transport=transport
         )
@@ -79,7 +84,9 @@ class RemoteModelClient:
 
         if response.status_code >= 400:
             detail = _error_detail(response)
-            if self._passthrough and 400 <= response.status_code < 500:
+            if response.status_code in self._passthrough_statuses or (
+                self._passthrough and 400 <= response.status_code < 500
+            ):
                 raise ServiceError(response.status_code, detail)
             raise InternalError(f"{self.name} error ({response.status_code}): {detail}")
         try:

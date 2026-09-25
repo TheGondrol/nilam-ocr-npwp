@@ -33,7 +33,7 @@ if [[ -f "$HERE/.env" ]]; then
 fi
 if [[ "${TRACKER_TARGET:-local}" == "gke" ]]; then
   say "menutup port-forward ke ${GKE_NAMESPACE:-nilam-ocr-npwp}"
-  for port in 9030 9031 9032 9033; do kill_port "$port"; done
+  for port in 9030 9031 9032 9033 9034; do kill_port "$port"; done
 fi
 
 if [[ "${1:-}" == "--stack" ]]; then

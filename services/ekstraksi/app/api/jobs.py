@@ -52,8 +52,8 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
     summary="Start the pipeline for a document (OCR stage)",
     description=(
         "**Step 2 of the pipeline, asynchronous: the start of the OCR -> structuring -> scoring chain.** "
-        "Called by the guardrails service from its `POST /v1/extract-ocr` once the document passed; the "
-        "orchestrator does not call it. Calling it directly skips the guardrails check.\n\n"
+        "Called by the orchestrator NPWP from its `POST /v1/extract-ocr` once the guardrails service passed the "
+        "document; the central orchestrator does not call it. Calling it directly skips the guardrails check.\n\n"
         "Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in the "
         "background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result "
         "(`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which hands it "
@@ -106,8 +106,8 @@ async def submit_job(
     guardrails: str | None = Form(
         None,
         description=(
-            "The guardrails report (`data` of the guardrails service's `POST /v1/extract-ocr`), serialised as a "
-            "JSON string; the guardrails service fills it in. Forwarded down the chain: scoring uses "
+            "The guardrails report (`data` of the guardrails service's `POST /v1/guardrails/check`), serialised "
+            "as a JSON string; the orchestrator NPWP fills it in. Forwarded down the chain: scoring uses "
             "`document.confidence`, and the final result returns it unchanged. Optional, but without it the "
             "scoring model works with one input missing"
         ),
@@ -138,9 +138,9 @@ async def submit_job(
     operation_id="getOcrJob",
     summary="Status and result of the OCR stage",
     description=(
-        "Status of this stage only, and its raw OCR result once `DONE`. The orchestrator normally learns the "
-        "status from the callback; use this to reconcile after a missed callback, or to debug. The later stages "
-        "have the same endpoint on their own service (`/v1/structuring/jobs/{request_id}`, "
+        "Status of this stage only, and its raw OCR result once `DONE`. Internal: the orchestrator NPWP reads it "
+        "(while it waits, and for its `GET /v1/extract-ocr/{request_id}`), and it helps to debug. The later "
+        "stages have the same endpoint on their own service (`/v1/structuring/jobs/{request_id}`, "
         "`/v1/scoring/jobs/{request_id}`)."
     ),
     responses={

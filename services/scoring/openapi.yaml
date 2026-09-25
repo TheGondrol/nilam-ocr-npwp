@@ -34,19 +34,24 @@ info:
     dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
 
 
-    **request_id.** Minted by the orchestrator and carried through every stage. Where an endpoint has
-    no
+    **request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint
+    has
 
-    request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+    no request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
 
     without it the service generates one.
 
 
-    **Asynchronous stages.** `POST .../jobs` answers `202` immediately and does the work in the
+    **Asynchronous stages** (internal: only the orchestrator NPWP and the previous stage call them). `POST
 
-    background. The outcome is reported by a callback to the orchestrator (see *Webhooks*), and can be
+    .../jobs` answers `202` immediately and does the work in the background. The outcome is reported by
+    a
 
-    read at any time with `GET .../jobs/{request_id}`. Submitting the same request_id again is idempotent:
+    callback to the central orchestrator (see *Webhooks*), and can be read at any time with
+
+    `GET .../jobs/{request_id}`, which the orchestrator NPWP''s `GET /v1/extract-ocr/{request_id}` combines
+
+    over the three stages. Submitting the same request_id again is idempotent:
 
     `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has
     been
@@ -64,18 +69,14 @@ info:
 servers:
 - url: /
   description: This host (where this page is served)
-- url: http://scoring.nilam-ocr-{environment}.svc.cluster.local:8033
-  description: GKE, from another namespace (e.g. the orchestrator / gateway)
+- url: http://nilam-ocr-npwp-scoring.{namespace}.svc.cluster.local:8033
+  description: GKE, from inside the release's namespace (the other services of this pipeline)
   variables:
-    environment:
-      enum:
-      - dev
-      - staging
-      - production
-      default: dev
-      description: 'One namespace per environment: nilam-ocr-<environment>'
+    namespace:
+      default: nilam-ocr-npwp
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
 - url: http://scoring:8033
-  description: GKE from the same namespace, or the Docker Compose network
+  description: The Docker Compose network
 - url: http://127.0.0.1:8033
   description: Local development
 paths:
@@ -244,9 +245,9 @@ paths:
       tags:
       - Pipeline
       summary: Status and result of the scoring stage
-      description: Status of this stage only and, once `DONE`, the two confidences plus the exact payload
-        that was scored. The orchestrator normally receives the final result in the `SCORING` callback;
-        use this to reconcile after a missed callback, or to audit a score.
+      description: 'Status of this stage only and, once `DONE`, the two confidences plus the exact payload
+        that was scored. Internal: the orchestrator NPWP reads it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`);
+        the central orchestrator receives the final result in the callback. Also useful to audit a score.'
       operationId: getScoringJob
       security:
       - APIKeyHeader: []
@@ -680,10 +681,11 @@ webhooks:
         **Expected answer.** Any `2xx`; the body is ignored. `5xx`, a timeout or an unreachable host are
         retried (3 attempts by default, exponential back-off from 0.5 s). A `4xx` is NOT retried. A callback
         that still fails is logged and dropped: the job itself stays `DONE` / `FAILED`, so the orchestrator
-        can reconcile with `GET .../jobs/{request_id}` and should time a stage out on its own. With `PIPELINE_OUTBOX`
-        the callback is instead queued in the same transaction as the result and retried with back-off
-        (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS` (24 h by default); a `4xx`,
-        or that age, makes it a dead letter that stays in the table and is counted by `GET .../outbox`.
+        can reconcile with the orchestrator NPWP''s `GET /v1/extract-ocr/{request_id}` and should time
+        a request out on its own. With `PIPELINE_OUTBOX` the callback is instead queued in the same transaction
+        as the result and retried with back-off (up to 5 minutes apart) for up to `PIPELINE_OUTBOX_MAX_AGE_SECONDS`
+        (24 h by default); a `4xx`, or that age, makes it a dead letter that stays in the table and is
+        counted by `GET .../outbox`.
 
 
         **What the receiver must tolerate.** The same callback may arrive more than once (treat it as
@@ -1224,8 +1226,8 @@ components:
       additionalProperties: true
       type: object
       title: GuardrailsResult
-      description: The guardrails report (`data` of the guardrails service's POST /v1/extract-ocr), forwarded
-        unchanged down the pipeline.
+      description: The guardrails report (`data` of the guardrails service's POST /v1/guardrails/check,
+        sent on by the orchestrator), forwarded unchanged down the pipeline.
     HealthResponse:
       properties:
         status:

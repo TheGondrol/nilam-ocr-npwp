@@ -1,0 +1,859 @@
+openapi: 3.1.0
+info:
+  title: OCR NPWP Orchestrator API
+  description: 'Entry point of the OCR NPWP pipeline, and the only service the central orchestrator /
+    gateway calls. `POST /v1/extract-ocr` checks the file, has the guardrails service judge it, hands
+    a document that passes to the OCR stage (ekstraksi, which chains to structuring and scoring), and
+    waits up to `PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is
+    still running. `GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later
+    time. This service stores nothing: the stages keep the jobs, and they send the result callback. All
+    endpoints except /health, /ready and /metrics require an X-API-Key header.
+
+
+    ## Conventions (the same for every nilam-ocr service)
+
+
+    **Authentication.** Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.
+
+    A missing or wrong key answers `401`. The services are reachable only from inside the cluster.
+
+
+    **Envelope.** Every JSON response, success or error, has the same shape:
+
+    `{status_code, status_desc, message, data, errors, request_id}`. `status_code` always equals the HTTP
+
+    status. On success `errors` is null; on error `data` is null.
+
+
+    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+
+    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+
+    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+
+    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+
+    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+
+
+    **request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint
+    has
+
+    no request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
+
+    without it the service generates one.
+
+
+    **Asynchronous stages** (internal: only the orchestrator NPWP and the previous stage call them). `POST
+
+    .../jobs` answers `202` immediately and does the work in the background. The outcome is reported by
+    a
+
+    callback to the central orchestrator (see *Webhooks*), and can be read at any time with
+
+    `GET .../jobs/{request_id}`, which the orchestrator NPWP''s `GET /v1/extract-ocr/{request_id}` combines
+
+    over the three stages. Submitting the same request_id again is idempotent:
+
+    `202` with `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has
+    been
+
+    `PROCESSING` for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the
+
+    process running it died). A job still running when the service shuts down is reported `FAILED`. Because
+
+    the request was already answered `202`, a problem with the document itself (unreadable file, no text,
+
+    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.
+
+    '
+  version: 1.0.0
+servers:
+- url: /
+  description: This host (where this page is served)
+- url: http://nilam-ocr-npwp.{namespace}.svc.cluster.local:8034
+  description: 'GKE, from another namespace: the entry Service (the central orchestrator / gateway)'
+  variables:
+    namespace:
+      default: nilam-ocr-npwp
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
+- url: http://nilam-ocr-npwp-orchestrator.{namespace}.svc.cluster.local:8034
+  description: GKE, from inside the release's namespace (the other services of this pipeline)
+  variables:
+    namespace:
+      default: nilam-ocr-npwp
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
+- url: http://orchestrator:8034
+  description: The Docker Compose network
+- url: http://127.0.0.1:8034
+  description: Local development
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Liveness probe
+      description: Says the process is alive and which implementations are active. Never touches a dependency.
+        Does not require an API key.
+      operationId: getHealth
+      responses:
+        '200':
+          description: The process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy
+                  value:
+                    status: healthy
+                    version: 1.0.0
+                    device: cpu
+                    backends: {}
+  /ready:
+    get:
+      tags:
+      - Health
+      summary: Readiness probe
+      description: 'Liveness vs readiness: /health only says the process is alive and never touches a
+        dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
+        pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
+        otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
+        services are deliberately not checked: their outage is reported per job, not by refusing traffic.
+        Does not require an API key.'
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Every required dependency answers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              examples:
+                ready:
+                  summary: Ready
+                  value:
+                    status: ready
+                    checks: {}
+        '503':
+          description: A required dependency is unavailable; the pod is taken out of the Service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: not_ready
+                checks: {}
+  /metrics:
+    get:
+      tags:
+      - Health
+      summary: Prometheus metrics
+      description: 'Prometheus text exposition of this process: `http_requests_total` and `http_request_duration_seconds`
+        per route template, and for the pipeline stages `pipeline_jobs_total` (by outcome), `pipeline_job_duration_seconds`,
+        `pipeline_stale_jobs_reclaimed_total`, `pipeline_outbox_deliveries_total` and the outbox backlog
+        gauges (`pipeline_outbox_pending`, `_retrying`, `_dead_letters`, `_oldest_pending_seconds`). Scraped
+        inside the cluster; does not require an API key.'
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics in the Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/extract-ocr:
+    post:
+      tags:
+      - Extract OCR
+      summary: Judge a document, run the pipeline, answer with the OCR result or 202
+      description: '**The call the central orchestrator makes.** Checks the file, has the guardrails service
+        judge it, hands it to the OCR stage when it passes, then waits for OCR -> structuring -> scoring
+        for up to `PIPELINE_WAIT_SECONDS` (15 s by default), counted from when this request arrived. The
+        response follows the central orchestrator''s `extract-ocr` contract ("Finished" meaning finished
+        within the wait):
+
+
+        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
+
+        |---|---|---|---|---|---|
+
+        | Finished | 200 | `completed` | the fields | `1` | null |
+
+        | Still running | 202 | `processing` | null | null | null |
+
+        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        |
+
+
+        `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
+        or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
+        gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
+        default), else `0`. `params` is returned as sent.
+
+
+        **Rejected by the structuring rules**: the ML team''s rules reject a document that is blurred
+        or blank, not in the standard NPWP format, another document or bundled with one, a screenshot
+        of the online NPWP lookup, longer than the page limit, or whose number carries an invalid birthdate,
+        province, kecamatan or KPP code. `message` is the rules'' Indonesian reason, e.g. `Kode provinsi
+        pada NPWP tidak valid, mohon dicek kembali`. A single-word name or a letter in the number is tolerated:
+        the fields are returned, and the trust model''s confidence already accounts for it.
+
+
+        **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
+        (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` (2) pages
+        answers `400`, both with an Indonesian `message` the client can show as is.
+
+
+        On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
+        /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS`
+        (e.g. +15 s) to cover a slow guardrails check or hand-off.
+
+
+        Send `request_id` plus the document as `file`, or as `file_url`; exactly one of the two. A `file_url`
+        is downloaded here for the guardrails check, and the URL itself (not the bytes) is handed to the
+        OCR stage, which downloads it again, also when it re-runs a job left behind by a dead process:
+        the URL must stay valid for longer than the job lease. The raw guardrails report (per-page probabilities)
+        is not part of this response: it travels down the pipeline and comes back in the SCORING callback.
+
+
+        **Idempotency.** The same request_id again re-runs the guardrails check, but the pipeline does
+        not run twice unless the earlier OCR attempt `FAILED` or outlived the job lease (`PIPELINE_JOB_LEASE_SECONDS`);
+        a request_id that already finished answers again with its stored outcome.'
+      operationId: extractOcr
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_extractOcr'
+        required: true
+      responses:
+        '200':
+          description: Accepted and finished within the wait
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              examples:
+                completed:
+                  summary: The OCR result
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OCR extraction completed successfully
+                    data:
+                      nomor_npwp:
+                        value: 12.345.678.9-012.345
+                        confidence: 1
+                      nama:
+                        value: BUDI SANTOSO
+                        confidence: 1
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: completed
+                    guardrails: 1
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+        '202':
+          description: 'Accepted, but still running when the wait ran out: the result follows by callback'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              examples:
+                processing:
+                  summary: Still processing
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: OCR job accepted; still processing
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: processing
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+        '400':
+          description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
+            `guardrails: 0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
+            file / intake (empty, unsupported type, unreadable, `file_url` refused)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
+                errors: DOWNSTREAM_VALIDATION_ERROR
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 0
+                params:
+                  nik: '3123456711950001'
+                  refno: PK19039Y8U
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+        '413':
+          description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 413
+                status_desc: Payload Too Large
+                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+        '422':
+          description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
+            `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), or a required field is
+            missing (`VALIDATION_ERROR`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: No text lines to structure
+                errors: STRUCTURING_FAILED
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 1
+                params:
+                  nik: '3123456711950001'
+                  refno: PK19039Y8U
+        '500':
+          description: The guardrails or ekstraksi service failed, or answered in an unexpected shape
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: guardrails service returned an unexpected response
+                errors: guardrails service returned an unexpected response
+        '503':
+          description: The guardrails service, its model, or the ekstraksi service is unreachable; nothing
+            was started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 503
+                status_desc: Service Unavailable
+                message: ekstraksi service is unavailable
+                errors: ekstraksi service is unavailable
+        '504':
+          description: The guardrails service, its model, or the ekstraksi service did not answer in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: ekstraksi service timed out after 10.0s
+                errors: ekstraksi service timed out after 10.0s
+      security:
+      - APIKeyHeader: []
+  /v1/extract-ocr/{request_id}:
+    get:
+      tags:
+      - Extract OCR
+      summary: 'Where a request is now: the extract-ocr answer, without waiting'
+      description: 'Reads the OCR, structuring and scoring jobs of `request_id` once each, in pipeline
+        order, and answers in the same contract as `POST /v1/extract-ocr` ("Finished" meaning finished
+        by now):
+
+
+        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |
+
+        |---|---|---|---|---|---|
+
+        | Finished | 200 | `completed` | the fields | `1` | null |
+
+        | Still running | 202 | `processing` | null | null | null |
+
+        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        |
+
+        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        |
+
+
+        Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
+        always null here (it is not stored) and `document_type` is `npwp`.
+
+
+        **404** means no stage has a job for this request_id: it was refused or rejected by the guardrails
+        model (the `400` of the POST is its final answer), refused before the check, or its POST is still
+        being judged by guardrails.
+
+
+        **Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it
+        became a dead letter in the outbox) leaves the next stage without a job, so this endpoint keeps
+        answering `202` for it. The `FAILED` callback and the central orchestrator''s own tables carry
+        that final state; this endpoint only reads the stages'' jobs.'
+      operationId: getExtractOcr
+      security:
+      - APIKeyHeader: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Request Id
+      responses:
+        '200':
+          description: Finished
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+              examples:
+                completed:
+                  summary: The OCR result
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OCR extraction completed successfully
+                    data:
+                      nomor_npwp:
+                        value: 12.345.678.9-012.345
+                        confidence: 1
+                      nama:
+                        value: BUDI SANTOSO
+                        confidence: 1
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: completed
+                    guardrails: 1
+        '202':
+          description: Still running
+          content:
+            application/json:
+              examples:
+                processing:
+                  summary: Still processing
+                  value:
+                    status_code: 202
+                    status_desc: Accepted
+                    message: OCR job accepted; still processing
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: processing
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '400':
+          description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
+            0`)'
+          content:
+            application/json:
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                errors: DOWNSTREAM_VALIDATION_ERROR
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 0
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: Invalid or missing API key
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No stage has a job for this request_id (rejected by the guardrails model, or not
+            submitted yet)
+          content:
+            application/json:
+              example:
+                status_code: 404
+                status_desc: Not Found
+                message: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                errors: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A pipeline stage failed (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`)
+          content:
+            application/json:
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: No text lines to structure
+                errors: STRUCTURING_FAILED
+                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                document_type: npwp
+                job_status: failed
+                guardrails: 1
+              schema:
+                $ref: '#/components/schemas/ExtractOcrResponse'
+        '500':
+          description: A stage answered in an unexpected shape, or refused this service (e.g. a wrong
+            API key)
+          content:
+            application/json:
+              example:
+                status_code: 500
+                status_desc: Internal Server Error
+                message: 'structuring service error (401): Invalid or missing API key'
+                errors: 'structuring service error (401): Invalid or missing API key'
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: A stage service is unreachable
+          content:
+            application/json:
+              example:
+                status_code: 503
+                status_desc: Service Unavailable
+                message: structuring service is unavailable
+                errors: structuring service is unavailable
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: A stage service did not answer in time
+          content:
+            application/json:
+              example:
+                status_code: 504
+                status_desc: Gateway Timeout
+                message: structuring service timed out after 10.0s
+                errors: structuring service timed out after 10.0s
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    Body_extractOcr:
+      properties:
+        request_id:
+          type: string
+          title: Request Id
+          description: request_id minted by the central orchestrator
+          examples:
+          - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Document type chosen by the client. Only `npwp` is supported
+          default: npwp
+          examples:
+          - npwp
+        params:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Params
+          description: 'Client metadata as JSON: an object, or a quoted string. Not interpreted; returned
+            unchanged in `params`'
+          examples:
+          - '{"nik": "3123456711950001", "refno": "PK19039Y8U"}'
+        file:
+          anyOf:
+          - type: string
+            format: binary
+          - type: string
+          - type: 'null'
+          title: File
+          description: Document image (JPEG/PNG/PDF). Omit when sending file_url.
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+          description: URL this service fetches the document image from (e.g. a presigned MinIO GET).
+            Omit when uploading file. The host must be listed in the service's `FILE_URL_ALLOWED_HOSTS`,
+            or resolve to a public address when that is empty; redirects are not followed.
+      type: object
+      required:
+      - request_id
+      title: Body_extractOcr
+    ContractField:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: The value read; null when the field was not found
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: integer
+          enum:
+          - 0
+          - 1
+          title: Confidence
+          description: 1 when the ML team's trust model gives this value a probability of being correct
+            of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default); 0 when it is lower, or when there
+            is no value
+          examples:
+          - 1
+      type: object
+      required:
+      - confidence
+      title: ContractField
+    ErrorResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          examples:
+          - 400
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          examples:
+          - Bad Request
+        message:
+          type: string
+          title: Message
+          description: Human-readable cause; safe to log
+          examples:
+          - Uploaded file is empty
+        data:
+          type: 'null'
+          title: Data
+          description: Always null on error
+        errors:
+          type: string
+          title: Errors
+          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
+            names a different field every time); for every other status it repeats `message`
+          examples:
+          - Uploaded file is empty
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Present when the error is tied to a known request_id
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      - errors
+      title: ErrorResponse
+      description: Every error response.
+    ExtractOcrResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable; its wording may change, so branch on `errors` instead
+          examples:
+          - OCR extraction completed successfully
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/NpwpData'
+          - type: 'null'
+          description: The OCR fields when `job_status` is `completed`; null otherwise
+        errors:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Errors
+          description: Failure code when the request failed or was refused; null otherwise
+          examples:
+          - null
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: The request_id this response belongs to
+        document_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Document Type
+          description: Document type of the request
+          examples:
+          - npwp
+        job_status:
+          anyOf:
+          - type: string
+            enum:
+            - pending
+            - processing
+            - completed
+            - failed
+          - type: 'null'
+          title: Job Status
+          description: '`completed` (200), `processing` (202), or `failed`; null when the request was
+            refused before anything was processed'
+          examples:
+          - completed
+        guardrails:
+          anyOf:
+          - type: integer
+            enum:
+            - 0
+            - 1
+          - type: 'null'
+          title: Guardrails
+          description: '1: the document passed the guardrails model (and the pipeline ran); 0: it was
+            rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
+            was refused before the check'
+          examples:
+          - 1
+        params:
+          title: Params
+          description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not
+            sent. Not stored, so always null on `GET /v1/extract-ocr/{request_id}`
+          examples:
+          - nik: '3123456711950001'
+            refno: PK19039Y8U
+      type: object
+      required:
+      - status_code
+      - status_desc
+      - message
+      title: ExtractOcrResponse
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: Always `healthy` while the process is alive
+          examples:
+          - healthy
+        version:
+          type: string
+          title: Version
+          description: Service version
+          examples:
+          - 1.0.0
+        device:
+          type: string
+          title: Device
+          description: Where this service computes
+          examples:
+          - cpu
+        backends:
+          additionalProperties:
+            type: string
+          type: object
+          title: Backends
+          description: Active implementation per concern (model backend, storage). Useful to confirm a
+            deployment
+          examples:
+          - ekstraksi: paddle
+            storage: postgres
+      type: object
+      required:
+      - status
+      - version
+      - device
+      - backends
+      title: HealthResponse
+      description: '`GET /health`.'
+    NpwpData:
+      properties:
+        nomor_npwp:
+          $ref: '#/components/schemas/ContractField'
+          description: 15-digit number as `XX.XXX.XXX.X-XXX.XXX`, or a 16-digit NIK-based number as 16
+            plain digits
+        nama:
+          $ref: '#/components/schemas/ContractField'
+          description: 'The name on the card: the taxpayer''s name, or the registered name on a company''s
+            card'
+      type: object
+      required:
+      - nomor_npwp
+      - nama
+      title: NpwpData
+    ReadyResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - not_ready
+          title: Status
+          description: '`ready` (HTTP 200) when every check is `ok`, else `not_ready` (HTTP 503)'
+          examples:
+          - ready
+        checks:
+          additionalProperties:
+            type: string
+            enum:
+            - ok
+            - failed
+          type: object
+          title: Checks
+          description: One entry per REQUIRED dependency of this service; empty when it has none
+          examples:
+          - database: ok
+      type: object
+      required:
+      - status
+      - checks
+      title: ReadyResponse
+      description: '`GET /ready`.'
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      description: API key for this service
+      in: header
+      name: X-API-Key
+tags:
+- name: Extract OCR
+  description: Start the pipeline for a document, and read where a request is
+- name: Health
+  description: Liveness and readiness probes; no API key

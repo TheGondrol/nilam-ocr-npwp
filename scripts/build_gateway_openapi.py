@@ -10,13 +10,12 @@ from ocr_common.web.app import API_CONVENTIONS
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "api" / "gateway.openapi.yaml"
-SERVICES = ("guardrails", "ekstraksi", "structuring", "scoring")
+# The orchestrator owns every operation; the stages are listed for the callback webhook they send.
+SERVICES = ("orchestrator", "ekstraksi", "structuring", "scoring")
 
 OPERATIONS: list[tuple[str, str, str, str]] = [
-    ("guardrails", "post", "/v1/extract-ocr", "1. Start the pipeline"),
-    ("ekstraksi", "get", "/v1/ekstraksi/jobs/{request_id}", "3. Reconciliation"),
-    ("structuring", "get", "/v1/structuring/jobs/{request_id}", "3. Reconciliation"),
-    ("scoring", "get", "/v1/scoring/jobs/{request_id}", "3. Reconciliation"),
+    ("orchestrator", "post", "/v1/extract-ocr", "1. Start the pipeline"),
+    ("orchestrator", "get", "/v1/extract-ocr/{request_id}", "3. Status"),
 ]
 CALLBACK_TAG = "2. Callbacks (you implement this)"
 
@@ -24,9 +23,10 @@ TAGS = [
     {
         "name": "1. Start the pipeline",
         "description": (
-            "The only call you make: guardrails check, then OCR -> structuring -> scoring, waited on for up to "
-            "PIPELINE_WAIT_SECONDS; answers in the orchestrator's extract-ocr contract. 200: `completed` with the "
-            "fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage failed."
+            "The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for up to "
+            "PIPELINE_WAIT_SECONDS; answers in the central orchestrator's extract-ocr contract. 200: `completed` "
+            "with the fields. 202: still `processing`, the result arrives by callback. 400: rejected. 422: a stage "
+            "failed."
         ),
     },
     {
@@ -34,20 +34,23 @@ TAGS = [
         "description": "Listed under **Webhooks**: the request each stage sends to you when it finishes.",
     },
     {
-        "name": "3. Reconciliation",
-        "description": "Read a stage's status and result directly, e.g. after a missed callback or a timeout.",
+        "name": "3. Status",
+        "description": (
+            "Where a request is now, in the same contract, without waiting: e.g. after a 202 whose callback did "
+            "not arrive."
+        ),
     },
 ]
 
 DESCRIPTION = """
-Everything the gateway / orchestrator needs to integrate the NPWP OCR pipeline, merged from the four
+Everything the central orchestrator / gateway needs to integrate the NPWP OCR pipeline, merged from the
 services' own specs. Each service also serves its full Swagger UI at `/docs`.
 
 ## The flow
 
-1. **`POST /v1/extract-ocr`** on the *guardrails* service (port `8031`) with your `request_id` and the document
-   (`file` or `file_url`, optional `params`). This is the only call you make, and it answers in the
-   orchestrator's `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
+1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your `request_id` and the
+   document (`file` or `file_url`, optional `params`). It answers in the central orchestrator's
+   `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
    - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 0`;
      nothing runs and no callback follows.
    - passed -> the document goes on to the OCR stage and the service waits for the pipeline for up to
@@ -55,11 +58,11 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
      **200**, `job_status: completed`, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with
      confidence 0/1; a stage failed -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still
      running -> **202**, `job_status: processing`. Give this call an HTTP timeout well above the wait.
-2. **Receive callbacks** (see *Webhooks*): `OCR` -> `STRUCTURING` -> `SCORING`, each `DONE` or
-   `FAILED`, sent in every case after a hand-off. The `SCORING` / `DONE` callback carries the **final
-   result** (richer than `data`: OCR scores, trust probabilities, the guardrails report). A `FAILED`
-   callback of any stage ends the request.
-3. **Reconcile when needed** with `GET /v1/<stage>/jobs/{request_id}` on the stage's own service.
+2. **Receive callbacks** (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The
+   `SCORING` / `DONE` callback carries the **final result** (richer than `data`: OCR scores, trust
+   probabilities, the guardrails report). A `FAILED` callback of any stage ends the request.
+3. **Read the status when needed** with `GET /v1/extract-ocr/{request_id}` on the same service: the same
+   contract, without waiting.
 
 Time a request out on your side: a stage that crashes mid-job cannot send its callback.
 
@@ -71,10 +74,9 @@ correct. There is **no document-level score and no approve / reject decision**; 
 
 ## Addresses
 
-Each operation lists the servers of the service that owns it. Inside GKE the four services share one
-Service; from another namespace: `http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:<port>` with
-guardrails `8031`, ekstraksi `8030`, structuring `8032`, scoring `8033`. Nothing is exposed outside
-the cluster.
+The orchestrator is the only service you call. From another namespace in GKE:
+`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034` (the release's entry Service). The
+guardrails and pipeline stage services are internal. Nothing is exposed outside the cluster.
 """
 
 REF = re.compile(r"#/components/schemas/([A-Za-z0-9_]+)")

@@ -3,7 +3,7 @@ import './App.css'
 
 const STAGES = ['GUARDRAILS', 'OCR', 'STRUCTURING', 'SCORING']
 const LABELS = {
-  GUARDRAILS: 'Guardrails',
+  GUARDRAILS: 'Orchestrator + guardrails',
   OCR: 'Ekstraksi OCR',
   STRUCTURING: 'Structuring',
   SCORING: 'Scoring',
@@ -76,7 +76,7 @@ function describe(e, t0) {
       return `Orkestrasi (tracker) menerima ${e.filename}${sim.length ? ` · simulasi: ${sim.join(', ')}` : ''}`
     }
     case 'http':
-      return `Guardrails menjawab HTTP ${e.http_status}, job_status=${e.job_status ?? '-'}${
+      return `Orchestrator menjawab HTTP ${e.http_status}, job_status=${e.job_status ?? '-'}${
         e.errors ? ` (${e.errors})` : ''
       } setelah ${fmtMs(e.elapsed_ms)} · batas tunggu ${e.wait_seconds} dtk`
     case 'stage':
@@ -718,7 +718,7 @@ function LoadTest({ overview, nav }) {
             </div>
 
             <div className="panel">
-              <h2>Pintu masuk: /v1/extract-ocr</h2>
+              <h2>Pintu masuk: orchestrator /v1/extract-ocr</h2>
               <div className="kv">
                 <span className="k">p50</span>
                 <span>{fmtMs(d.extract?.p50)}</span>
@@ -983,9 +983,9 @@ function Pipeline({ nav, overview: sharedOverview }) {
             dtk
           </label>
           <div className="hint small">
-            batas tunggu guardrails {sim.wait_seconds} dtk: di bawah itu jawabannya 200 + hasil, di atas itu 202 dan hasil menyusul lewat callback. Nama file diberi awalan <code>delay{slowSeconds}s-</code>; hook ini hanya hidup di ENVIRONMENT=local.
+            batas tunggu orchestrator {sim.wait_seconds} dtk: di bawah itu jawabannya 200 + hasil, di atas itu 202 dan hasil menyusul lewat callback. Nama file diberi awalan <code>delay{slowSeconds}s-</code>; hook ini hanya hidup di ENVIRONMENT=local.
           </div>
-          <button disabled={busy}>{busy ? `Menunggu guardrails (maks. ${sim.wait_seconds} dtk)…` : 'Kirim dokumen'}</button>
+          <button disabled={busy}>{busy ? `Menunggu orchestrator (maks. ${sim.wait_seconds} dtk)…` : 'Kirim dokumen'}</button>
         </form>
         {error && <div className="error">{error}</div>}
 

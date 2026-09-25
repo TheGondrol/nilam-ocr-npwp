@@ -1,17 +1,18 @@
 # Helm chart `nilam-ocr-npwp`
 
 Satu Deployment, Service, ConfigMap, PodDisruptionBudget, dan NetworkPolicy per service:
-`guardrails` (8031), `ekstraksi` (8030), `structuring` (8032), `scoring` (8033). Nama objeknya
-`<release>-<service>`, jadi di cluster dev: `nilam-ocr-npwp-guardrails`, dst. Tiap service bisa
-di-scale dan di-restart sendiri; guardrails (torch, CPU-bound) punya HPA opsional, dan kalau ia
-kehabisan memori, tahap lain tidak ikut jatuh.
+`orchestrator` (8034), `guardrails` (8031), `ekstraksi` (8030), `structuring` (8032), `scoring`
+(8033). Nama objeknya `<release>-<service>`, jadi di cluster dev: `nilam-ocr-npwp-orchestrator`, dst.
+Tiap service bisa di-scale dan di-restart sendiri; guardrails (torch, CPU-bound) punya HPA opsional, dan
+kalau ia kehabisan memori, tahap lain tidak ikut jatuh.
 
-Service `nilam-ocr-npwp` (tanpa akhiran) adalah pintu masuk yang dipublikasikan ke Orkestrasi
-([integration.md](../../integration.md)): ia membuka port semua service ber-`entrypoint`
-(ekstraksi 8030, guardrails 8031). Selector-nya mencakup semua pod release, tetapi tiap port
-memakai `targetPort` bernama (`ekstraksi`, `guardrails`), dan Kubernetes hanya memasukkan pod
-yang punya nama port itu ke endpoint port tersebut. URL antar service di dalam pipeline memakai
-Service per komponen (`http://nilam-ocr-npwp-structuring:8032`).
+Service `nilam-ocr-npwp` (tanpa akhiran) adalah pintu masuk yang dipublikasikan ke Orkestrasi pusat
+([integration.md](../../integration.md)): ia membuka port semua service ber-`entrypoint`, yaitu hanya
+orchestrator (8034). Selector-nya mencakup semua pod release, tetapi port itu memakai `targetPort`
+bernama (`orchestrator`), dan Kubernetes hanya memasukkan pod yang punya nama port itu ke endpoint
+port tersebut. Karena nama service dipakai sebagai nama port, nama service maksimal 15 karakter, huruf
+kecil/angka, tanpa `-`. URL antar service di dalam release memakai Service per komponen
+(`http://nilam-ocr-npwp-structuring:8032`).
 
 Ini satu-satunya jalur deploy; manifest Kustomize yang dulu ada di `deploy/k8s` sudah dihapus
 dan polanya (Deployment per service, NetworkPolicy, PDB, HPA, ExternalSecret) dibawa ke sini.
@@ -46,11 +47,11 @@ langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Ork
 | ServiceAccount | satu untuk semua | `serviceAccount.{create,name,annotations}` |
 | ExternalSecret | opsional, mati | `externalSecret.*` |
 
-Aturan NetworkPolicy dihitung dari `services.<svc>.upstreams`: `structuring` hanya menerima dari
-pod yang menyebutnya sebagai upstream (ekstraksi, guardrails), `scoring` dari ekstraksi,
-guardrails, dan structuring. Service ber-`entrypoint` (ekstraksi, guardrails) menerima dari
-semua pod release (handoff antar tahap dan callback mode uji coba) dan dari namespace di
-`networkPolicy.clientNamespaces`. Egress belum dibatasi (utang teknis di README utama).
+Aturan NetworkPolicy dihitung dari `services.<svc>.upstreams`: guardrails dan ekstraksi hanya
+menerima dari orchestrator, `structuring` dari ekstraksi dan orchestrator, `scoring` dari structuring
+dan orchestrator (orchestrator membaca status tiap tahap). Service ber-`entrypoint` (hanya
+orchestrator) menerima dari semua pod release dan dari namespace di `networkPolicy.clientNamespaces`.
+Egress belum dibatasi (utang teknis di README utama).
 
 ## Konfigurasi dinamis
 
@@ -63,7 +64,7 @@ hanya me-restart pod service yang konfigurasinya berubah.
 | `environment` | `ENVIRONMENT` untuk semua service (`dev`, `staging`, `production`) |
 | `image.registry`, `image.tag` | registry dan tag bersama; `services.<nama>.image.tag` menimpa per service |
 | `orchestration.url` | callback ke Orkestrasi; kosong = hasil lewat `ORCHESTRATION_OUTCOME_TABLE` (salah satu wajib) |
-| `commonEnv` | env var untuk keempat service |
+| `commonEnv` | env var untuk kelima service (yang tidak dikenal sebuah service diabaikan) |
 | `services.<nama>.env` | env var per service; menimpa `commonEnv` dan nilai bawaan chart |
 | `services.<nama>.upstreams` | service lain yang dipanggil; chart mengisi `<NAMA>_SERVICE_URL` dan NetworkPolicy |
 | `services.<nama>.entrypoint` | dipanggil dari luar release: ikut Service pintu masuk dan menerima `clientNamespaces` |
@@ -76,8 +77,8 @@ hanya me-restart pod service yang konfigurasinya berubah.
 Tulis angka sebagai string (`"0.8"`, `"5242880"`), karena Helm mengubah angka besar menjadi notasi ilmiah.
 
 URL antar-service memakai nama Service per komponen, bukan `localhost`. Di luar
-`ENVIRONMENT=local`, service menolak `STRUCTURING_SERVICE_URL` dan `SCORING_SERVICE_URL` yang
-menunjuk ke localhost.
+`ENVIRONMENT=local`, service menolak `*_SERVICE_URL` yang menunjuk ke localhost (orchestrator: keempat
+URL-nya; ekstraksi dan structuring: tahap berikutnya).
 
 ## Secret
 
@@ -93,7 +94,7 @@ kubectl -n nilam-ocr-npwp create secret generic nilam-ocr-npwp-secrets `
 
 `DATABASE_URL` harus berformat SQLAlchemy (`postgresql+asyncpg://`), bukan JDBC. Karakter khusus
 di password perlu di-URL-encode (`@` menjadi `%40`). `ORCHESTRATION_API_KEY` boleh dihilangkan.
-`guardrails` hanya menerima `API_KEY`; `DATABASE_URL` tidak pernah masuk ke pod-nya. Key opsional `API_KEYS`
+`orchestrator` dan `guardrails` hanya menerima `API_KEY`; `DATABASE_URL` tidak pernah masuk ke pod-nya. Key opsional `API_KEYS`
 (dipisah koma) diterima juga oleh semua service selama rotasi: tambahkan key baru di sana, pindahkan
 pemanggil, lalu jadikan `API_KEY` dan hapus dari `API_KEYS`; tiap langkah cukup `rollout restart`.
 
@@ -141,6 +142,16 @@ menunggu pod siap dan otomatis rollback kalau gagal.
 Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan tabel dijalankan dulu
 dengan [migrate-db.sh](migrate-db.sh) sebelum deploy image yang membutuhkannya.
 
+**Upgrade ke chart 0.3.0 (orchestrator sebagai pintu masuk): wajib `deploy.sh all`.** Values baru
+mengubah ConfigMap guardrails (tanpa `*_SERVICE_URL` dan `PIPELINE_WAIT_SECONDS`), jadi annotation
+`checksum/config` me-roll pod guardrails walau guardrails tidak disebut. Image guardrails lama menolak
+start dengan ConfigMap itu (`ENVIRONMENT=production` dan `EKSTRAKSI_SERVICE_URL` default localhost),
+lalu `--atomic` me-rollback seluruh release. Tag global `values-ddb-dev.yaml` juga tidak punya image
+orchestrator. Sejak upgrade, entry Service `nilam-ocr-npwp` hanya membuka 8034: Orkestrasi pusat harus
+pindah dari `:8031/v1/extract-ocr` ke `:8034/v1/extract-ocr` pada saat yang sama. `helm rollback` ke
+revisi sebelumnya membuang port 8034 lagi, jadi Orkestrasi pusat harus kembali ke `:8031` kalau
+rollback.
+
 ## Install dan upgrade
 
 ```powershell
@@ -173,8 +184,8 @@ dari terminal Administrator.
 
 ```powershell
 kubectl -n nilam-ocr-npwp get deploy,pods,svc,pdb,networkpolicy
-kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-ekstraksi 8030:8030
-curl http://localhost:8030/ready
+kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+curl http://localhost:8034/ready
 ```
 
 `port-forward` harus ke Service per komponen (atau `deploy/nilam-ocr-npwp-<service>`): pada Service

@@ -37,7 +37,7 @@ spec:
   ingress:
     - from:
         {{- if $svc.entrypoint }}
-        # Semua pod release: handoff antar tahap dan callback mode uji coba (orchestration.url ke ekstraksi).
+        # Semua pod release, dan namespace pemanggil di networkPolicy.clientNamespaces (Orkestrasi pusat).
         - podSelector:
             matchLabels:
               {{- include "nilam-ocr-npwp.selectorLabels" $ | nindent 14 }}

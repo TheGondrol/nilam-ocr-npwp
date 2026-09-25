@@ -18,7 +18,7 @@ tiap sampel ke `POST /api/loadtest/{run}/samples`, dan callback tahap untuk requ
     # buka http://127.0.0.1:5173 -> menu "Load testing" -> atur laju & durasi -> Mulai
 
 Tracker menjalankan `docker run grafana/k6` di network compose (`ocr_default`) sehingga k6
-memanggil `http://guardrails:8031` langsung, dan melapor ke tracker lewat
+memanggil `http://orchestrator:8034` langsung, dan melapor ke tracker lewat
 `http://host.docker.internal:<PORT>`. Container diberi nama `nilam-lt-<run>` dan dihapus setelah
 selesai. Env backend tracker yang terkait: `K6_IMAGE`, `K6_NETWORK`, `K6_TARGET`, `K6_TRACKER`.
 
@@ -46,32 +46,32 @@ Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
     docker run --rm --network ocr_default --add-host host.docker.internal:host-gateway \
       -v "$PWD/tools/load-tester/k6:/scripts:ro" -v "$PWD/tools/load-tester/images:/images:ro" \
       -v "$PWD/tools/load-tester/out:/out" \
-      -e RUN_ID=coba1 -e TARGET=http://guardrails:8031 -e TRACKER=http://host.docker.internal:8090 \
+      -e RUN_ID=coba1 -e TARGET=http://orchestrator:8034 -e TRACKER=http://host.docker.internal:8090 \
       -e RATE=2 -e DURATION=60s -e MODE=constant -e IMAGES=npwp1.jpg,npwp2.jpg \
       grafana/k6 run /scripts/extract-ocr.js
 
 Env skrip: `RUN_ID`, `TARGET`, `TRACKER` (kosong = tanpa lapor), `RATE`, `DURATION`, `MODE`
 (`constant` | `ramp`), `IMAGES`, `WAIT_SECONDS`, `API_KEY`, `ENDPOINT` (default `/v1/extract-ocr`).
 
-Load test ke **dev** (GKE) tanpa mengotori data Orkestrasi: port-forward guardrails lalu tembak kembaran
+Load test ke **dev** (GKE) tanpa mengotori data Orkestrasi: port-forward orchestrator lalu tembak kembaran
 `-test`-nya, yang menulis ke tabel `testing_*` dan tidak mengirim callback (lihat README utama,
 "Endpoint Testing"):
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-guardrails 8031:8031
+    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
     docker run --rm --add-host host.docker.internal:host-gateway \
       -v "$PWD/tools/load-tester/k6:/scripts:ro" -v "$PWD/tools/load-tester/images:/images:ro" \
-      -e ENDPOINT=/v1/extract-ocr-test -e TARGET=http://host.docker.internal:8031 -e API_KEY="$API_KEY" \
+      -e ENDPOINT=/v1/extract-ocr-test -e TARGET=http://host.docker.internal:8034 -e API_KEY="$API_KEY" \
       -e RUN_ID=burst1 -e RATE=5 -e DURATION=60s -e IMAGES=npwp1.jpg \
       grafana/k6 run /scripts/extract-ocr.js
 
-Di endpoint `-test`, `request_id` dibuat guardrails (`TEST_<RUN_ID>_<uuid>`) dari field `run_id` yang dikirim
+Di endpoint `-test`, `request_id` dibuat orchestrator (`TEST_<RUN_ID>_<uuid>`) dari field `run_id` yang dikirim
 skrip; `LT_...` dari skrip diabaikan. Semua request satu run: `request_id LIKE 'TEST_burst1_%'`.
 
 ## Membaca hasilnya
 
 - **200 / 202 / 4xx / 5xx / timeout**: campuran jawaban pintu masuk. Bergesernya 200 ke 202 adalah
   tanda pertama jenuh; 5xx dan timeout tanda kedua.
-- **p50 / p95 extract-ocr**: lama koneksi ditahan guardrails. Mendekati `PIPELINE_WAIT_SECONDS`
+- **p50 / p95 extract-ocr**: lama koneksi ditahan orchestrator. Mendekati `PIPELINE_WAIT_SECONDS`
   berarti hampir semua jawaban 202.
 - **Tuntas (SCORING DONE)** dan **p95 end-to-end**: kapasitas sesungguhnya. Bandingkan dengan jumlah
   dikirim; selisihnya masih antre atau gagal.
