@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.web.intake import FileField, FileUrlField, read_image
-from ocr_common.web.request_id import bind_request_id, reset_request_id
+from ocr_common.web.request_id import adopt_request_id, reset_request_id
 from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
 from ocr_common.web.security import verify_api_key
 
@@ -233,9 +233,10 @@ async def extract_ocr(
             document_type=document_type,
         )
 
-    # The central orchestrator's request_id becomes the X-Request-ID of every call below and of our log
-    # lines, so one id follows the request through guardrails and every stage.
-    token = bind_request_id(request_id)
+    # The central orchestrator's request_id becomes the id of this request: in the envelope of an error raised
+    # below (413, a bad file, an unreachable stage), in the X-Request-ID response header and outbound calls, and
+    # in our log lines, so one id follows the request through guardrails and every stage.
+    token = adopt_request_id(request, request_id)
     try:
         content, filename, content_type = await read_image(request, file, file_url)
         outcome = await service.submit(
@@ -320,11 +321,12 @@ async def extract_ocr(
 )
 async def get_extract_ocr(
     request_id: str,
+    request: Request,
     response: Response,
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
 ):
-    token = bind_request_id(request_id)
+    token = adopt_request_id(request, request_id)
     try:
         outcome = await service.status(request_id)
     finally:
