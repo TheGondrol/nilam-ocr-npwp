@@ -179,18 +179,23 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 200 | `failed` | null | `1` | null (`message`: `guardrails
+        rejected`) |
+
+        | Rejected by the structuring rules | 200 | `failed` | null | `1` | null (`message`: the rules''
+        reason) |
+
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        `guardrails` is `1` when the document was rejected (by the guardrails model or by the structuring
+        rules) and `0` when it passed. A rejection is an answer, not an error: `200` with `job_status:
+        failed`; read `guardrails`, not the HTTP status, to tell it from a result.
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
@@ -236,7 +241,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Accepted and finished within the wait
+          description: 'Finished within the wait, or rejected (`guardrails: 1`)'
           content:
             application/json:
               schema:
@@ -258,6 +263,32 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
+                    guardrails: 0
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+                rejected_by_guardrails:
+                  summary: Rejected by the guardrails model
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: guardrails rejected
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
+                    guardrails: 1
+                    params:
+                      nik: '3123456711950001'
+                      refno: PK19039Y8U
+                rejected_by_rules:
+                  summary: Rejected by the structuring rules
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
                     guardrails: 1
                     params:
                       nik: '3123456711950001'
@@ -282,10 +313,10 @@ paths:
                       nik: '3123456711950001'
                       refno: PK19039Y8U
         '400':
-          description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
-            `guardrails: 0`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
-            pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
-            file / intake (empty, unsupported type, unreadable, `file_url` refused)'
+          description: 'The request cannot be processed: unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`),
+            more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages (`Jumlah halaman melebihi batas, pastikan
+            hanya mengunggah dokumen NPWP`, plain error envelope), or a bad file / intake (empty, unsupported
+            type, unreadable, `file_url` refused). A rejected document is a 200, not a 400'
           content:
             application/json:
               schema:
@@ -293,15 +324,10 @@ paths:
               example:
                 status_code: 400
                 status_desc: Bad Request
-                message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
-                errors: DOWNSTREAM_VALIDATION_ERROR
+                message: 'Unsupported document_type: ktp. Supported: npwp'
+                errors: UNSUPPORTED_DOCUMENT_TYPE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
+                document_type: ktp
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -340,7 +366,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -394,18 +420,23 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `1` | null |
+        | Finished | 200 | `completed` | the fields | `0` | null |
 
         | Still running | 202 | `processing` | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
+        | Rejected by the guardrails model | 200 | `failed` | null | `1` | null (`message`: `guardrails
+        rejected`) |
+
+        | Rejected by the structuring rules | 200 | `failed` | null | `1` | null (`message`: the rules''
+        reason) |
+
+        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
         |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `0` | `DOWNSTREAM_VALIDATION_ERROR`
-        |
 
-        | A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        |
+        `guardrails` is `1` when the document was rejected (by the guardrails model or by the structuring
+        rules) and `0` when it passed. A rejection is an answer, not an error: `200` with `job_status:
+        failed`; read `guardrails`, not the HTTP status, to tell it from a result.
 
 
         Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
@@ -413,8 +444,8 @@ paths:
 
 
         **404** means no stage has a job for this request_id: it was refused or rejected by the guardrails
-        model (the `400` of the POST is its final answer), refused before the check, or its POST is still
-        being judged by guardrails.
+        model (the POST''s answer, `guardrails: 1`, is final: nothing is stored for it), refused before
+        the check, or its POST is still being judged by guardrails.
 
 
         **Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it
@@ -433,7 +464,7 @@ paths:
           title: Request Id
       responses:
         '200':
-          description: Finished
+          description: 'Finished, or rejected by the structuring rules (`guardrails: 1`)'
           content:
             application/json:
               schema:
@@ -455,6 +486,16 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: completed
+                    guardrails: 0
+                rejected_by_rules:
+                  summary: Rejected by the structuring rules
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: failed
                     guardrails: 1
         '202':
           description: Still running
@@ -470,22 +511,6 @@ paths:
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                     document_type: npwp
                     job_status: processing
-              schema:
-                $ref: '#/components/schemas/ExtractOcrResponse'
-        '400':
-          description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            0`)'
-          content:
-            application/json:
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
-                errors: DOWNSTREAM_VALIDATION_ERROR
-                request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
@@ -523,7 +548,7 @@ paths:
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 job_status: failed
-                guardrails: 1
+                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
@@ -747,11 +772,11 @@ components:
             - 1
           - type: 'null'
           title: Guardrails
-          description: '1: the document passed the guardrails model (and the pipeline ran); 0: it was
-            rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
+          description: '1: the document was rejected, by the guardrails model or by the structuring rules
+            (answered 200 with `job_status: failed`); 0: it passed. Null on 202, and when the request
             was refused before the check'
           examples:
-          - 1
+          - 0
         params:
           title: Params
           description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not

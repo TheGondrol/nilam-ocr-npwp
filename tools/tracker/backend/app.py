@@ -13,7 +13,7 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 Redis Streams sebagai bus event: tiap request punya stream `ocr:events:<request_id>`.
 Setiap event punya `type`:
     client    upload diterima
-    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya
+    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 422; ditolak = 200 guardrails 1) dan lamanya
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED), `source`: db | callback
     outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n dan jawaban tracker
@@ -40,6 +40,7 @@ import loadtest
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tracker")
@@ -109,7 +110,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="nilam-ocr tracker (stand-in Orkestrasi)", lifespan=lifespan)
-redis = Redis.from_url(REDIS_URL, decode_responses=True)
+# SSE menunggu event baru dengan XREAD BLOCK selama ini. Timeout baca socket Redis harus di atasnya: redis-py 8
+# memberi socket_timeout default 5 dtk, sama dengan block, sehingga setiap XREAD yang tidak mendapat event
+# berakhir TimeoutError di sisi client sebelum jawaban kosong Redis sampai.
+XREAD_BLOCK_MS = 5000
+redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=XREAD_BLOCK_MS / 1000 + 10)
 http = httpx.AsyncClient(timeout=120.0, headers={"X-API-Key": API_KEY} if API_KEY else {})
 simulation: dict[str, Any] = {"callback": "ok"}
 watchers: dict[str, asyncio.Task[None]] = {}
@@ -133,7 +138,11 @@ async def emit(request_id: str, stage: str, status: str, *, type: str = "stage",
     summary.setdefault("created_at", event["ts"])
     summary["updated_at"] = event["ts"]
     if type == "stage":
-        summary.update(stage=stage, status=status)
+        # Jawaban orchestrator (GUARDRAILS DONE) datang setelah pipeline selesai atau berhenti; jangan sampai ia
+        # menutupi keadaan tahap yang lebih jauh (mis. STRUCTURING REJECTED) di daftar request.
+        entry_answer = stage == "GUARDRAILS" and status == "DONE"
+        if not entry_answer or summary.get("stage") in (None, "CLIENT", "GUARDRAILS"):
+            summary.update(stage=stage, status=status)
     elif type == "http":
         # Body ikut disimpan supaya daftar "Request terakhir" bisa memperlihatkan bedanya jawaban 200 dan 202.
         summary.update(
@@ -142,6 +151,7 @@ async def emit(request_id: str, stage: str, status: str, *, type: str = "stage",
             elapsed_ms=fields.get("elapsed_ms"),
             wait_seconds=fields.get("wait_seconds"),
             body=fields.get("body"),
+            rejected_by=fields.get("rejected_by"),
         )
     elif type == "client":
         summary.update(filename=fields.get("filename"), slow=fields.get("slow"), stage="CLIENT", status=status)
@@ -224,6 +234,7 @@ async def watch_db(request_id: str) -> None:
         return
     seen_jobs: dict[str, tuple[str, int]] = {}
     seen_rows: dict[int, dict[str, Any]] = {}
+    rejected = False
     deadline = time.time() + DB_WATCH_TIMEOUT
     while time.time() < deadline:
         async with db.acquire() as conn:
@@ -246,14 +257,17 @@ async def watch_db(request_id: str) -> None:
                 continue
             seen_jobs[stage] = key
             result = await fetch_result(stage, request_id) if job["status"] == "DONE" else None
+            # Aturan structuring yang menolak: job-nya DONE dengan reject_reason, dan scoring tidak pernah jalan.
+            reject_reason = result.get("reject_reason") if isinstance(result, dict) else None
+            rejected = rejected or bool(reject_reason)
             await emit(
                 request_id,
                 stage,
-                job["status"],
+                "REJECTED" if reject_reason else job["status"],
                 source="db",
                 attempt=job["attempts"],
                 result=result,
-                error_message=job["error_message"],
+                error_message=reject_reason or job["error_message"],
             )
 
         current = {row["id"]: _outbox_view(row) for row in rows}
@@ -275,7 +289,7 @@ async def watch_db(request_id: str) -> None:
                 await emit(request_id, "OUTBOX", "DELIVERED", type="outbox", message=seen_rows.pop(row_id))
 
         statuses = {stage: job["status"] for stage, job in jobs.items() if job is not None}
-        finished = statuses.get("SCORING") == "DONE" or "FAILED" in statuses.values()
+        finished = rejected or statuses.get("SCORING") == "DONE" or "FAILED" in statuses.values()
         pending = [v for v in current.values() if not v["failed_at"]]
         dead = [v for v in current.values() if v["failed_at"]]
         # Jalur 200: orchestrator baru menjawab setelah pipeline selesai, jadi jawabannya bisa tiba
@@ -295,6 +309,29 @@ def start_watcher(request_id: str) -> None:
     watchers[request_id] = asyncio.create_task(watch_db(request_id))
 
 
+def stop_watcher(request_id: str) -> None:
+    """Untuk request yang tidak pernah masuk pipeline: tidak ada baris yang perlu ditunggu."""
+    task = watchers.pop(request_id, None)
+    if task is not None:
+        task.cancel()
+
+
+def is_rejection(body: dict[str, Any]) -> bool:
+    """Dokumen ditolak (model guardrails atau aturan structuring): 200 dengan job_status failed dan guardrails 1."""
+    return body.get("job_status") == "failed" and body.get("guardrails") == 1
+
+
+async def rejected_by(request_id: str) -> str:
+    """Siapa yang menolak, dibaca dari GET status orchestrator: 404 = tidak ada tahap yang punya job (model
+    guardrails), 200 = tahap-tahap jalan lalu aturan structuring menolak."""
+    try:
+        r = await http.get(f"{ORCHESTRATOR_URL}/v1/extract-ocr/{request_id}")
+    except httpx.HTTPError as exc:
+        log.warning("status %s: %s", request_id, exc)
+        return "guardrails"
+    return "structuring" if r.status_code == 200 else "guardrails"
+
+
 async def poll_stages(request_id: str) -> None:
     """Pengganti callback di mode GKE: tarik status tiap tahap sampai selesai."""
     deadline = time.time() + POLL_TIMEOUT
@@ -310,6 +347,13 @@ async def poll_stages(request_id: str) -> None:
                 continue
             data = r.json().get("data") or {}
             status = data.get("status")
+            reject_reason = (data.get("result") or {}).get("reject_reason")
+            if status == "DONE" and reject_reason:
+                await emit(
+                    request_id, stage, "REJECTED", source="poll", result=data.get("result"), error_message=reject_reason
+                )
+                await emit(request_id, "PIPELINE", "END", type="pipeline")
+                return
             if status == "DONE":
                 await emit(request_id, stage, "DONE", source="poll", result=data.get("result"))
                 if stage != "SCORING":
@@ -370,6 +414,9 @@ async def submit(
         await emit(request_id, "PIPELINE", "END", type="pipeline")
         raise HTTPException(status_code=503, detail="orchestrator service unavailable") from exc
     elapsed_ms = round((time.perf_counter() - started) * 1000)
+    rejector = None
+    if r.status_code == 200 and is_rejection(body):
+        rejector = await rejected_by(request_id)
     await emit(
         request_id,
         "GUARDRAILS",
@@ -382,10 +429,22 @@ async def submit(
         elapsed_ms=elapsed_ms,
         wait_seconds=WAIT_SECONDS,
         body=body,
+        rejected_by=rejector,
     )
-    if r.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR":
+    if rejector == "guardrails":
         await emit(request_id, "GUARDRAILS", "REJECTED", elapsed_ms=elapsed_ms, error_message=body.get("message"))
+        stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
+        return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
+    if rejector == "structuring":
+        # Lolos guardrails; OCR dan structuring jalan, lalu aturan structuring menolak. Kartu STRUCTURING
+        # menjadi REJECTED dari watcher DB (atau polling), yang juga menutup request.
+        await emit(request_id, "GUARDRAILS", "DONE", elapsed_ms=elapsed_ms)
+        if pool is None and not POLL:
+            await emit(request_id, "STRUCTURING", "REJECTED", source="orchestrator", error_message=body.get("message"))
+            await emit(request_id, "PIPELINE", "END", type="pipeline")
+        elif POLL:
+            asyncio.create_task(poll_stages(request_id))
         return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
     if r.status_code not in (200, 202, 422):
         await emit(request_id, "GUARDRAILS", "FAILED", http_status=r.status_code, error_message=body.get("message"))
@@ -507,10 +566,17 @@ async def events(request_id: str, request: Request):
     """SSE: replay seluruh stream lalu live. Ditutup pada event pipeline END atau saat client pergi."""
 
     async def generate():
-        last_id = "0"
+        # EventSource yang menyambung ulang mengirim Last-Event-ID: lanjutkan dari situ. Mulai dari "0" lagi
+        # membuat UI menambahkan semua event sekali lagi (timeline dobel).
+        last_id = request.headers.get("last-event-id") or "0"
         idle = 0
         while not await request.is_disconnected():
-            entries = await redis.xread({_stream(request_id): last_id}, block=5000, count=100)
+            try:
+                entries = await redis.xread({_stream(request_id): last_id}, block=XREAD_BLOCK_MS, count=100)
+            except RedisError as exc:
+                # Stream ditutup; browser menyambung ulang sendiri dan melanjutkan dari Last-Event-ID.
+                log.warning("SSE %s: Redis %s: %s", request_id, type(exc).__name__, exc)
+                return
             if not entries:
                 idle += 1
                 yield ": keep-alive\n\n"

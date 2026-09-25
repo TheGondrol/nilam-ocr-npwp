@@ -13,8 +13,10 @@ from ocr_common.web.security import verify_api_key
 
 from app.api.extract_contract import (
     COMPLETED_MESSAGE,
+    GUARDRAILS_REJECTED_MESSAGE,
+    PASSED,
     PROCESSING_MESSAGE,
-    REJECTED_CODE,
+    REJECTED,
     extract_body,
     extract_response,
 )
@@ -39,7 +41,7 @@ _COMPLETED = extract_body(
     COMPLETED_MESSAGE,
     data=_DATA,
     job_status="completed",
-    guardrails=1,
+    guardrails=PASSED,
     errors=None,
     request_id=RID,
     document_type="npwp",
@@ -54,21 +56,36 @@ _PROCESSING = extract_body(
     params=_PARAMS,
 )
 _REJECTED = extract_body(
-    400,
-    "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
-    errors=REJECTED_CODE,
+    200,
+    GUARDRAILS_REJECTED_MESSAGE,
     job_status="failed",
-    guardrails=0,
+    guardrails=REJECTED,
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
+)
+_RULES_REJECTED = extract_body(
+    200,
+    "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+    job_status="failed",
+    guardrails=REJECTED,
+    request_id=RID,
+    document_type="npwp",
+    params=_PARAMS,
+)
+_UNSUPPORTED = extract_body(
+    400,
+    "Unsupported document_type: ktp. Supported: npwp",
+    errors="UNSUPPORTED_DOCUMENT_TYPE",
+    request_id=RID,
+    document_type="ktp",
 )
 _FAILED = extract_body(
     422,
     "No text lines to structure",
     errors="STRUCTURING_FAILED",
     job_status="failed",
-    guardrails=1,
+    guardrails=PASSED,
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
@@ -77,12 +94,16 @@ _FAILED = extract_body(
 _CONTRACT_TABLE = (
     "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` |\n"
     "|---|---|---|---|---|---|\n"
-    "| Finished | 200 | `completed` | the fields | `1` | null |\n"
+    "| Finished | 200 | `completed` | the fields | `0` | null |\n"
     "| Still running | 202 | `processing` | null | null | null |\n"
-    f"| Rejected by the guardrails model | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
-    f"| Rejected by the structuring rules | 400 | `failed` | null | `0` | `{REJECTED_CODE}` |\n"
-    "| A stage failed | 422 | `failed` | null | `1` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
+    "| Rejected by the guardrails model | 200 | `failed` | null | `1` | null "
+    f"(`message`: `{GUARDRAILS_REJECTED_MESSAGE}`) |\n"
+    "| Rejected by the structuring rules | 200 | `failed` | null | `1` | null (`message`: the rules' reason) |\n"
+    "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` |\n\n"
+    "`guardrails` is `1` when the document was rejected (by the guardrails model or by the structuring rules) "
+    "and `0` when it passed. A rejection is an answer, not an error: `200` with `job_status: failed`; read "
+    "`guardrails`, not the HTTP status, to tell it from a result.\n\n"
 )
 
 
@@ -140,8 +161,10 @@ def _parse_params(raw: str | None) -> Any:
     ),
     responses={
         200: success_examples(
-            "Accepted and finished within the wait",
+            "Finished within the wait, or rejected (`guardrails: 1`)",
             completed=("The OCR result", _COMPLETED),
+            rejected_by_guardrails=("Rejected by the guardrails model", _REJECTED),
+            rejected_by_rules=("Rejected by the structuring rules", _RULES_REJECTED),
         ),
         202: {
             **success_examples(
@@ -153,12 +176,12 @@ def _parse_params(raw: str | None) -> Any:
         400: {
             "model": ExtractOcrResponse,
             "description": (
-                f"Rejected by the guardrails model or by the structuring rules (`{REJECTED_CODE}`, `guardrails: 0`), "
-                "unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
-                f"pages (`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
-                "`file_url` refused)"
+                "The request cannot be processed: unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more "
+                f"than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages (`{TOO_MANY_PAGES_MESSAGE}`, plain error envelope), or a "
+                "bad file / intake (empty, unsupported type, unreadable, `file_url` refused). A rejected document is "
+                "a 200, not a 400"
             ),
-            "content": {"application/json": {"example": _REJECTED}},
+            "content": {"application/json": {"example": _UNSUPPORTED}},
         },
         401: UNAUTHORIZED,
         413: error(
@@ -266,8 +289,8 @@ async def extract_ocr(
         + "Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is always "
         "null here (it is not stored) and `document_type` is `npwp`.\n\n"
         "**404** means no stage has a job for this request_id: it was refused or rejected by the guardrails model "
-        "(the `400` of the POST is its final answer), refused before the check, or its POST is still being "
-        "judged by guardrails.\n\n"
+        "(the POST's answer, `guardrails: 1`, is final: nothing is stored for it), refused before the check, or its "
+        "POST is still being judged by guardrails.\n\n"
         "**Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it became a "
         "dead letter in the outbox) leaves the next stage without a job, so this endpoint keeps answering `202` "
         "for it. The `FAILED` callback and the central orchestrator's own tables carry that final state; this "
@@ -275,8 +298,9 @@ async def extract_ocr(
     ),
     responses={
         200: success_examples(
-            "Finished",
+            "Finished, or rejected by the structuring rules (`guardrails: 1`)",
             completed=("The OCR result", {**_COMPLETED, "params": None}),
+            rejected_by_rules=("Rejected by the structuring rules", {**_RULES_REJECTED, "params": None}),
         ),
         202: {
             **success_examples(
@@ -284,19 +308,6 @@ async def extract_ocr(
                 processing=("Still processing", {**_PROCESSING, "params": None}),
             ),
             "model": ExtractOcrResponse,
-        },
-        400: {
-            "model": ExtractOcrResponse,
-            "description": f"Rejected by the structuring rules (`{REJECTED_CODE}`, `guardrails: 0`)",
-            "content": {
-                "application/json": {
-                    "example": {
-                        **_REJECTED,
-                        "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
-                        "params": None,
-                    }
-                }
-            },
         },
         401: UNAUTHORIZED,
         404: error(

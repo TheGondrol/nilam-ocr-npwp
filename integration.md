@@ -71,15 +71,19 @@ kalian. Orchestrator memeriksa file, meminta guardrails menilainya, lalu menungg
     POST :8034/v1/extract-ocr
       file > 2,5 MB              -> 413  message "Ukuran dokumen melebihi batas 2,5 MB, ..." (sebelum model)
       PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
-      ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0
-                                         tidak ada yang jalan, tidak ada callback
-      ditolak aturan structuring -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 0,
+      ditolak model guardrails   -> 200  job_status = failed, guardrails = 1, errors = null,
+                                         message = "guardrails rejected"; tidak ada yang jalan, tidak ada callback
+      ditolak aturan structuring -> 200  job_status = failed, guardrails = 1, errors = null,
                                          message = alasan penolakan dari aturan ML; scoring tidak jalan
-      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 1
-      lolos, gagal tepat waktu   -> 422  job_status = failed,
+      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 0
+      lolos, gagal tepat waktu   -> 422  job_status = failed, guardrails = 0,
                                          errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
       lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
                                          hasil menyusul di callback SCORING
+
+**`guardrails`: `1` = dokumen ditolak, `0` = lolos** (disepakati 25 September 2026; sebelumnya
+kebalikannya). Dokumen yang ditolak dijawab **200**, bukan 400: bedakan dari hasil lewat
+`guardrails` atau `job_status`, bukan lewat status HTTP.
 
 Callback bersifat **opsional**: kalau kalian tidak menyediakan endpoint callback, kami
 jalankan tanpa `ORCHESTRATION_URL`, tidak ada callback yang dikirim, dan hasil tiap request
@@ -168,7 +172,7 @@ Selesai dalam waktu tunggu, **200**:
       "request_id": "REQ_001",
       "document_type": "npwp",
       "job_status": "completed",
-      "guardrails": 1,
+      "guardrails": 0,
       "params": {"nik": "3123456711950001", "refno": "PK19039Y8U"}
     }
 
@@ -178,7 +182,7 @@ Selesai dalam waktu tunggu, **200**:
 - Flag dari aturan ekstraksi ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
   input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
   nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
-  menolak dokumen dengan 400 (lihat di bawah).
+  menolak dokumen (200, `guardrails: 1`, lihat di bawah).
 - Pencocokan nama fuzzy terhadap nama nasabah (`refno`) dilakukan di sisi Orkestrasi, sesuai
   keputusan ML engineer; service ini tidak memakainya.
 
@@ -189,28 +193,28 @@ Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback, a
      "data": null, "errors": null, "request_id": "REQ_001", "document_type": "npwp",
      "job_status": "processing", "guardrails": null, "params": {...}}
 
-Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
+Ditolak model guardrails, **200** dengan `guardrails: 1`; tidak ada yang jalan dan tidak ada callback:
 
-    {"status_code": 400, "status_desc": "Bad Request",
-     "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
-     "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+    {"status_code": 200, "status_desc": "OK", "message": "guardrails rejected",
+     "data": null, "errors": null, "request_id": "REQ_001",
+     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
 
-Ditolak aturan structuring ML engineer (23 Sep 2026), juga **400** dengan bentuk yang sama;
+Ditolak aturan structuring ML engineer (23 Sep 2026), juga **200** dengan bentuk yang sama;
 `message` adalah alasan penolakan pertama dari aturan itu (bukan alasan flag yang ditoleransi),
 dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan terjadi di tahap structuring, jadi scoring tidak jalan:
 
-    {"status_code": 400, "status_desc": "Bad Request",
+    {"status_code": 200, "status_desc": "OK",
      "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
-     "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+     "data": null, "errors": null, "request_id": "REQ_001",
+     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
 
 Alasan yang menolak: dokumen blur / blank, bukan format standar NPWP, dokumen lain terdeteksi,
 screenshot cek NPWP online, jumlah halaman melebihi batas, serta kode provinsi, kecamatan, tanggal
 lahir, atau KPP pada nomor yang tidak valid. Kalau dokumen punya beberapa alasan, yang dipakai
 adalah alasan penolakan pertama menurut urutan prioritas aturan ML. Kalau penolakan terjadi setelah
 jawaban 202, keadaan akhirnya adalah callback `STRUCTURING` `FAILED` dengan alasan itu sebagai
-`error_message`, dan baris 400 / `DOWNSTREAM_VALIDATION_ERROR` di tabel Orkestrasi.
+`error_message`, dan baris 400 / `DOWNSTREAM_VALIDATION_ERROR` di tabel Orkestrasi. **Catatan:**
+baris tabel dan callback itu belum ikut diubah ke 200; kabari kami kalau perlu disamakan.
 
 Tahap pipeline gagal dalam waktu tunggu, **422**; request berakhir di sini, sama seperti
 callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
@@ -218,13 +222,13 @@ callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
     {"status_code": 422, "status_desc": "Unprocessable Entity",
      "message": "ekstraksi OCR model is unavailable",
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
+     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
 
 Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lain):
 
 | Kode | `errors` | Arti | Pipeline jalan? |
 |---|---|---|---|
-| 400 | `UNSUPPORTED_DOCUMENT_TYPE` | `document_type` bukan `npwp` | tidak |
+| 400 | `UNSUPPORTED_DOCUMENT_TYPE` | `document_type` bukan `npwp` (dokumen yang *ditolak* bukan 400, lihat di atas) | tidak |
 | 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
@@ -249,15 +253,16 @@ tidak datang.
 
 | Keadaan | HTTP | `job_status` | `errors` |
 |---|---|---|---|
-| selesai | 200 | `completed` + `data` | null |
+| selesai | 200 | `completed` + `data`, `guardrails: 0` | null |
 | masih berjalan | 202 | `processing` | null |
-| ditolak aturan structuring | 400 | `failed`, `guardrails: 0` | `DOWNSTREAM_VALIDATION_ERROR` |
-| satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
+| ditolak aturan structuring | 200 | `failed`, `guardrails: 1`, `message` = alasannya | null |
+| satu tahap gagal | 422 | `failed`, `guardrails: 0` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
 | tidak dikenal | 404 | – | = `message` |
 
 - `params` selalu `null` di sini (tidak disimpan); `document_type` selalu `npwp`.
 - **404** berarti tidak ada tahap yang punya job untuk `request_id` itu: dokumennya ditolak model
-  guardrails (jawaban 400 di `POST` adalah jawaban finalnya), ditolak sebelum dinilai, atau
+  guardrails (jawaban `POST`-nya, `guardrails: 1`, adalah jawaban final; tidak ada yang disimpan),
+  ditolak sebelum dinilai, atau
   `POST`-nya masih berjalan di tahap penilaian guardrails.
 - **503 / 504** berarti salah satu tahap tidak bisa dibaca saat itu; coba lagi.
 - **Batasan:** serah terima antar tahap yang gagal permanen (setelah semua retry, atau menjadi dead

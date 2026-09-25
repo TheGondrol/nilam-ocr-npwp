@@ -33,13 +33,15 @@ function stageView(events, stage) {
   const http = stage === 'GUARDRAILS' ? events.find((e) => e.type === 'http') : null
   if (mine.length === 0 && callbacks.length === 0) return { status: 'PENDING', callbacks, http }
   const last = mine[mine.length - 1]
-  const status = last ? last.status : 'PROCESSING'
+  // Penolakan aturan structuring datang dua kali (baris DB REJECTED dan callback FAILED) dalam urutan acak.
+  const rejected = mine.find((e) => e.status === 'REJECTED')
+  const status = rejected ? 'REJECTED' : last ? last.status : 'PROCESSING'
   const started = mine.find((e) => e.status === 'PROCESSING')?.ts
   const finished = last && ['DONE', 'FAILED', 'REJECTED'].includes(last.status) ? last.ts : null
   let elapsed = last?.elapsed_ms
   if (elapsed == null && started && finished) elapsed = (finished - started) * 1000
   const withResult = [...mine].reverse().find((e) => e.result)
-  const db = mine.find((e) => e.source === 'db' && ['DONE', 'FAILED'].includes(e.status))
+  const db = mine.find((e) => e.source === 'db' && ['DONE', 'FAILED', 'REJECTED'].includes(e.status))
   const acknowledged = mine.find((e) => e.source === 'callback' && ['DONE', 'FAILED'].includes(e.status))
   return {
     status,
@@ -80,7 +82,8 @@ function describe(e, t0) {
         e.errors ? ` (${e.errors})` : ''
       } setelah ${fmtMs(e.elapsed_ms)} · batas tunggu ${e.wait_seconds} dtk`
     case 'stage':
-      if (e.stage === 'GUARDRAILS') return `Guardrails: ${e.status}${e.error_message ? ` · ${e.error_message}` : ''}`
+      if (e.stage === 'GUARDRAILS') return `${LABELS.GUARDRAILS}: ${e.status}${e.error_message ? ` · ${e.error_message}` : ''}`
+      if (e.status === 'REJECTED') return `${LABELS[e.stage]}: dokumen ditolak aturan ML · ${e.error_message}`
       if (e.source === 'db') {
         if (e.status === 'PROCESSING') return `${LABELS[e.stage]}: job diklaim (INSERT ${e.stage.toLowerCase()}_jobs PROCESSING)`
         if (e.status === 'DONE') return `${LABELS[e.stage]}: hasil tersimpan, job DONE (transaksi commit)`
@@ -187,21 +190,24 @@ function Summary({ stage, result }) {
   return null
 }
 
-function httpClass(status) {
-  return status === 200 ? 'done' : status === 202 ? 'processing' : status === 400 ? 'rejected' : 'failed'
+// Dokumen yang ditolak dijawab 200 (guardrails: 1, job_status: failed); rejectedBy membedakannya dari hasil.
+function httpClass(status, rejectedBy) {
+  if (rejectedBy) return 'rejected'
+  return status === 200 ? 'done' : status === 202 ? 'processing' : 'failed'
 }
 
-function httpNote(status) {
+function httpNote(status, rejectedBy) {
+  if (rejectedBy === 'structuring') return '200: ditolak aturan structuring (guardrails: 1)'
+  if (rejectedBy) return '200: ditolak guardrails (guardrails: 1)'
   if (status === 200) return '200: hasil lengkap ada di response'
   if (status === 202) return '202: hanya request_id, hasil menyusul lewat callback'
   if (status === 422) return '422: satu tahap gagal di dalam batas tunggu'
-  if (status === 400) return '400: ditolak guardrails'
   return `HTTP ${status}`
 }
 
 function GuardrailsResponse({ http, t0 }) {
   if (!http) return null
-  const cls = httpClass(http.http_status)
+  const cls = httpClass(http.http_status, http.rejected_by)
   const within = http.elapsed_ms / 1000 <= http.wait_seconds
   return (
     <div className={`http ${cls}`}>
@@ -214,10 +220,13 @@ function GuardrailsResponse({ http, t0 }) {
         </span>
       </div>
       <div className="meta">
-        {http.http_status === 200 && 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.'}
-        {http.http_status === 202 && 'Batas tunggu habis sebelum SCORING selesai: hasil menyusul lewat callback SCORING (dan bisa dibaca lewat GET /v1/<tahap>/jobs).'}
+        {http.http_status === 200 && !http.rejected_by && 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.'}
+        {http.http_status === 202 && 'Batas tunggu habis sebelum SCORING selesai: hasil menyusul lewat callback, dan bisa dibaca kapan saja lewat GET /v1/extract-ocr/{request_id} di orchestrator.'}
         {http.http_status === 422 && 'Satu tahap gagal di dalam batas tunggu.'}
-        {http.http_status === 400 && 'Dokumen ditolak guardrails: tidak ada tahap yang dijalankan.'}
+        {http.rejected_by &&
+          (http.rejected_by === 'structuring'
+            ? 'Lolos guardrails, lalu ditolak aturan structuring ML: OCR dan structuring sudah jalan, scoring tidak.'
+            : 'Dokumen ditolak guardrails: tidak ada tahap yang dijalankan.')}
       </div>
       <Json value={http.body} label="response extract-ocr" />
     </div>
@@ -1019,7 +1028,7 @@ function Pipeline({ nav, overview: sharedOverview }) {
                 <span className="meta">
                   {r.http_status ? (
                     <>
-                      <span className={`pill ${httpClass(r.http_status)}`}>HTTP {r.http_status}</span> {r.job_status ?? ''}
+                      <span className={`pill ${httpClass(r.http_status, r.rejected_by)}`}>HTTP {r.http_status}</span> {r.job_status ?? ''}
                       {r.elapsed_ms != null ? ` · ${fmtMs(r.elapsed_ms)}` : ''}
                     </>
                   ) : (
@@ -1030,7 +1039,7 @@ function Pipeline({ nav, overview: sharedOverview }) {
               </button>
               {r.body && (
                 <div className="resp">
-                  <span className="meta">{httpNote(r.http_status)}</span>
+                  <span className="meta">{httpNote(r.http_status, r.rejected_by)}</span>
                   <Json value={r.body} label="response" />
                 </div>
               )}

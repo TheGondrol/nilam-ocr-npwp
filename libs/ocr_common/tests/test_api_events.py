@@ -67,7 +67,7 @@ async def test_completing_appends_a_completed_get_ocr_result_row(scoring):
     assert row["error_code"] is None
     assert row["ds"]
     data = row["result_data"]
-    assert data["result"] == {"document_type": "npwp", **DATA, "guardrails": 1}
+    assert data["result"] == {"document_type": "npwp", **DATA, "guardrails": 0}
     assert (data["status"], data["document_type"], data["error_code"], data["error_message"]) == (
         "completed",
         "npwp",

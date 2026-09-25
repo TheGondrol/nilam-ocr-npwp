@@ -54,7 +54,12 @@ if [[ -f "$HERE/.env" ]]; then
 fi
 TRACKER_TARGET="${TRACKER_TARGET:-local}"
 
-ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:8034}"
+# Mode GKE: port-forward orchestrator ada di 9034 (lihat di bawah); .env lama belum punya barisnya.
+if [[ "$TRACKER_TARGET" == "gke" ]]; then
+  ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:9034}"
+else
+  ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:8034}"
+fi
 GUARDRAILS_URL="${GUARDRAILS_URL:-http://127.0.0.1:8031}"
 EKSTRAKSI_URL="${EKSTRAKSI_URL:-http://127.0.0.1:8030}"
 STRUCTURING_URL="${STRUCTURING_URL:-http://127.0.0.1:8032}"

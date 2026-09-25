@@ -12,7 +12,7 @@ Untuk satu request, dari kiri ke kanan di layar:
 
 1. **Jawaban orchestrator**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
    202 `processing` (batas tunggu habis, hasil menyusul lewat callback), 422 (tahap gagal),
-   400 (ditolak guardrails), plus lamanya dibanding batas tunggu.
+   200 `guardrails: 1` (ditolak guardrails atau aturan structuring), plus lamanya dibanding batas tunggu.
 2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `<tahap>_jobs` DONE,
    dibaca langsung dari PostgreSQL) dan *orkestrasi tahu* (callback diterima tracker, attempt ke-n).
    Selisih keduanya adalah tempat outbox bekerja.
