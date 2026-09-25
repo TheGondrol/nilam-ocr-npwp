@@ -74,7 +74,7 @@ class ExtractOcrService:
                 done = {"stage": STAGE_OF[GUARDRAILS], "status": STATUS_DONE, "error_message": None}
                 return {**report, "job": None, "pipeline": done, "result": report}
         else:
-            logger.warning("guardrails skipped for request_id %s (pipeline_name_sequence %s)", request_id, sequence)
+            logger.info("guardrails left out for request_id %s (pipeline_name_sequence %s)", request_id, sequence)
             GUARDRAILS_SKIPPED.inc()
             report = None
             verdict = {"passed": True, "reason": None}

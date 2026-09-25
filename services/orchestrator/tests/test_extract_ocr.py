@@ -278,30 +278,8 @@ def test_a_sequence_ending_at_structuring_answers_with_its_result_as_it_is(clien
     assert stub_waiter.last_stages == ["STRUCTURING"]
 
 
-def test_leaving_guardrails_out_is_refused_with_403_while_not_allowed(client, auth, stub_guardrails, stub_extraction):
-    response = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
-
-    assert response.status_code == 403
-    assert response.json() == {
-        "status_code": 403,
-        "status_desc": "Forbidden",
-        "message": "a pipeline_name_sequence without guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off",
-        "data": None,
-        "errors": "GUARDRAILS_SKIP_NOT_ALLOWED",
-        "request_id": "OCR_1",
-        "document_type": "npwp",
-        "job_status": None,
-        "guardrails": None,
-        "params": None,
-    }
-    assert stub_guardrails.checked == [] and stub_extraction.submitted == []
-
-
-def test_without_guardrails_the_document_is_handed_on_without_a_report(
-    client, auth, settings_override, stub_guardrails, stub_extraction
-):
-    settings_override(guardrails_skip_allowed=True)
-
+def test_without_guardrails_the_document_is_handed_on_without_a_report(client, auth, stub_guardrails, stub_extraction):
+    """Leaving guardrails out is the central orchestrator's call: no setting here can refuse it."""
     # A file name the guardrails model rejects: left out of the sequence, it never gets to judge it.
     response = _submit(client, auth, filename="notnpwp.jpg", pipeline_name_sequence=NO_GUARDRAILS)
 
@@ -313,8 +291,7 @@ def test_without_guardrails_the_document_is_handed_on_without_a_report(
     assert (handed["guardrails"], handed["sequence"]) == (None, NO_GUARDRAILS)
 
 
-def test_without_guardrails_the_structuring_rules_still_reject(client, auth, settings_override, stub_waiter):
-    settings_override(guardrails_skip_allowed=True)
+def test_without_guardrails_the_structuring_rules_still_reject(client, auth, stub_waiter):
     stub_waiter.outcome = WaitOutcome("STRUCTURING", STATUS_REJECTED, "dokumen blur / blank")
 
     response = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
@@ -329,7 +306,6 @@ def test_without_guardrails_the_structuring_rules_still_reject(client, auth, set
 
 
 def test_without_guardrails_the_file_checks_still_run(client, auth, settings_override, stub_extraction):
-    settings_override(guardrails_skip_allowed=True)
     pages = _submit(
         client,
         auth,
@@ -338,7 +314,7 @@ def test_without_guardrails_the_file_checks_still_run(client, auth, settings_ove
         content_type="application/pdf",
         pipeline_name_sequence=NO_GUARDRAILS,
     )
-    settings_override(guardrails_skip_allowed=True, max_upload_bytes=10)
+    settings_override(max_upload_bytes=10)
     size = _submit(client, auth, pipeline_name_sequence=NO_GUARDRAILS)
 
     assert (pages.status_code, pages.json()["message"]) == (400, TOO_MANY_PAGES)

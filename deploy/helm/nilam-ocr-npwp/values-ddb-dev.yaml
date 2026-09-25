@@ -35,10 +35,6 @@ networkPolicy:
   clientNamespaces: [ocr-dev]
 
 services:
-  orchestrator:
-    env:
-      # Dev: Orkestrasi pusat boleh melewati model guardrails per request (pipeline_name_sequence tanpa guardrails).
-      GUARDRAILS_SKIP_ALLOWED: "true"
   extraction:
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070

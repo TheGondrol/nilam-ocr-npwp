@@ -165,7 +165,7 @@ guardrails butuh hasil service sebelumnya).
 | `[guardrails, extraction, structuring]` | ya | hasil structuring apa adanya: `{fields, flag, flag_reason, reject_reason, ...}` |
 | `[guardrails, extraction]` | ya | hasil OCR apa adanya: `{full_text, blocks, ...}` |
 | `[guardrails]` | ya | laporan guardrails apa adanya: `{passed, reason, document, pages}` |
-| `[extraction, structuring, scoring]`, `[extraction, structuring]`, `[extraction]` | ya, kalau guardrails boleh dilewati (lihat di bawah) | seperti baris yang sama di atas |
+| `[extraction, structuring, scoring]`, `[extraction, structuring]`, `[extraction]` | ya: guardrails dilewati (lihat di bawah) | seperti baris yang sama di atas |
 | `[extraction, scoring]`, `[guardrails, structuring]` | tidak: ada yang dilewati di tengah | **422** `INVALID_PIPELINE_SEQUENCE` |
 | `[structuring, scoring]`, `[scoring]` | tidak: tidak ada input untuk service pertama | **422** `INVALID_PIPELINE_SEQUENCE` |
 | urutan terbalik, nama dobel, nama tidak dikenal (mis. `ekstraksi`) | tidak | **422** `INVALID_PIPELINE_SEQUENCE` |
@@ -177,9 +177,8 @@ tetap bisa menolak (400) selama `structuring` ada di urutan. Request `[guardrail
 menyimpan apa pun: jawaban POST-nya final, dan `GET /v1/extract-ocr/{request_id}` untuknya dijawab 404.
 
 **Melewati guardrails.** Urutan tanpa `guardrails` membuat dokumen tidak dinilai model guardrails dan
-langsung masuk pipeline. Ini hanya berlaku kalau service mengizinkannya (`GUARDRAILS_SKIP_ALLOWED`,
-nyala di dev). Kalau tidak diizinkan, jawabannya **403** `GUARDRAILS_SKIP_NOT_ALLOWED` dan tidak ada
-yang dijalankan. Yang tetap berlaku:
+langsung masuk pipeline. Keputusannya sepenuhnya di kalian: kami tidak punya pengaturan yang
+menolaknya. OCR (`extraction`) tidak bisa dilewati. Yang tetap berlaku:
 
 - pengecekan file: tipe, 2,5 MB (413), dan 2 halaman (400);
 - aturan structuring: dokumen blur / blank, kode wilayah salah, dan seterusnya tetap dijawab 400
@@ -270,7 +269,6 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
-| 403 | `GUARDRAILS_SKIP_NOT_ALLOWED` | `pipeline_name_sequence` tanpa `guardrails`, tetapi service tidak mengizinkannya | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
@@ -537,7 +535,6 @@ penjelasan yang aman untuk di-log.
 | 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
 | 413 | file lebih dari 2,5 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
-| 403 | `pipeline_name_sequence` tanpa `guardrails`, tanpa izin di service (`GUARDRAILS_SKIP_NOT_ALLOWED`) |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |

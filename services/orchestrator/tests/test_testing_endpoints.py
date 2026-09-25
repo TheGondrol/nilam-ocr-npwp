@@ -91,11 +91,8 @@ def test_testing_endpoint_takes_the_sequence_like_the_live_one(auth):
     client = make_client(app)
 
     without_guardrails = ["extraction", "structuring", "scoring"]
-    refused = _submit(client, auth, "/v1/extract-ocr-test", pipeline_name_sequence=without_guardrails)
-    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
     skipped = _submit(client, auth, "/v1/extract-ocr-test", pipeline_name_sequence=without_guardrails)
 
-    assert refused.status_code == 403
     assert skipped.status_code == 200
     assert guardrails.checked == []
     assert [(job["guardrails"], job["sequence"]) for job in extraction.submitted] == [(None, without_guardrails)]

@@ -50,10 +50,6 @@ def test_localhost_services_are_fine_locally():
     assert settings.port == 8034
 
 
-def test_skipping_guardrails_is_not_allowed_by_default():
-    assert Settings(api_key="x", _env_file=None, environment="local").guardrails_skip_allowed is False
-
-
 def test_pipeline_wait_defaults_to_15_seconds_and_can_be_changed():
     assert Settings(api_key="x", _env_file=None, environment="local").pipeline_wait_seconds == 15.0
     assert (

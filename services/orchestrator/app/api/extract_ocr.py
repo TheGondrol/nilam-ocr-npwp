@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import DOCUMENT_TYPE
-from ocr_common.pipeline import DEFAULT_SEQUENCE, GUARDRAILS, InvalidSequence, validate_sequence
+from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
 from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
@@ -29,10 +29,6 @@ router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
-SKIP_NOT_ALLOWED_CODE = "GUARDRAILS_SKIP_NOT_ALLOWED"
-SKIP_NOT_ALLOWED_MESSAGE = (
-    "a pipeline_name_sequence without guardrails is not allowed here: GUARDRAILS_SKIP_ALLOWED is off"
-)
 INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
@@ -101,13 +97,6 @@ _GUARDRAILS_ONLY = extract_body(
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
-)
-_SKIP_NOT_ALLOWED = extract_body(
-    403,
-    SKIP_NOT_ALLOWED_MESSAGE,
-    errors=SKIP_NOT_ALLOWED_CODE,
-    request_id=RID,
-    document_type="npwp",
 )
 
 _CONTRACT_TABLE = (
@@ -187,8 +176,7 @@ def _parse_params(raw: str | None) -> Any:
         "only `guardrails` runs, the OCR result (`{text, blocks, ...}`) after `extraction`, the structuring result "
         "(`{fields, flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. "
         "The rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving "
-        "`guardrails` out is only allowed when this service allows it (`GUARDRAILS_SKIP_ALLOWED`; otherwise "
-        f"`403` `{SKIP_NOT_ALLOWED_CODE}` and nothing runs); the file checks above always run, and the trust "
+        "`guardrails` out is the central orchestrator's call: the file checks above always run, and the trust "
         "model then works without a guardrails probability. A `guardrails`-only request stores nothing: its "
         "POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
@@ -230,14 +218,6 @@ def _parse_params(raw: str | None) -> Any:
             "content": {"application/json": {"example": _REJECTED}},
         },
         401: UNAUTHORIZED,
-        403: {
-            "model": ExtractOcrResponse,
-            "description": (
-                "A `pipeline_name_sequence` without `guardrails` while `GUARDRAILS_SKIP_ALLOWED` is off "
-                f"(`{SKIP_NOT_ALLOWED_CODE}`); nothing was started"
-            ),
-            "content": {"application/json": {"example": _SKIP_NOT_ALLOWED}},
-        },
         413: error(
             413,
             "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started",
@@ -290,8 +270,7 @@ async def extract_ocr(
         description=(
             "The services to run, in order: `guardrails`, `extraction`, `structuring`, `scoring`; guardrails "
             "optional at the front, the end may be cut off, nothing skipped in the middle. Repeated form fields, or "
-            "one JSON array string. Omitted: all four. The last one's result is `data`, as it is. Without "
-            f"`guardrails` only when `GUARDRAILS_SKIP_ALLOWED` is on, else `403` `{SKIP_NOT_ALLOWED_CODE}`"
+            "one JSON array string. Omitted: all four. The last one's result is `data`, as it is"
         ),
         examples=[["guardrails", "extraction", "structuring", "scoring"]],
     ),
@@ -327,15 +306,6 @@ async def extract_ocr(
             422,
             f"Invalid pipeline_name_sequence: {exc}",
             errors=INVALID_SEQUENCE_CODE,
-            request_id=request_id,
-            document_type=document_type,
-        )
-    if GUARDRAILS not in sequence and not settings.guardrails_skip_allowed:
-        response.status_code = 403
-        return extract_body(
-            403,
-            SKIP_NOT_ALLOWED_MESSAGE,
-            errors=SKIP_NOT_ALLOWED_CODE,
             request_id=request_id,
             document_type=document_type,
         )

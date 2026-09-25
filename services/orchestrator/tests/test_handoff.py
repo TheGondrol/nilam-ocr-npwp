@@ -7,7 +7,6 @@ import pytest
 from ocr_common.clients.remote import RemoteModelClient
 
 from app.clients.extraction import ExtractionJobClient
-from app.config import get_settings
 from app.dependencies import get_extraction_client
 from app.main import app
 from tests.conftest import JPEG
@@ -113,20 +112,16 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
 def test_a_document_without_guardrails_is_handed_over_without_a_guardrails_field(client, auth, extraction):
     """extraction refuses a `guardrails` that is not a JSON object, so no report means no field, not `null`."""
     handler = extraction(_accepted)
-    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"guardrails_skip_allowed": True})
-    try:
-        response = client.post(
-            "/v1/extract-ocr",
-            headers=auth,
-            data={
-                "request_id": RID,
-                "document_type": "npwp",
-                "pipeline_name_sequence": ["extraction", "structuring"],
-            },
-            files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
-        )
-    finally:
-        app.dependency_overrides.pop(get_settings, None)
+    response = client.post(
+        "/v1/extract-ocr",
+        headers=auth,
+        data={
+            "request_id": RID,
+            "document_type": "npwp",
+            "pipeline_name_sequence": ["extraction", "structuring"],
+        },
+        files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
+    )
 
     assert response.status_code == 200
     [sent] = handler.requests
