@@ -149,6 +149,11 @@ menunggu pod siap dan otomatis rollback kalau gagal.
 Perubahan `libs/ocr_common` masuk ke semua image; deploy `all`. Perubahan tabel dijalankan dulu
 dengan [migrate-db.sh](migrate-db.sh) sebelum deploy image yang membutuhkannya.
 
+**Riwayat release.** Setiap `helm upgrade` atau `helm rollback` menyimpan satu revisi sebagai Secret
+`sh.helm.release.v1.nilam-ocr-npwp.v<N>` di namespace; itulah yang dipakai `helm rollback`. `deploy.sh`
+menyimpan 5 revisi terakhir (`--history-max`, ubah lewat env `HISTORY_MAX`); revisi yang lebih tua
+dibuang Helm sendiri pada upgrade berikutnya, jadi Secret itu tidak perlu dihapus manual.
+
 **Upgrade ke chart 0.3.0 (orchestrator sebagai pintu masuk): wajib `deploy.sh all`.** Values baru
 mengubah ConfigMap guardrails (tanpa `*_SERVICE_URL` dan `PIPELINE_WAIT_SECONDS`), jadi annotation
 `checksum/config` me-roll pod guardrails walau guardrails tidak disebut. Image guardrails lama menolak

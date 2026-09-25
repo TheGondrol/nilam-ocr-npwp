@@ -11,6 +11,8 @@ REGISTRY="${REGISTRY:-asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribr
 IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 TIMEOUT="${TIMEOUT:-10m}"
+# Revisi release yang disimpan Helm (satu Secret sh.helm.release.v1.<release>.vN per revisi), untuk rollback.
+HISTORY_MAX="${HISTORY_MAX:-5}"
 ALL_SERVICES=(orchestrator guardrails ekstraksi structuring scoring)
 
 usage() {
@@ -39,7 +41,8 @@ Opsi:
   -h, --help      tampilkan bantuan ini
 
 Environment: DEPLOY_ENV (default ddb-dev -> values-ddb-dev.yaml), RELEASE, NAMESPACE,
-REGISTRY, EXPECTED_CONTEXT, TIMEOUT (default 10m).
+REGISTRY, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
+untuk rollback, default 5).
 
 Contoh:
   deploy/helm/deploy.sh scoring
@@ -176,7 +179,8 @@ if [[ $BUILD_ONLY -eq 1 ]]; then
   exit 0
 fi
 
-HELM_ARGS=(upgrade "$RELEASE" "$CHART" -n "$NAMESPACE" --reset-then-reuse-values -f "$VALUES" --timeout "$TIMEOUT")
+HELM_ARGS=(upgrade "$RELEASE" "$CHART" -n "$NAMESPACE" --reset-then-reuse-values -f "$VALUES" --timeout "$TIMEOUT"
+  --history-max "$HISTORY_MAX")
 for svc in "${SERVICES[@]}"; do
   HELM_ARGS+=(--set "services.$svc.image.tag=$TAG")
 done
