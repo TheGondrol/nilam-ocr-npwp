@@ -197,6 +197,7 @@ paths:
                         n_pages: 1
                         n_approve: 1
                         n_reject: 0
+                        reject_threshold: 0.5
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -218,6 +219,7 @@ paths:
                         n_pages: 1
                         n_approve: 0
                         n_reject: 1
+                        reject_threshold: 0.5
                       pages:
                       - page_index: 0
                         proba_approve: 0.1179
@@ -375,6 +377,18 @@ components:
           description: Pages with verdict `reject`
           examples:
           - 0
+        reject_threshold:
+          anyOf:
+          - type: number
+            exclusiveMaximum: 1.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Reject Threshold
+          description: 'The reject threshold the pages were judged with: the central orchestrator''s (`GUARDRAILS_THRESHOLD_URL`),
+            else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s 0.5). Null with the
+            `remote` backend, which applies its own'
+          examples:
+          - 0.5
       type: object
       required:
       - verdict
@@ -574,7 +588,7 @@ components:
           - accepted
           - reject
           title: Verdict
-          description: '`reject` when `proba_reject` reaches the reject threshold (0.5 by default)'
+          description: '`reject` when `proba_reject` reaches the reject threshold (`document.reject_threshold`)'
           examples:
           - accepted
       type: object

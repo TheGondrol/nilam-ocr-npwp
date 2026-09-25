@@ -372,7 +372,12 @@ guardrails (internal, model):
 | `GUARDRAILS_MODEL_PATH` | Jika `efficientnet` | `weights/best_model.pt` | Checkpoint (`model_state_dict`, `class_names`, `image_size`, `reject_threshold`) |
 | `GUARDRAILS_DEVICE` | Tidak | `cpu` | Inference CPU saja (image memakai wheel torch CPU); nilai lain jatuh ke cpu dengan peringatan |
 | `GUARDRAILS_TORCH_THREADS` | Tidak | bawaan torch | Batas thread torch; samakan dengan limit CPU container |
-| `GUARDRAILS_REJECT_THRESHOLD` | Tidak | dari checkpoint (`0.5`) | Backend lokal saja. Halaman reject kalau `proba_reject >= ambang` |
+| `GUARDRAILS_REJECT_THRESHOLD` | Tidak | dari checkpoint (`0.5`) | Backend lokal saja. Halaman reject kalau `proba_reject >= ambang`. Ini **default**-nya: ambang dari Orkestrasi pusat (`GUARDRAILS_THRESHOLD_URL`) didahulukan |
+| `GUARDRAILS_THRESHOLD_URL` | Tidak | – | Base URL Orkestrasi pusat, pemilik ambang reject (bisa diubah tanpa deploy di sini). Guardrails `GET {URL}{GUARDRAILS_THRESHOLD_PATH}` → `{"reject_threshold": 0.5}`. Kosong, tidak terjangkau, atau jawabannya bukan angka di antara 0 dan 1 → nilai terakhir yang pernah diberikan, kalau belum pernah → default. Ambang yang dipakai tercatat di `document.reject_threshold`. Endpoint aslinya belum ada; dummy-nya di tracker (`http://127.0.0.1:8090`) |
+| `GUARDRAILS_THRESHOLD_PATH` | Tidak | `/v1/thresholds/guardrails` | Path endpoint ambang di Orkestrasi pusat; sesuaikan begitu endpoint aslinya ada |
+| `GUARDRAILS_THRESHOLD_API_KEY` | Tidak | – | Dikirim sebagai `X-API-Key` ke endpoint ambang |
+| `GUARDRAILS_THRESHOLD_TIMEOUT_SECONDS` | Tidak | `2` | Batas tunggu endpoint ambang; lewat → default, dokumen tetap dinilai |
+| `GUARDRAILS_THRESHOLD_CACHE_SECONDS` | Tidak | `60` | Ambang disimpan selama ini per pod; perubahan di Orkestrasi berlaku paling lambat setelah ini |
 | `GUARDRAILS_DOCUMENT_POLICY` | Tidak | `all` | Backend lokal saja. `all`: accepted hanya kalau semua halaman accepted; `majority`: accepted > reject |
 | `GUARDRAILS_PDF_DPI` / `GUARDRAILS_MAX_PAGES` | Tidak | `150` / `20` | Backend lokal saja. Render PDF per halaman |
 | `GUARDRAILS_MAX_DOCUMENT_PAGES` | Tidak | `2` | Kedua backend. PDF dengan halaman lebih dari ini ditolak **400** `Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP` sebelum model jalan (permintaan ML engineer: NPWP asli maksimal 2 halaman; pengecekan dipindah dari structuring ke guardrails supaya OCR tidak dibebani) |

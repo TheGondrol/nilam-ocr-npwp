@@ -21,13 +21,27 @@ _REJECTED_PAGE = {"page_index": 0, "proba_approve": 0.1179, "proba_reject": 0.88
 _ACCEPTED_REPORT = {
     "passed": True,
     "reason": None,
-    "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
+    "document": {
+        "verdict": "accepted",
+        "confidence": 0.9821,
+        "n_pages": 1,
+        "n_approve": 1,
+        "n_reject": 0,
+        "reject_threshold": 0.5,
+    },
     "pages": [_ACCEPTED_PAGE],
 }
 _REJECTED_REPORT = {
     "passed": False,
     "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
-    "document": {"verdict": "reject", "confidence": 0.8821, "n_pages": 1, "n_approve": 0, "n_reject": 1},
+    "document": {
+        "verdict": "reject",
+        "confidence": 0.8821,
+        "n_pages": 1,
+        "n_approve": 0,
+        "n_reject": 1,
+        "reject_threshold": 0.5,
+    },
     "pages": [_REJECTED_PAGE],
 }
 

@@ -124,6 +124,9 @@ services:
       GUARDRAILS_DEVICE: cpu
       # Samakan dengan limits.cpu; tanpa ini torch membuat thread sebanyak core node.
       GUARDRAILS_TORCH_THREADS: "2"
+      # Ambang reject dari Orkestrasi pusat; isi begitu endpoint-nya ada. Kosong = default 0.5 (checkpoint).
+      # GUARDRAILS_THRESHOLD_URL: http://<orkestrasi-pusat>
+      # GUARDRAILS_THRESHOLD_PATH: /v1/thresholds/guardrails
     resources:
       requests:
         cpu: "1"

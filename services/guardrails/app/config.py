@@ -18,7 +18,16 @@ class Settings(BaseServiceSettings):
     guardrails_model_path: str = "weights/best_model.pt"
     guardrails_device: str = "cpu"
     guardrails_torch_threads: int | None = None
-    guardrails_reject_threshold: float | None = None
+    guardrails_reject_threshold: float | None = Field(None, gt=0, lt=1)
+
+    # The reject threshold is owned by the central orchestrator: GET GUARDRAILS_THRESHOLD_URL +
+    # GUARDRAILS_THRESHOLD_PATH answers {"reject_threshold": 0.5}, cached GUARDRAILS_THRESHOLD_CACHE_SECONDS.
+    # Unset, unreachable or an invalid answer -> GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's (0.5).
+    guardrails_threshold_url: str | None = None
+    guardrails_threshold_path: str = "/v1/thresholds/guardrails"
+    guardrails_threshold_api_key: str | None = None
+    guardrails_threshold_timeout_seconds: float = Field(2.0, gt=0)
+    guardrails_threshold_cache_seconds: float = Field(60.0, ge=0)
 
     guardrails_document_policy: Literal["all", "majority"] = "all"
     guardrails_pdf_dpi: int = 150
@@ -30,7 +39,9 @@ class Settings(BaseServiceSettings):
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:
         self.reject_mock_backend_outside_local(guardrails_backend=self.guardrails_backend)
-        self.reject_localhost_outside_local(guardrails_model_url=self.guardrails_model_url)
+        self.reject_localhost_outside_local(
+            guardrails_model_url=self.guardrails_model_url, guardrails_threshold_url=self.guardrails_threshold_url
+        )
         return self
 
 

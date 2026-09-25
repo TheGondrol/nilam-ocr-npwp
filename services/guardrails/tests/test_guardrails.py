@@ -78,6 +78,7 @@ async def test_all_pages_accepted_gives_accepted_with_weakest_page_confidence():
         "n_pages": 3,
         "n_approve": 3,
         "n_reject": 0,
+        "reject_threshold": 0.5,
     }
     assert [p["verdict"] for p in report["pages"]] == ["accepted"] * 3
     assert report["pages"][1] == {"page_index": 1, "proba_approve": 0.80, "proba_reject": 0.20, "verdict": "accepted"}
@@ -86,7 +87,14 @@ async def test_all_pages_accepted_gives_accepted_with_weakest_page_confidence():
 async def test_policy_all_rejects_document_when_one_page_rejected():
     classifier = StubClassifier((0.99, 0.01), (0.30, 0.70))
     report = await GuardrailsService(classifier, _settings()).check("a.pdf", "application/pdf", _pdf(2))
-    assert report["document"] == {"verdict": "reject", "confidence": 0.70, "n_pages": 2, "n_approve": 1, "n_reject": 1}
+    assert report["document"] == {
+        "verdict": "reject",
+        "confidence": 0.70,
+        "n_pages": 2,
+        "n_approve": 1,
+        "n_reject": 1,
+        "reject_threshold": 0.5,
+    }
 
 
 async def test_policy_majority_accepts_when_more_pages_accepted():
@@ -163,7 +171,14 @@ def test_check_returns_the_guardrails_report(client, auth):
     assert body["data"] == {
         "passed": True,
         "reason": None,
-        "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
+        "document": {
+            "verdict": "accepted",
+            "confidence": 0.9821,
+            "n_pages": 1,
+            "n_approve": 1,
+            "n_reject": 0,
+            "reject_threshold": 0.5,
+        },
         "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
     }
 

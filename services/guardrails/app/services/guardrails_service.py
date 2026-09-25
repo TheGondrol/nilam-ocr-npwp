@@ -4,6 +4,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ocr_common.image_validation import validate_image
 
+from app.clients.reject_threshold import RejectThreshold, default_threshold
 from app.config import Settings
 from app.services.pages import check_page_count, render_pages
 
@@ -22,9 +23,13 @@ class GuardrailsService:
     """The entry checks of the pipeline, in order: type / empty / size (413 above `MAX_UPLOAD_BYTES`), page
     count (400 above `GUARDRAILS_MAX_DOCUMENT_PAGES`), then the guardrails model's verdict."""
 
-    def __init__(self, classifier, settings: Settings):
+    def __init__(self, classifier, settings: Settings, threshold: RejectThreshold | None = None):
+        """Without `threshold`, the default one (GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's)."""
         self._classifier = classifier
         self._settings = settings
+        self._threshold = threshold or RejectThreshold(
+            None, "", default_threshold(settings.guardrails_reject_threshold, classifier), cache_seconds=0
+        )
 
     async def check(self, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
         validate_image(content_type, content, self._settings)
@@ -34,12 +39,15 @@ class GuardrailsService:
             report = await self._classifier.check_document(filename, content, content_type)
             check_page_count(int(report["document"]["n_pages"]), self._settings.guardrails_max_document_pages)
         else:
-            report = await run_in_threadpool(self._check_locally, filename, content_type, content)
+            threshold = await self._threshold.get()
+            report = await run_in_threadpool(self._check_locally, filename, content_type, content, threshold)
 
         passed = report["document"]["verdict"] == VERDICT_ACCEPTED
         return {"passed": passed, "reason": None if passed else _reject_reason(report["document"]), **report}
 
-    def _check_locally(self, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
+    def _check_locally(
+        self, filename: str, content_type: str | None, content: bytes, threshold: float
+    ) -> dict[str, Any]:
         pages = render_pages(
             content_type,
             content,
@@ -48,10 +56,6 @@ class GuardrailsService:
             max_document_pages=self._settings.guardrails_max_document_pages,
         )
         predictions = self._classifier.classify(filename, pages)
-
-        threshold = self._settings.guardrails_reject_threshold
-        if threshold is None:
-            threshold = float(getattr(self._classifier, "reject_threshold", 0.5))
 
         page_results = [
             {
@@ -62,7 +66,8 @@ class GuardrailsService:
             }
             for index, (proba_approve, proba_reject) in enumerate(predictions)
         ]
-        return {"document": self._aggregate(page_results), "pages": page_results}
+        # The threshold in the report: it can change at the orchestrator, so a verdict records the one it used.
+        return {"document": {**self._aggregate(page_results), "reject_threshold": threshold}, "pages": page_results}
 
     def _aggregate(self, pages: list[dict[str, Any]]) -> dict[str, Any]:
         n_pages = len(pages)
