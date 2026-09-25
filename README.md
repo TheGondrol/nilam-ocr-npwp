@@ -133,9 +133,9 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 (request_id, document_type, params, file | file_url)
    orchestrator: file_url? unduh sekali dari MinIO (host di FILE_URL_ALLOWED_HOSTS) : pakai file
                 > MAX_UPLOAD_BYTES (2,5 MB)        ◄─ 413 "Ukuran dokumen melebihi batas ..."   (sebelum guardrails)
+                PDF > MAX_DOCUMENT_PAGES (2)       ◄─ 400 "Jumlah halaman melebihi batas ..."   (sebelum guardrails)
                 ─► guardrails:8031 POST /v1/guardrails/check (file + request_id), SINKRON
-                     > GUARDRAILS_MAX_DOCUMENT_PAGES (2) ◄─ 400 "Jumlah halaman melebihi batas ..." (sebelum model)
-                     model guardrails per halaman ◄─ 200 {passed, reason, document, pages}
+                     hanya model guardrails per halaman ◄─ 200 {passed, reason, document, pages}
    passed=false ◄─ 400 {errors: DOWNSTREAM_VALIDATION_ERROR, job_status: failed, guardrails: 1, message, params}
                 ─► Orkestrasi pusat jawab client 400 dari respons sinkron ini. Tidak ada tahap yang jalan,
                    jadi `downstream_status` untuk request yang ditolak guardrails TIDAK pernah ditulis pipeline.
@@ -352,6 +352,7 @@ orchestrator (pintu masuk, tanpa database):
 | Variable | Wajib? | Default | Keterangan |
 |---|---|---|---|
 | `GUARDRAILS_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8031` | Service guardrails; `POST /v1/guardrails/check` untuk tiap dokumen. `GUARDRAILS_API_KEY` = `API_KEY` kalau kosong |
+| `MAX_DOCUMENT_PAGES` | Tidak | `2` | PDF dengan halaman lebih dari ini ditolak **400** `Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP` di sini, sebelum guardrails dipanggil (permintaan ML engineer: NPWP asli maksimal 2 halaman). PDF yang tidak terbaca juga 400 di sini. Halaman dihitung dengan PyMuPDF, parser yang sama dengan render guardrails |
 | `GUARDRAILS_TIMEOUT_SECONDS` | Tidak | `20.0` | Cek guardrails tidak diulang (sudah di dalam anggaran waktu pemanggil): 503/504 diteruskan ke Orkestrasi pusat, yang boleh mengirim ulang |
 | `EKSTRAKSI_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8030` | Tujuan hand-off (`POST /v1/ekstraksi/jobs`) dan status tahap OCR. `EKSTRAKSI_API_KEY`, `EKSTRAKSI_TIMEOUT_SECONDS` (`10.0`) |
 | `STRUCTURING_SERVICE_URL` / `SCORING_SERVICE_URL` | Produksi: ya | `http://127.0.0.1:8032` / `:8033` | Untuk membaca status tahap (`GET …/jobs/{request_id}`) saat menunggu dan untuk `GET /v1/extract-ocr/{request_id}`. `STRUCTURING_API_KEY` / `SCORING_API_KEY` = `API_KEY` kalau kosong. Di luar `local` keempat URL ditolak kalau menunjuk localhost |
@@ -359,7 +360,7 @@ orchestrator (pintu masuk, tanpa database):
 | `PIPELINE_WAIT_SECONDS` | Tidak | `15` | Berapa lama `POST /v1/extract-ocr` menunggu pipeline, dihitung sejak request diterima. Selesai dalam waktu ini → **200** `job_status: completed` dengan `data` (atau **422** `<TAHAP>_FAILED` kalau gagal); belum → **202** `processing`. `0` = tidak menunggu (selalu 202 setelah hand-off). HTTP timeout pemanggil harus di atas nilai ini |
 | `PIPELINE_POLL_INTERVAL_SECONDS` | Tidak | `0.5` | Jeda antar-cek status tahap selama menunggu. Menambah latensi paling banyak sebesar ini tiap kali sebuah tahap masih berjalan; lebih kecil = lebih cepat tapi lebih banyak `GET` |
 
-`MAX_UPLOAD_BYTES` dan `FIELD_CONFIDENCE_THRESHOLD` (tabel pertama) juga dipakai di sini: samakan `MAX_UPLOAD_BYTES` dengan guardrails, dan `FIELD_CONFIDENCE_THRESHOLD` dengan scoring.
+`MAX_UPLOAD_BYTES` dan `FIELD_CONFIDENCE_THRESHOLD` (tabel pertama) juga dipakai di sini. Semua penjagaan file (tipe, kosong, ukuran 413, jumlah halaman) ada **di orchestrator**; guardrails hanya menjalankan model. Samakan `FIELD_CONFIDENCE_THRESHOLD` dengan scoring.
 
 guardrails (internal, model):
 
@@ -380,7 +381,6 @@ guardrails (internal, model):
 | `GUARDRAILS_THRESHOLD_CACHE_SECONDS` | Tidak | `60` | Ambang disimpan selama ini per pod; perubahan di Orkestrasi berlaku paling lambat setelah ini |
 | `GUARDRAILS_DOCUMENT_POLICY` | Tidak | `all` | Backend lokal saja. `all`: accepted hanya kalau semua halaman accepted; `majority`: accepted > reject |
 | `GUARDRAILS_PDF_DPI` / `GUARDRAILS_MAX_PAGES` | Tidak | `150` / `20` | Backend lokal saja. Render PDF per halaman |
-| `GUARDRAILS_MAX_DOCUMENT_PAGES` | Tidak | `2` | Kedua backend. PDF dengan halaman lebih dari ini ditolak **400** `Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP` sebelum model jalan (permintaan ML engineer: NPWP asli maksimal 2 halaman; pengecekan dipindah dari structuring ke guardrails supaya OCR tidak dibebani) |
 
 structuring: `STRUCTURING_BACKEND` (`npwp_rules`, default: aturan regex + posisi dari ML engineer; atau `rule_based`: regex berbasis label, hanya untuk teks berlabel). Data rujukan aturan, semuanya opsional (file yang tidak ada = pemeriksaan itu tanpa sinyal, service tetap jalan; default nama file yang sama di `app/vendor/npwp_rules/data/`): `WILAYAH_CODES_PATH` (`kode_wilayah.json`, kode kecamatan Depdagri untuk NPWP 16 digit), `KPP_CODES_PATH` (`kpp_codes.json`, kode KPP untuk NPWP 15 digit), `NAME_MASTER_PATH` (`name_lnmast.xlsx`, master nama untuk tie-break kandidat nama; data internal, pasang lewat volume). Tahap berikutnya `SCORING_SERVICE_URL` (`http://127.0.0.1:8033`), `SCORING_API_KEY` (= `API_KEY`), `SCORING_TIMEOUT_SECONDS` (`10.0`).
 
@@ -588,7 +588,7 @@ curl -X POST http://localhost:8081/v1/predict/json -H "X-API-Key: dummy-key" -F 
 #           "pages": [{"page_index", "proba_approve", "proba_reject", "verdict"}]}}
 ```
 
-Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** (`POST /v1/guardrails/check`, dipanggil orchestrator) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: validasi tipe/ukuran/halaman sebelum berkas dikirim, envelope, dan `passed`/`reason`. Model yang mati atau lambat menjadi 503/504 di sini, dan orchestrator meneruskannya apa adanya. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
+Aktifkan dengan `GUARDRAILS_BACKEND=remote` + `GUARDRAILS_MODEL_URL` (+ `GUARDRAILS_MODEL_API_KEY`). Kontrak **kita** (`POST /v1/guardrails/check`, dipanggil orchestrator) tidak berubah; service ini tetap menambah yang tidak dimiliki service model: envelope dan `passed`/`reason` (tipe, ukuran, dan jumlah halaman sudah dicek orchestrator sebelum berkas sampai di sini). Model yang mati atau lambat menjadi 503/504 di sini, dan orchestrator meneruskannya apa adanya. Bedanya dengan `efficientnet`: berkas dikirim **utuh** (PDF dirender di service model) dan `data.document` / `data.pages` diteruskan **apa adanya**, jadi ambang reject, kebijakan dokumen, dan render PDF adalah keputusan service model; `GUARDRAILS_REJECT_THRESHOLD`, `_DOCUMENT_POLICY`, `_PDF_DPI`, `_MAX_PAGES` tidak berlaku. Hanya field kontrak yang diambil (field tambahan dibuang); bentuk lain, termasuk `verdict` di luar `accepted`/`reject`, menjadi 500 `guardrails model returned an unexpected response` alih-alih vonis tebakan. Status ≥ 400 dari service model (termasuk 401 karena key salah) menjadi 500 dengan detailnya, bukan diteruskan: 401 itu salah konfigurasi kita, bukan salah pemanggil kita. Image dengan backend ini tidak butuh torch maupun bobot, tapi Dockerfile sekarang masih memasang keduanya. Test live: `cd services/guardrails && GUARDRAILS_MODEL_URL=http://localhost:8081 GUARDRAILS_MODEL_API_KEY=dummy-key python -m pytest tests/test_guardrails_live.py`.
 
 **Ekstraksi, backend `remote` (sudah ada)**: klien ke service model ekstraksi milik ML engineer. Kontrak model (`nilamnpwp/ocr`, 23 September 2026):
 

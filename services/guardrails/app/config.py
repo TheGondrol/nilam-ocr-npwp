@@ -32,9 +32,6 @@ class Settings(BaseServiceSettings):
     guardrails_document_policy: Literal["all", "majority"] = "all"
     guardrails_pdf_dpi: int = 150
     guardrails_max_pages: int = 20
-    # A genuine NPWP upload is at most 2 pages (ML team, 23 Sep 2026); more is refused with 400 before the
-    # model runs. Applies to both backends (the remote model reports n_pages).
-    guardrails_max_document_pages: int = Field(2, ge=1)
 
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:

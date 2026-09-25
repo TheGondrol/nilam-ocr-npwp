@@ -69,7 +69,7 @@ def test_unreadable_pdf_is_400():
 
 async def test_all_pages_accepted_gives_accepted_with_weakest_page_confidence():
     classifier = StubClassifier((0.99, 0.01), (0.80, 0.20), (0.95, 0.05))
-    settings = _settings(guardrails_max_document_pages=3)
+    settings = _settings()
     report = await GuardrailsService(classifier, settings).check("a.pdf", "application/pdf", _pdf(3))
     assert classifier.seen_pages == 3
     assert report["document"] == {
@@ -99,7 +99,7 @@ async def test_policy_all_rejects_document_when_one_page_rejected():
 
 async def test_policy_majority_accepts_when_more_pages_accepted():
     classifier = StubClassifier((0.99, 0.01), (0.30, 0.70), (0.90, 0.10))
-    settings = _settings(guardrails_document_policy="majority", guardrails_max_document_pages=3)
+    settings = _settings(guardrails_document_policy="majority")
     report = await GuardrailsService(classifier, settings).check("a.pdf", "application/pdf", _pdf(3))
     assert report["document"]["verdict"] == "accepted"
     assert report["document"]["n_reject"] == 1
@@ -113,46 +113,12 @@ async def test_threshold_from_settings_overrides_classifier_threshold():
     assert (await default.check("a.jpg", "image/jpeg", _jpeg()))["document"]["verdict"] == "accepted"
 
 
-async def test_more_than_two_pages_is_400_before_the_model_runs():
+async def test_the_page_limit_is_not_checked_here():
+    """The orchestrator NPWP refuses a PDF above MAX_DOCUMENT_PAGES before calling this service; what
+    reaches it is judged page by page."""
     classifier = StubClassifier((0.99, 0.01), (0.99, 0.01), (0.99, 0.01))
-    with pytest.raises(ServiceError) as exc:
-        await GuardrailsService(classifier, _settings()).check("a.pdf", "application/pdf", _pdf(3))
-    assert exc.value.status_code == 400
-    assert exc.value.message == "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
-    assert classifier.seen_pages == 0
-
-
-async def test_two_pages_are_within_the_limit():
-    classifier = StubClassifier((0.99, 0.01), (0.99, 0.01))
-    report = await GuardrailsService(classifier, _settings()).check("a.pdf", "application/pdf", _pdf(2))
-    assert report["document"]["n_pages"] == 2
-
-
-async def test_page_limit_applies_to_the_remote_model_too():
-    class RemoteStub:
-        async def check_document(self, filename, content, content_type):
-            return {
-                "document": {"verdict": "accepted", "confidence": 0.9, "n_pages": 3, "n_approve": 3, "n_reject": 0},
-                "pages": [],
-            }
-
-    with pytest.raises(ServiceError) as exc:
-        await GuardrailsService(RemoteStub(), _settings()).check("a.pdf", "application/pdf", _pdf(3))
-    assert exc.value.status_code == 400
-
-
-async def test_document_above_the_size_limit_is_413():
-    service = GuardrailsService(StubClassifier(), _settings(max_upload_bytes=1024 * 1024))
-    with pytest.raises(ServiceError) as exc:
-        await service.check("a.jpg", "image/jpeg", _jpeg() + bytes(1024 * 1024))
-    assert exc.value.status_code == 413
-    assert exc.value.message == "Ukuran dokumen melebihi batas 1 MB, pastikan hanya mengunggah dokumen NPWP"
-
-
-async def test_unsupported_content_type_is_400():
-    with pytest.raises(ServiceError) as exc:
-        await GuardrailsService(StubClassifier(), _settings()).check("a.txt", "text/plain", b"x")
-    assert exc.value.status_code == 400
+    report = await GuardrailsService(classifier, _settings()).check("a.pdf", "application/pdf", _pdf(3))
+    assert (report["document"]["n_pages"], classifier.seen_pages) == (3, 3)
 
 
 def test_health_lists_backend(client):
@@ -207,41 +173,6 @@ def test_check_mock_scenarios_reject_with_200(client, auth, filename):
     assert data["document"]["n_reject"] == 1
     assert data["passed"] is False
     assert data["reason"] == "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)"
-
-
-def test_check_unsupported_content_type_returns_400(client, auth):
-    response = client.post(
-        "/v1/guardrails/check",
-        data={"request_id": "OCR_5"},
-        files=image_upload(content_type="text/plain"),
-        headers=auth,
-    )
-    assert response.status_code == 400
-    assert response.json()["message"].startswith("Unsupported content type")
-
-
-def test_check_three_page_pdf_returns_400_with_the_ml_message(client, auth):
-    response = client.post(
-        "/v1/guardrails/check",
-        data={"request_id": "OCR_8"},
-        files=image_upload("scan.pdf", _pdf(3), "application/pdf"),
-        headers=auth,
-    )
-    assert response.status_code == 400
-    body = response.json()
-    assert body["message"] == "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
-    assert body["errors"] == body["message"]
-
-
-def test_check_oversized_document_returns_413(client, auth, use_classifier):
-    use_classifier(StubClassifier((0.98, 0.02)), max_upload_bytes=100)
-    response = client.post(
-        "/v1/guardrails/check", data={"request_id": "OCR_9"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
-    )
-    assert response.status_code == 413
-    body = response.json()
-    assert body["status_desc"] == "Payload Too Large"
-    assert body["message"].startswith("Ukuran dokumen melebihi batas")
 
 
 def test_check_unreadable_image_returns_400(client, auth):

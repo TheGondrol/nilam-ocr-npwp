@@ -7,10 +7,10 @@ from app.config import Settings
 
 GUARDRAILS_CHECK_PATH = "/v1/guardrails/check"
 
-# Relayed as they are: the guardrails service's refusals of the document (400 page limit or unreadable
-# file, 413 size, both with a message the client can show) and the outages of its model (503, 504).
+# Relayed as they are: the guardrails service's refusal of a file its model cannot read (400; type, size
+# and page count are checked here before it is called) and the outages of its model (503, 504).
 # Anything else (401 wrong key, 422, 500) is a fault on our side and becomes 500.
-PASSTHROUGH_STATUSES = (400, 413, 503, 504)
+PASSTHROUGH_STATUSES = (400, 503, 504)
 
 
 class GuardrailsClient:

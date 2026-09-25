@@ -111,14 +111,63 @@ def test_oversized_document_is_413_before_guardrails(client, auth, stub_guardrai
     assert stub_guardrails.checked == []
 
 
-def test_a_refusal_of_the_guardrails_service_is_answered_as_it_is(client, auth, stub_guardrails, stub_ekstraksi):
-    stub_guardrails.error = ServiceError(400, TOO_MANY_PAGES)
+def _pdf(n_pages: int) -> bytes:
+    import fitz
 
-    response = _submit(client, auth, filename="scan.pdf", content=b"%PDF-1.4", content_type="application/pdf")
+    document = fitz.open()
+    for i in range(n_pages):
+        document.new_page(width=300, height=200).insert_text((20, 40), f"halaman {i + 1}")
+    return document.tobytes()
+
+
+def _submit_pdf(client, auth, content):
+    return _submit(client, auth, filename="scan.pdf", content=content, content_type="application/pdf")
+
+
+def test_more_than_two_pages_is_400_before_guardrails(client, auth, stub_guardrails, stub_ekstraksi):
+    response = _submit_pdf(client, auth, _pdf(3))
 
     assert response.status_code == 400
     body = response.json()
     assert (body["message"], body["errors"]) == (TOO_MANY_PAGES, TOO_MANY_PAGES)
+    assert "job_status" not in body
+    assert stub_guardrails.checked == [] and stub_ekstraksi.submitted == []
+
+
+def test_two_pages_are_within_the_limit(client, auth, stub_guardrails):
+    response = _submit_pdf(client, auth, _pdf(2))
+
+    assert response.status_code == 200
+    assert len(stub_guardrails.checked) == 1
+
+
+def test_the_page_limit_is_a_setting(client, auth, stub_guardrails):
+    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"max_document_pages": 1})
+    try:
+        response = _submit_pdf(client, auth, _pdf(2))
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 400
+    assert response.json()["message"] == TOO_MANY_PAGES
+    assert stub_guardrails.checked == []
+
+
+def test_unreadable_pdf_is_400_before_guardrails(client, auth, stub_guardrails):
+    response = _submit_pdf(client, auth, b"%PDF-1.4 garbage")
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "Uploaded file is not a readable PDF"
+    assert stub_guardrails.checked == []
+
+
+def test_a_refusal_of_the_guardrails_service_is_answered_as_it_is(client, auth, stub_guardrails, stub_ekstraksi):
+    stub_guardrails.error = ServiceError(400, "Uploaded file is not a readable image")
+
+    response = _submit(client, auth)
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "Uploaded file is not a readable image"
     assert stub_ekstraksi.submitted == []
 
 

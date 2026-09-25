@@ -105,8 +105,8 @@ paths:
 
 
         **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
-        (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` (2) pages
-        answers `400`, both with an Indonesian `message` the client can show as is.
+        (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` (2) pages answers `400`,
+        both with an Indonesian `message` the client can show as is.
 
 
         On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
@@ -180,7 +180,7 @@ paths:
                       refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
-            `guardrails: 1`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
+            `guardrails: 1`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `MAX_DOCUMENT_PAGES`
             pages (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), or a bad
             file / intake (empty, unsupported type, unreadable, `file_url` refused)'
           content:

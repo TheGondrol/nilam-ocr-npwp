@@ -10,7 +10,6 @@ from tests.conftest import ACCEPTED_REPORT, JPEG
 from tests.test_handoff import _form
 
 RID = "REQ_guardrails_client"
-TOO_MANY_PAGES = "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
 
 
 class Guardrails:
@@ -64,8 +63,7 @@ async def test_a_file_without_a_name_is_sent_as_upload():
 @pytest.mark.parametrize(
     ("status", "message"),
     [
-        (400, TOO_MANY_PAGES),
-        (413, "Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP"),
+        (400, "Uploaded file is not a readable image"),
         (503, "guardrails model is unavailable"),
         (504, "guardrails model timed out after 30.0s"),
     ],
