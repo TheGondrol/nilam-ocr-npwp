@@ -38,7 +38,7 @@ mati + kirim dokumen -> tahap 2-4 selesai walau orkestrasi "mati", callback menu
 RETRY; nyalakan lagi -> semuanya terkirim; (4) callback menolak -> dead letter -> lepaskan.
 
 Prasyarat pola outbox terlihat: service dijalankan dengan `DATABASE_URL` (stack
-`docker-compose.db.yml`, migrasi sampai `0003`) dan `PIPELINE_OUTBOX=true` (sudah di
+`docker-compose.db.yml`, semua migrasi dengan `make db-upgrade`) dan `PIPELINE_OUTBOX=true` (sudah di
 `services/*/.env`). Tanpa itu service memakai mode langsung dan panel outbox tetap kosong.
 
 ## Memilih target: GKE atau lokal
@@ -56,7 +56,7 @@ Yang berubah otomatis mengikuti saklar itu:
 
 | | GKE | lokal |
 |---|---|---|
-| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service, chart 0.2.0+) di 9030-9034; release chart lama satu pod: set `GKE_WORKLOAD=deploy/nilam-ocr-npwp` | container di 127.0.0.1:8030-8034 |
+| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service) di 9030-9034; butuh chart 0.3.0+, karena chart lama belum punya orchestrator | container di 127.0.0.1:8030-8034 |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
 | baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5433}` |
@@ -76,15 +76,15 @@ Aturnya lewat `TRACKER_POLL_INTERVAL` (default 2 detik) dan
     # prasyarat GKE: kredensial cluster sudah ada
     #   gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 \
     #     --project ddb-kubecluster-dev-01 --location asia-southeast2
-    # prasyarat lokal: keempat service jalan dengan
+    # prasyarat lokal: kelima service jalan; ketiga tahap pipeline (ekstraksi, structuring, scoring) dengan
     #   ORCHESTRATION_URL=http://host.docker.internal:8090 (container) / http://127.0.0.1:8090 (bare)
     #   dan, untuk melihat outbox, DATABASE_URL + PIPELINE_OUTBOX=true
 
     tools/tracker/run.sh            # backend :8090 + frontend :5173, Ctrl+C mematikan semuanya
-    tools/tracker/run.sh --stack    # (lokal saja) nyalakan Redis, keempat container, dan Postgres dulu
+    tools/tracker/run.sh --stack    # (lokal saja) nyalakan Redis, kelima container, dan Postgres dulu
     tools/tracker/stop.sh           # matikan yang jalan di latar, termasuk port-forward
 
-Di mode GKE `run.sh` membuka empat port-forward sendiri (satu per Service) dan menutupnya saat
+Di mode GKE `run.sh` membuka lima port-forward sendiri (satu per Service) dan menutupnya saat
 berhenti; log-nya di `tools/tracker/.port-forward.log`. Callback dari pod tetap tidak sampai ke
 laptop, jadi status tahap diambil dengan polling dan panel outbox hanya terisi kalau
 `TRACKER_DATABASE_URL` menunjuk database dev.
@@ -112,14 +112,16 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `DELETE /api/loadtest/assets` | hapus semua unggahan yang tertinggal di `assets/`; 409 selama ada run berjalan |
 | `GET` / `POST /api/loadtest` | daftar run; mulai run `{"rate", "duration_seconds", "mode": "constant" \| "ramp", "images"}` |
 | `POST /api/loadtest/{run}/samples` | dipanggil k6 tiap request: status, job_status, elapsed_ms |
-| `GET /api/loadtest/{run}` | statistik run: campuran 200/202/4xx/5xx/timeout, p50/p95, end-to-end, ringkasan k6 |
+| `GET /api/loadtest/{run}` | statistik run: campuran 200/ditolak/202/4xx/5xx/timeout, p50/p95, end-to-end, alasan penolakan, ringkasan k6 |
 | `POST /api/loadtest/{run}/stop`, `DELETE /api/loadtest/{run}` | hentikan container k6; hapus run beserta baris `LT_<run>_%` di database |
 
 ## Load testing
 
 Menu **Load testing** menjalankan [../load-tester](../load-tester) (k6 di Docker) dan menghitung
-jawaban pintu masuk (200 selesai di dalam batas tunggu, 202 hasil menyusul, 4xx, 5xx, timeout)
-serta waktu end-to-end dari submit sampai callback SCORING DONE. Request uji berprefiks `LT_` dan
+jawaban pintu masuk (200 selesai di dalam batas tunggu, 200 ditolak dengan `guardrails: 1`, 202 hasil
+menyusul, 4xx, 5xx, timeout) serta waktu end-to-end dari submit sampai callback SCORING DONE. Dokumen yang
+ditolak, baik lewat jawaban 200 maupun lewat callback FAILED `DOWNSTREAM_VALIDATION_ERROR` setelah 202,
+dihitung terpisah dari tuntas dan gagal, dengan daftar alasannya. Request uji berprefiks `LT_` dan
 tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NETWORK
 (ocr_default), K6_TARGET (http://orchestrator:8034), K6_TRACKER (http://host.docker.internal:PORT),
 K6_API_KEY, LOAD_TESTER_DIR.

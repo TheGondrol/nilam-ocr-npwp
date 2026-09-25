@@ -175,11 +175,12 @@ button.link.danger { color: var(--failed); font-size: inherit; }
 .mix { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--line); margin-top: 12px; }
 .mix span { display: block; height: 100%; }
 .mix .b200 { background: var(--done); }
+.mix .brejected { background: var(--rejected); }
 .mix .b202 { background: var(--processing); }
-.mix .b4xx { background: var(--rejected); }
+.mix .b4xx { background: #f87171; }
 .mix .b5xx { background: var(--failed); }
 .mix .btimeout, .legend .btimeout { background: var(--muted); }
-.legend .b200 { background: var(--done); } .legend .b202 { background: var(--processing); } .legend .b4xx { background: var(--rejected); } .legend .b5xx { background: var(--failed); }
+.legend .b200 { background: var(--done); } .legend .brejected { background: var(--rejected); } .legend .b202 { background: var(--processing); } .legend .b4xx { background: #f87171; } .legend .b5xx { background: var(--failed); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .kv { display: grid; grid-template-columns: max-content 1fr; column-gap: 16px; row-gap: 4px; font-size: 0.85rem; margin-top: 8px; }

@@ -10,7 +10,7 @@ from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING
 logger = logging.getLogger(__name__)
 
 # The pipeline stopped because a stage rejected the document (a rejecting check of the structuring
-# rules: `reject_reason` in its result). Final, like FAILED, but answered as a 400.
+# rules: `reject_reason` in its result). Final, like FAILED, but answered as a 200 with `guardrails: 1`.
 STATUS_REJECTED = "REJECTED"
 
 
