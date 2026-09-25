@@ -3,7 +3,7 @@
 # sama, cukup Ctrl+C). Membunuh proses yang mendengarkan port backend & frontend.
 #
 #   tools/tracker/stop.sh            backend :8090 + frontend :5173
-#   tools/tracker/stop.sh --stack    plus: hentikan keempat container, Postgres, dan Redis
+#   tools/tracker/stop.sh --stack    plus: hentikan kelima container, Postgres, dan Redis
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

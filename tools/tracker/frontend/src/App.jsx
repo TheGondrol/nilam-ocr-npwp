@@ -386,10 +386,12 @@ function Backlog({ overview }) {
 
 // --- load testing ----------------------------------------------------------------
 
+// Dokumen yang ditolak juga dijawab 200 (guardrails: 1), jadi dihitung sendiri: sebuah jawaban, bukan hasil.
 const STATUS_BUCKETS = [
   { key: '200', label: '200 selesai', cls: 'done' },
+  { key: 'rejected', label: '200 ditolak', cls: 'rejected' },
   { key: '202', label: '202 menyusul', cls: 'processing' },
-  { key: '4xx', label: '4xx', cls: 'rejected' },
+  { key: '4xx', label: '4xx', cls: 'failed' },
   { key: '5xx', label: '5xx', cls: 'failed' },
   { key: 'timeout', label: 'timeout', cls: 'timeout' },
 ]
@@ -674,7 +676,7 @@ function LoadTest({ overview, nav }) {
                 </span>
                 <span className="meta">
                   <span className={`pill ${runStatusClass(r.status)}`}>{r.status}</span> {r.sent} dikirim · {r.counts?.['200'] ?? 0}×200 ·{' '}
-                  {r.counts?.['202'] ?? 0}×202 · {r.completed} tuntas
+                  {r.counts?.['202'] ?? 0}×202 · {r.completed} tuntas{r.rejected > 0 && ` · ${r.rejected} ditolak`}
                 </span>
               </button>
             </li>
@@ -744,8 +746,9 @@ function LoadTest({ overview, nav }) {
               <h2>End-to-end: submit sampai callback SCORING DONE</h2>
               <div className="tiles">
                 <Tile k="tuntas" v={d.completed} s={pct(d.completed, sent)} cls="done" />
-                <Tile k="gagal" v={d.failed} s="callback FAILED" cls="failed" />
-                <Tile k="dalam proses" v={d.in_flight} s="dikirim, belum ada SCORING DONE" cls="processing" />
+                <Tile k="ditolak" v={d.rejected ?? 0} s="model guardrails / aturan structuring" cls="rejected" />
+                <Tile k="gagal" v={d.failed} s="callback FAILED, bukan penolakan" cls="failed" />
+                <Tile k="dalam proses" v={d.in_flight} s="pipeline jalan, belum tuntas / gagal / ditolak" cls="processing" />
                 <Tile
                   k="dokumen / menit"
                   v={d.completed_per_minute == null ? '-' : d.completed_per_minute.toFixed(1)}
@@ -784,6 +787,19 @@ function LoadTest({ overview, nav }) {
                   <span className="k">http_req_failed</span>
                   <span>{d.k6.http_req_failed_rate == null ? '-' : pct(d.k6.http_req_failed_rate, 1)}</span>
                 </div>
+              </div>
+            )}
+
+            {d.rejections?.length > 0 && (
+              <div className="panel">
+                <h2>Alasan penolakan</h2>
+                <ul className="lines">
+                  {d.rejections.map((x) => (
+                    <li key={x.reason}>
+                      <span className="conf">{x.count}×</span> {x.reason}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

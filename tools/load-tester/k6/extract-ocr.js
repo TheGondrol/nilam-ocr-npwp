@@ -1,6 +1,6 @@
 // Skenario k6: kirim NPWP ke orchestrator /v1/extract-ocr dengan laju kedatangan tetap
 // (open model), catat status HTTP-nya, dan laporkan tiap sampel ke tracker supaya
-// jumlah 200/202/4xx/5xx dan waktu end-to-end (sampai callback SCORING) bisa dihitung.
+// jumlah 200/ditolak/202/4xx/5xx dan waktu end-to-end (sampai callback SCORING) bisa dihitung.
 //
 // Env (diisi tracker, atau manual lewat `k6 run -e ...`):
 //   RUN_ID        id run, dipakai sebagai prefiks request_id: LT_<RUN_ID>_<vu>-<iter>. Endpoint -test
@@ -81,6 +81,7 @@ export const options = {
 }
 
 const status200 = new Counter('extract_200')
+const statusRejected = new Counter('extract_rejected')
 const status202 = new Counter('extract_202')
 const status4xx = new Counter('extract_4xx')
 const status5xx = new Counter('extract_5xx')
@@ -114,7 +115,9 @@ export default function () {
   } catch (_) {
     body = null
   }
-  if (res.status === 200) status200.add(1)
+  // Dokumen yang ditolak (model guardrails atau aturan structuring) juga dijawab 200, dengan guardrails 1.
+  if (res.status === 200 && body && body.guardrails === 1) statusRejected.add(1)
+  else if (res.status === 200) status200.add(1)
   else if (res.status === 202) status202.add(1)
   else if (res.status === 0) statusTimeout.add(1)
   else if (res.status >= 500) status5xx.add(1)
@@ -129,6 +132,7 @@ export default function () {
         image: image.name,
         status: res.status,
         job_status: body && body.job_status ? body.job_status : null,
+        guardrails: body && body.guardrails != null ? body.guardrails : null,
         errors: body && body.errors ? body.errors : null,
         message: body && body.message ? body.message : res.error || null,
         started_at: startedAt / 1000,

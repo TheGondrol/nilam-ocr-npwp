@@ -1,14 +1,15 @@
 """Load testing dari tracker: jalankan k6 di Docker, kumpulkan sampel yang dilaporkan k6 dan
-callback tahap untuk request berprefiks LT_, lalu hitung campuran 200/202/4xx/5xx, latensi
+callback tahap untuk request berprefiks LT_, lalu hitung campuran 200/ditolak/202/4xx/5xx, latensi
 pintu masuk, dan waktu end-to-end sampai callback SCORING DONE.
 
 Kunci Redis:
   ocr:loadtests                 hash run_id -> meta (json)
   ocr:lt:<run>:samples          list sampel dari k6 (json), urut kedatangan
-  ocr:lt:<run>:status           hash "200" | "202" | "4xx" | "5xx" | "timeout" -> jumlah
+  ocr:lt:<run>:status           hash salah satu BUCKETS -> jumlah
   ocr:lt:<run>:cb               hash "<STAGE>:<STATUS>" -> jumlah callback yang tiba
   ocr:lt:<run>:done             hash request_id -> ts callback SCORING DONE diterima
   ocr:lt:<run>:failed           hash request_id -> "<STAGE>: <pesan>"
+  ocr:lt:<run>:rejected         hash request_id -> alasan penolakan (message jawaban 200 atau callback FAILED)
 """
 
 import asyncio
@@ -18,6 +19,7 @@ import os
 import re
 import secrets
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,12 @@ IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".pdf")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_RATE = 50.0
 MAX_DURATION = 1800
+# Ember jawaban pintu masuk. "rejected" = 200 dengan guardrails 1: dokumen ditolak model guardrails atau aturan
+# structuring, sebuah jawaban tetapi bukan hasil, jadi tidak dihitung bersama "200".
+BUCKETS = ("200", "rejected", "202", "4xx", "5xx", "timeout")
+# Callback FAILED dengan kode ini berarti aturan structuring menolak dokumen (ocr_common.npwp.REJECTED_CODE),
+# bukan tahap yang rusak.
+REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
 
 ctx: dict[str, Any] = {}
 watchers: dict[str, asyncio.Task[None]] = {}
@@ -253,6 +261,9 @@ async def record_callback(body: dict[str, Any], *, accepted: bool) -> None:
         return
     if stage == "SCORING" and status == "DONE":
         await r.hset(_key(run, "done"), request_id, time.time())
+    elif status == "FAILED" and body.get("error_code") == REJECTED_CODE:
+        # Penolakan yang datang setelah jawaban 202; kalau jawabannya sudah 200 ditolak, baris ini sama saja.
+        await r.hset(_key(run, "rejected"), request_id, body.get("error_message") or "-")
     elif status == "FAILED":
         await r.hset(_key(run, "failed"), request_id, f"{stage}: {body.get('error_message') or '-'}")
 
@@ -310,6 +321,7 @@ async def stats(run: str) -> dict[str, Any]:
     counts = {k: int(v) for k, v in (await r.hgetall(_key(run, "status"))).items()}
     done = await r.hgetall(_key(run, "done"))
     failed = await r.hgetall(_key(run, "failed"))
+    rejected = await r.hgetall(_key(run, "rejected"))
     callbacks = {k: int(v) for k, v in (await r.hgetall(_key(run, "cb"))).items()}
 
     submitted = {s["request_id"]: float(s["started_at"]) for s in samples}
@@ -324,20 +336,30 @@ async def stats(run: str) -> dict[str, Any]:
     if starts and done_ts and done_ts[-1] > starts[0]:
         completed_per_minute = len(done_ts) / ((done_ts[-1] - starts[0]) / 60)
 
+    # Yang masih ditunggu hanya request yang pipeline-nya berjalan: jawaban 200 (callback SCORING menyusul), 202,
+    # dan timeout, sampai tuntas, gagal, atau ditolak. 4xx/5xx tidak memulai pipeline, kecuali 422 tahap gagal
+    # yang sudah final bersama callback FAILED-nya; penolakan model guardrails tidak pernah punya callback.
+    finished = set(done) | set(failed) | set(rejected)
+    waiting = {s["request_id"] for s in samples if s["status"] in (200, 202, 0)}
+
     sent = len(samples)
     return {
         **meta,
         "sent": sent,
-        "counts": {k: counts.get(k, 0) for k in ("200", "202", "4xx", "5xx", "timeout")},
+        "counts": {k: counts.get(k, 0) for k in BUCKETS},
         "extract": _trend([float(s["elapsed_ms"]) for s in samples]),
         "achieved_rate": achieved_rate,
         "completed": len(done),
         "failed": len(failed),
-        "in_flight": max(sent - len(e2e) - len([rid for rid in failed if rid in submitted]), 0),
+        "rejected": len(rejected),
+        "in_flight": len(waiting - finished),
         "completed_per_minute": completed_per_minute,
         "e2e": _trend(e2e),
         "callbacks": callbacks,
         "failures": [{"request_id": k, "reason": v} for k, v in list(failed.items())[:20]],
+        "rejections": [
+            {"reason": reason, "count": count} for reason, count in Counter(rejected.values()).most_common(10)
+        ],
         "last_errors": [
             {"request_id": s["request_id"], "status": s["status"], "message": s.get("message") or s.get("errors")}
             for s in samples[-200:]
@@ -443,8 +465,9 @@ async def list_runs() -> list[dict[str, Any]]:
         run = meta["run_id"]
         counts = {k: int(v) for k, v in (await r.hgetall(_key(run, "status"))).items()}
         meta["sent"] = sum(counts.values())
-        meta["counts"] = {k: counts.get(k, 0) for k in ("200", "202", "4xx", "5xx", "timeout")}
+        meta["counts"] = {k: counts.get(k, 0) for k in BUCKETS}
         meta["completed"] = await r.hlen(_key(run, "done"))
+        meta["rejected"] = await r.hlen(_key(run, "rejected"))
     return rows
 
 
@@ -495,8 +518,11 @@ async def add_sample(run: str, request: Request) -> dict[str, Any]:
     sample = await request.json()
     r = ctx["redis"]
     status = int(sample.get("status") or 0)
+    rejected = status == 200 and sample.get("guardrails") == 1
     bucket = (
-        "200"
+        "rejected"
+        if rejected
+        else "200"
         if status == 200
         else "202"
         if status == 202
@@ -511,6 +537,8 @@ async def add_sample(run: str, request: Request) -> dict[str, Any]:
     async with r.pipeline(transaction=False) as pipe:
         pipe.rpush(_key(run, "samples"), json.dumps(sample))
         pipe.hincrby(_key(run, "status"), bucket, 1)
+        if rejected:
+            pipe.hset(_key(run, "rejected"), sample["request_id"], sample.get("message") or "-")
         await pipe.execute()
     return {"ok": True}
 
@@ -540,7 +568,7 @@ async def remove(run: str) -> dict[str, Any]:
     if task is not None:
         task.cancel()
     r = ctx["redis"]
-    await r.delete(*[_key(run, s) for s in ("samples", "status", "cb", "done", "failed")])
+    await r.delete(*[_key(run, s) for s in ("samples", "status", "cb", "done", "failed", "rejected")])
     await r.hdel("ocr:loadtests", run)
     try:
         (LT_DIR / "out" / f"{run}.json").unlink(missing_ok=True)

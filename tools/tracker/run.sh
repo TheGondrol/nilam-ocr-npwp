@@ -2,7 +2,7 @@
 # Jalankan tracker (backend 8090 + Vite 5173) dari Git Bash / WSL / Linux.
 #
 #   tools/tracker/run.sh            backend + frontend; Ctrl+C mematikan semuanya
-#   tools/tracker/run.sh --stack    plus: nyalakan Redis + keempat container + Postgres dulu
+#   tools/tracker/run.sh --stack    plus: nyalakan Redis + kelima container + Postgres dulu
 #
 # Target diatur di tools/tracker/.env:
 #   blok GKE aktif      -> port-forward ke namespace nilam-ocr-npwp, hasil tiap
@@ -10,7 +10,7 @@
 #                          bisa masuk ke laptop)
 #   blok GKE dikomentari -> stack lokal seperti biasa, callback langsung
 #
-# Prasyarat yang diperiksa: Redis di 6379, keempat service /health, dan (lokal)
+# Prasyarat yang diperiksa: Redis di 6379, kelima service /health, dan (lokal)
 # tunnel SSH ke model OCR (8070). Yang tidak terpenuhi hanya diperingatkan,
 # kecuali Redis.
 set -euo pipefail
@@ -90,22 +90,16 @@ if [[ "$TRACKER_TARGET" == "gke" ]]; then
     || die "tidak bisa membaca namespace $NS. Jalankan: gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2"
 
   : >"$HERE/.port-forward.log"
-  if [[ -n "${GKE_WORKLOAD:-}" ]]; then
-    # Chart lama (0.1.0): satu pod berisi empat container, satu port-forward untuk semuanya.
-    say "target GKE: $NS/$GKE_WORKLOAD -> 127.0.0.1:9030-9033 (satu port-forward)"
-    kubectl -n "$NS" port-forward "$GKE_WORKLOAD" 9030:8030 9031:8031 9032:8032 9033:8033 >>"$HERE/.port-forward.log" 2>&1 &
+  # Chart 0.3.0+: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
+  # Chart yang lebih lama tidak punya orchestrator, pintu masuk yang dipanggil tracker.
+  say "target GKE: $NS/svc/$RELEASE-{ekstraksi,guardrails,structuring,scoring,orchestrator} -> 127.0.0.1:9030-9034"
+  for pair in "ekstraksi|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033" "orchestrator|9034:8034"; do
+    svc="${pair%%|*}"; ports="${pair##*|}"
+    kubectl -n "$NS" get "svc/$RELEASE-$svc" >/dev/null 2>&1 \
+      || die "svc/$RELEASE-$svc tidak ada di $NS. Release masih di bawah chart 0.3.0 (belum ada orchestrator)? Deploy dulu dari main: deploy/helm/deploy.sh all"
+    kubectl -n "$NS" port-forward "svc/$RELEASE-$svc" "$ports" >>"$HERE/.port-forward.log" 2>&1 &
     PF_PIDS+=($!)
-  else
-    # Chart 0.2.0+: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
-    say "target GKE: $NS/svc/$RELEASE-{ekstraksi,guardrails,structuring,scoring,orchestrator} -> 127.0.0.1:9030-9034"
-    for pair in "ekstraksi|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033" "orchestrator|9034:8034"; do
-      svc="${pair%%|*}"; ports="${pair##*|}"
-      kubectl -n "$NS" get "svc/$RELEASE-$svc" >/dev/null 2>&1 \
-        || die "svc/$RELEASE-$svc tidak ada di $NS. Release masih chart lama? Set GKE_WORKLOAD=deploy/$RELEASE di .env"
-      kubectl -n "$NS" port-forward "svc/$RELEASE-$svc" "$ports" >>"$HERE/.port-forward.log" 2>&1 &
-      PF_PIDS+=($!)
-    done
-  fi
+  done
 
   for _ in $(seq 1 30); do
     up "$ORCHESTRATOR_URL/health" && up "$EKSTRAKSI_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" && break

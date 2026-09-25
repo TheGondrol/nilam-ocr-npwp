@@ -69,12 +69,14 @@ skrip; `LT_...` dari skrip diabaikan. Semua request satu run: `request_id LIKE '
 
 ## Membaca hasilnya
 
-- **200 / 202 / 4xx / 5xx / timeout**: campuran jawaban pintu masuk. Bergesernya 200 ke 202 adalah
-  tanda pertama jenuh; 5xx dan timeout tanda kedua.
+- **200 / ditolak / 202 / 4xx / 5xx / timeout**: campuran jawaban pintu masuk. Bergesernya 200 ke 202
+  adalah tanda pertama jenuh; 5xx dan timeout tanda kedua. Dokumen yang ditolak juga dijawab 200, dengan
+  `guardrails: 1`, jadi dihitung sendiri sebagai **ditolak**. Banyak penolakan berarti file ujinya yang
+  ditolak model atau aturan ML (lihat alasannya di tracker), bukan tanda beban.
 - **p50 / p95 extract-ocr**: lama koneksi ditahan orchestrator. Mendekati `PIPELINE_WAIT_SECONDS`
   berarti hampir semua jawaban 202.
 - **Tuntas (SCORING DONE)** dan **p95 end-to-end**: kapasitas sesungguhnya. Bandingkan dengan jumlah
-  dikirim; selisihnya masih antre atau gagal.
+  dikirim; selisihnya masih antre, gagal, atau ditolak.
 - **dropped_iterations** (dari k6): k6 tidak sanggup mempertahankan laju karena VU habis, artinya
   latensi sudah lebih panjang dari yang diperkirakan; laju yang tercapai lebih rendah dari yang
   diminta.
