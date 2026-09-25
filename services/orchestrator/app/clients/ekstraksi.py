@@ -29,7 +29,7 @@ class EkstraksiJobClient:
         self,
         request_id: str,
         document_type: str,
-        guardrails: dict[str, Any],
+        guardrails: dict[str, Any] | None,
         filename: str,
         content_type: str | None,
         content: bytes,
@@ -38,8 +38,11 @@ class EkstraksiJobClient:
     ) -> dict[str, Any]:
         """Hand the document to the OCR stage. When the request came as `file_url`, that URL is forwarded
         instead of the bytes: the OCR service downloads it itself, and a job left behind by a dead process
-        can be run again from the URL stored with the job."""
-        fields = {"request_id": request_id, "document_type": document_type, "guardrails": json.dumps(guardrails)}
+        can be run again from the URL stored with the job. `guardrails` is None when the check was skipped:
+        the field is then left out (ekstraksi refuses a `guardrails` that is not a JSON object)."""
+        fields = {"request_id": request_id, "document_type": document_type}
+        if guardrails is not None:
+            fields["guardrails"] = json.dumps(guardrails)
         if file_url:
             call = lambda: self._client.post_form(self._jobs_path, data={**fields, "file_url": file_url})  # noqa: E731
         else:

@@ -90,6 +90,9 @@ services:
       # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
       PIPELINE_WAIT_SECONDS: "15"
       GUARDRAILS_TIMEOUT_SECONDS: "20"
+      # Boleh tidaknya Orkestrasi pusat melewati model guardrails per request (skip_guardrails=true).
+      # "false" = request seperti itu ditolak 403. Pengecekan file dan aturan structuring tetap jalan.
+      GUARDRAILS_SKIP_ALLOWED: "false"
     # Tiap request menahan dokumennya (maks. MAX_UPLOAD_BYTES, 2,5 MB) selama menunggu pipeline.
     resources:
       requests:
