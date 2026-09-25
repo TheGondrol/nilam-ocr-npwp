@@ -6,7 +6,7 @@ from ocr_common.web.app import create_app
 
 from app.api import guardrails
 from app.config import get_settings
-from app.dependencies import get_page_classifier
+from app.dependencies import get_page_classifier, get_reject_threshold
 
 settings = get_settings()
 
@@ -14,7 +14,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     classifier = get_page_classifier()
+    threshold = get_reject_threshold()
     yield
+    await threshold.aclose()
     close = getattr(classifier, "aclose", None)  # only the HTTP-backed models hold a connection
     if close is not None:
         await close()

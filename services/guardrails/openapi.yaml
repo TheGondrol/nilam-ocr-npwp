@@ -166,9 +166,9 @@ paths:
         The model is either in this process (`efficientnet`) or the ML team''s model service (`remote`,
         POST /v1/predict/json); the report is the same either way. The orchestrator NPWP calls it for
         every `extract-ocr` and hands `data` on to the OCR stage when `passed`. Always 200 when the document
-        was judged: read `data.passed`. Refused before the model runs: more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
-        pages (400 `Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), a document
-        above `MAX_UPLOAD_BYTES` (413), an empty, unreadable or unsupported file (400).'
+        was judged: read `data.passed`. Only the model judges here: the type, size (`MAX_UPLOAD_BYTES`)
+        and page count (`MAX_DOCUMENT_PAGES`) of the document are checked by the orchestrator NPWP before
+        it calls this endpoint. A file the model cannot read (not an image, an unreadable PDF) is 400.'
       operationId: checkDocument
       requestBody:
         content:
@@ -197,6 +197,7 @@ paths:
                         n_pages: 1
                         n_approve: 1
                         n_reject: 0
+                        reject_threshold: 0.5
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -218,6 +219,7 @@ paths:
                         n_pages: 1
                         n_approve: 0
                         n_reject: 1
+                        reject_threshold: 0.5
                       pages:
                       - page_index: 0
                         proba_approve: 0.1179
@@ -225,8 +227,7 @@ paths:
                         verdict: reject
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: Bad file (empty, unsupported type, unreadable, more than `GUARDRAILS_MAX_DOCUMENT_PAGES`
-            pages) or bad intake
+          description: A file the model cannot read, or bad intake
           content:
             application/json:
               schema:
@@ -234,8 +235,8 @@ paths:
               example:
                 status_code: 400
                 status_desc: Bad Request
-                message: Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP
-                errors: Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP
+                message: Uploaded file is not a readable image
+                errors: Uploaded file is not a readable image
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -247,17 +248,6 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: Invalid or missing API key
-        '413':
-          description: The document exceeds `MAX_UPLOAD_BYTES`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 413
-                status_desc: Payload Too Large
-                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
-                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
         '422':
           description: Validation Error
           content:
@@ -375,6 +365,18 @@ components:
           description: Pages with verdict `reject`
           examples:
           - 0
+        reject_threshold:
+          anyOf:
+          - type: number
+            exclusiveMaximum: 1.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Reject Threshold
+          description: 'The reject threshold the pages were judged with: the central orchestrator''s (`GUARDRAILS_THRESHOLD_URL`),
+            else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s 0.5). Null with the
+            `remote` backend, which applies its own'
+          examples:
+          - 0.5
       type: object
       required:
       - verdict
@@ -574,7 +576,7 @@ components:
           - accepted
           - reject
           title: Verdict
-          description: '`reject` when `proba_reject` reaches the reject threshold (0.5 by default)'
+          description: '`reject` when `proba_reject` reaches the reject threshold (`document.reject_threshold`)'
           examples:
           - accepted
       type: object

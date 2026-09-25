@@ -2,13 +2,13 @@ import time
 from typing import Any
 
 from ocr_common.errors import NotFound
-from ocr_common.image_validation import validate_image
 from ocr_common.npwp import DOCUMENT_TYPE, final_result
 from ocr_common.pipeline import STAGE_SCORING, STAGE_STRUCTURING, STATUS_DONE
 
 from app.clients.ekstraksi import EkstraksiJobClient
 from app.clients.guardrails import GuardrailsClient
 from app.config import Settings
+from app.services.document_checks import check_document
 from app.services.pipeline_waiter import PipelineWait, WaitOutcome
 
 
@@ -35,11 +35,11 @@ class ExtractOcrService:
         received_at: float | None = None,
         file_url: str | None = None,
     ) -> dict[str, Any]:
-        """Check the file (type, empty, `MAX_UPLOAD_BYTES`) before anyone else sees it, judge it with the
-        guardrails model, hand it to the OCR stage when it passes, and wait for the pipeline for what is
-        left of `PIPELINE_WAIT_SECONDS` since `received_at`."""
+        """Check the file (type, empty, `MAX_UPLOAD_BYTES`, `MAX_DOCUMENT_PAGES`) before anyone else sees it,
+        judge it with the guardrails model, hand it to the OCR stage when it passes, and wait for the
+        pipeline for what is left of `PIPELINE_WAIT_SECONDS` since `received_at`."""
         started = time.monotonic() if received_at is None else received_at
-        validate_image(content_type, content, self._settings)
+        check_document(content_type, content, self._settings)
         report = await self._guardrails.check(request_id, filename, content_type, content)
         if not report["passed"]:
             return {**report, "job": None, "pipeline": None, "result": None}

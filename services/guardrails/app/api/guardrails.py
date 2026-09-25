@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
 
-from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import get_request_id
@@ -10,7 +9,6 @@ from ocr_common.web.security import verify_api_key
 from app.api.schemas import GuardrailReportResponse
 from app.dependencies import get_guardrails_service
 from app.services.guardrails_service import GuardrailsService
-from app.services.pages import TOO_MANY_PAGES_MESSAGE
 
 router = APIRouter(tags=["Guardrails"], dependencies=[Depends(verify_api_key)])
 
@@ -21,13 +19,27 @@ _REJECTED_PAGE = {"page_index": 0, "proba_approve": 0.1179, "proba_reject": 0.88
 _ACCEPTED_REPORT = {
     "passed": True,
     "reason": None,
-    "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
+    "document": {
+        "verdict": "accepted",
+        "confidence": 0.9821,
+        "n_pages": 1,
+        "n_approve": 1,
+        "n_reject": 0,
+        "reject_threshold": 0.5,
+    },
     "pages": [_ACCEPTED_PAGE],
 }
 _REJECTED_REPORT = {
     "passed": False,
     "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
-    "document": {"verdict": "reject", "confidence": 0.8821, "n_pages": 1, "n_approve": 0, "n_reject": 1},
+    "document": {
+        "verdict": "reject",
+        "confidence": 0.8821,
+        "n_pages": 1,
+        "n_approve": 0,
+        "n_reject": 1,
+        "reject_threshold": 0.5,
+    },
     "pages": [_REJECTED_PAGE],
 }
 
@@ -43,9 +55,9 @@ _REJECTED_REPORT = {
         "either in this process (`efficientnet`) or the ML team's model service (`remote`, POST "
         "/v1/predict/json); the report is the same either way. The orchestrator NPWP calls it for every "
         "`extract-ocr` and hands `data` on to the OCR stage when `passed`. Always 200 when the document was "
-        "judged: read `data.passed`. Refused before the model runs: more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
-        f"pages (400 `{TOO_MANY_PAGES_MESSAGE}`), a document above `MAX_UPLOAD_BYTES` (413), an empty, "
-        "unreadable or unsupported file (400)."
+        "judged: read `data.passed`. Only the model judges here: the type, size (`MAX_UPLOAD_BYTES`) and page "
+        "count (`MAX_DOCUMENT_PAGES`) of the document are checked by the orchestrator NPWP before it calls this "
+        "endpoint. A file the model cannot read (not an image, an unreadable PDF) is 400."
     ),
     responses={
         200: success_examples(
@@ -53,14 +65,8 @@ _REJECTED_REPORT = {
             accepted=("Accepted", envelope(200, "OK", _ACCEPTED_REPORT, RID)),
             rejected=("Rejected", envelope(200, "OK", _REJECTED_REPORT, RID)),
         ),
-        400: error(
-            400,
-            "Bad file (empty, unsupported type, unreadable, more than `GUARDRAILS_MAX_DOCUMENT_PAGES` pages) or "
-            "bad intake",
-            TOO_MANY_PAGES_MESSAGE,
-        ),
+        400: error(400, "A file the model cannot read, or bad intake", "Uploaded file is not a readable image"),
         401: UNAUTHORIZED,
-        413: error(413, "The document exceeds `MAX_UPLOAD_BYTES`", PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB")),
         422: error(422, "Validation Error", "body.file: Field required", errors="VALIDATION_ERROR"),
         500: error(500, "The guardrails model failed", "guardrails model returned an unexpected response"),
         503: error(503, "The guardrails model service (`remote`) is unreachable", "guardrails model is unavailable"),

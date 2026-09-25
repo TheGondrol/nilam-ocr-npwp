@@ -7,7 +7,9 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
     POST /api/requests/{id}/outbox/release   lepaskan dead letter request itu (failed_at = NULL)
-    GET/PUT /api/simulation          bagaimana tracker menjawab callback: ok | down (503) | reject (422)
+    GET/PUT /api/simulation          bagaimana tracker menjawab callback: ok | down (503) | reject (422),
+                                     dan reject threshold guardrails yang dibagikan (default 0.5)
+    GET  /v1/thresholds/guardrails   DUMMY endpoint threshold Orkestrasi pusat (GUARDRAILS_THRESHOLD_URL)
     GET  /api/outbox                 backlog outbox tiap service (GET /v1/<tahap>/outbox)
 
 Redis Streams sebagai bus event: tiap request punya stream `ocr:events:<request_id>`.
@@ -116,7 +118,7 @@ app = FastAPI(title="nilam-ocr tracker (stand-in Orkestrasi)", lifespan=lifespan
 XREAD_BLOCK_MS = 5000
 redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=XREAD_BLOCK_MS / 1000 + 10)
 http = httpx.AsyncClient(timeout=120.0, headers={"X-API-Key": API_KEY} if API_KEY else {})
-simulation: dict[str, Any] = {"callback": "ok"}
+simulation: dict[str, Any] = {"callback": "ok", "guardrails_reject_threshold": 0.5}
 watchers: dict[str, asyncio.Task[None]] = {}
 pool: Any = None
 db_error: str | None = None
@@ -516,9 +518,21 @@ async def put_simulation(body: dict[str, Any]):
     mode = body.get("callback", simulation["callback"])
     if mode not in CALLBACK_MODES:
         raise HTTPException(status_code=422, detail=f"callback harus salah satu dari {sorted(CALLBACK_MODES)}")
+    threshold = body.get("guardrails_reject_threshold", simulation["guardrails_reject_threshold"])
+    if isinstance(threshold, bool) or not isinstance(threshold, int | float) or not 0 < threshold < 1:
+        raise HTTPException(status_code=422, detail="guardrails_reject_threshold harus angka di antara 0 dan 1")
     simulation["callback"] = mode
-    log.info("simulation: callback=%s", mode)
+    simulation["guardrails_reject_threshold"] = float(threshold)
+    log.info("simulation: callback=%s guardrails_reject_threshold=%s", mode, threshold)
     return await get_simulation()
+
+
+@app.get("/v1/thresholds/guardrails")
+async def guardrails_threshold():
+    """DUMMY endpoint threshold milik Orkestrasi pusat, yang dibaca guardrails (GUARDRAILS_THRESHOLD_URL +
+    GUARDRAILS_THRESHOLD_PATH, di-cache GUARDRAILS_THRESHOLD_CACHE_SECONDS). Ganti nilainya dengan
+    PUT /api/simulation {"guardrails_reject_threshold": 0.7}. Diganti endpoint asli begitu Orkestrasi punya."""
+    return {"reject_threshold": simulation["guardrails_reject_threshold"]}
 
 
 @app.post("/api/requests/{request_id}/outbox/release")

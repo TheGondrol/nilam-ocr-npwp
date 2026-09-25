@@ -98,23 +98,6 @@ async def test_model_verdict_is_not_overridden_by_local_settings():
     assert [p["verdict"] for p in report["pages"]] == ["accepted", "accepted"]
 
 
-async def test_file_is_validated_before_calling_the_model():
-    calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        return httpx.Response(200, json=ACCEPTED)
-
-    service = GuardrailsService(_model(handler), _settings())
-    with pytest.raises(ServiceError) as exc:
-        await service.check("a.txt", "text/plain", b"x")
-    assert exc.value.status_code == 400
-    with pytest.raises(ServiceError):
-        await service.check("a.jpg", "image/jpeg", b"")
-    assert calls == 0
-
-
 async def test_extra_fields_from_the_model_are_dropped():
     body = {
         "status_code": 200,
@@ -200,7 +183,8 @@ def test_http_check_with_remote_backend(client, auth, use_classifier):
     body = response.json()
     assert body["request_id"] == "OCR_R1"
     assert body["data"]["passed"] is False
-    assert body["data"]["document"] == REJECTED["data"]["document"]
+    # The remote model applies its own threshold, so the report does not state one.
+    assert body["data"]["document"] == {**REJECTED["data"]["document"], "reject_threshold": None}
 
 
 def test_http_model_unreachable_returns_503_envelope(client, auth, use_classifier):

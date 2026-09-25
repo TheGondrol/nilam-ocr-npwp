@@ -21,13 +21,13 @@ from app.api.extract_contract import (
 from app.api.schemas import ExtractOcrResponse
 from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
+from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
 from app.services.extract_service import ExtractOcrService
 
 router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
-TOO_MANY_PAGES_MESSAGE = "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -124,7 +124,7 @@ def _parse_params(raw: str | None) -> Any:
         "dicek kembali`. A single-word name or a letter in the number is tolerated: the fields are returned, and "
         "the trust model's confidence already accounts for it.\n\n"
         "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
-        "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
+        "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
@@ -154,7 +154,7 @@ def _parse_params(raw: str | None) -> Any:
             "model": ExtractOcrResponse,
             "description": (
                 f"Rejected by the guardrails model or by the structuring rules (`{REJECTED_CODE}`, `guardrails: 1`), "
-                "unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `GUARDRAILS_MAX_DOCUMENT_PAGES` "
+                "unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `MAX_DOCUMENT_PAGES` "
                 f"pages (`{TOO_MANY_PAGES_MESSAGE}`), or a bad file / intake (empty, unsupported type, unreadable, "
                 "`file_url` refused)"
             ),

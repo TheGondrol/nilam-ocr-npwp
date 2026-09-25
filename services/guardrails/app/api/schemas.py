@@ -19,7 +19,7 @@ class PageResult(BaseModel):
     )
     verdict: Verdict = Field(
         ...,
-        description="`reject` when `proba_reject` reaches the reject threshold (0.5 by default)",
+        description="`reject` when `proba_reject` reaches the reject threshold (`document.reject_threshold`)",
         examples=["accepted"],
     )
 
@@ -43,6 +43,17 @@ class DocumentResult(BaseModel):
     n_pages: int = Field(..., ge=0, description="Pages judged (a PDF is capped at 20)", examples=[2])
     n_approve: int = Field(..., ge=0, description="Pages with verdict `accepted`", examples=[2])
     n_reject: int = Field(..., ge=0, description="Pages with verdict `reject`", examples=[0])
+    reject_threshold: float | None = Field(
+        None,
+        gt=0,
+        lt=1,
+        description=(
+            "The reject threshold the pages were judged with: the central orchestrator's "
+            "(`GUARDRAILS_THRESHOLD_URL`), else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint's "
+            "0.5). Null with the `remote` backend, which applies its own"
+        ),
+        examples=[0.5],
+    )
 
 
 class GuardrailReport(BaseModel):

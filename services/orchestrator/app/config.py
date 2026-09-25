@@ -14,6 +14,10 @@ class Settings(BaseServiceSettings):
     guardrails_api_key: str | None = None
     guardrails_timeout_seconds: float = 20.0
 
+    # A PDF with more pages is refused with 400 here, before guardrails or any stage runs (a genuine NPWP
+    # upload is at most 2 pages, ML team 23 Sep 2026). MAX_UPLOAD_BYTES (413) is checked here too.
+    max_document_pages: int = Field(2, ge=1)
+
     ekstraksi_service_url: str = "http://127.0.0.1:8030"
     ekstraksi_api_key: str | None = None
     ekstraksi_timeout_seconds: float = 10.0
