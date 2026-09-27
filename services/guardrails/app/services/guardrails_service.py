@@ -2,7 +2,7 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
-from app.clients.reject_threshold import RejectThreshold, default_threshold
+from app.clients.threshold import GuardrailsThreshold, Threshold, default_threshold
 from app.config import Settings
 from app.services.pages import render_pages
 
@@ -21,11 +21,11 @@ class GuardrailsService:
     """The guardrails model's verdict on a document. Only what the model decides: the type, size and page
     count were checked by the orchestrator NPWP before it called this service."""
 
-    def __init__(self, classifier, settings: Settings, threshold: RejectThreshold | None = None):
+    def __init__(self, classifier, settings: Settings, threshold: GuardrailsThreshold | None = None):
         """Without `threshold`, the default one (GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's)."""
         self._classifier = classifier
         self._settings = settings
-        self._threshold = threshold or RejectThreshold(
+        self._threshold = threshold or GuardrailsThreshold(
             None, "", default_threshold(settings.guardrails_reject_threshold, classifier), cache_seconds=0
         )
 
@@ -41,7 +41,7 @@ class GuardrailsService:
         return {"passed": passed, "reason": None if passed else _reject_reason(report["document"]), **report}
 
     def _check_locally(
-        self, filename: str, content_type: str | None, content: bytes, threshold: float
+        self, filename: str, content_type: str | None, content: bytes, threshold: Threshold
     ) -> dict[str, Any]:
         pages = render_pages(
             content_type,
@@ -56,12 +56,13 @@ class GuardrailsService:
                 "page_index": index,
                 "proba_approve": proba_approve,
                 "proba_reject": proba_reject,
-                "verdict": VERDICT_REJECT if proba_reject >= threshold else VERDICT_ACCEPTED,
+                "verdict": VERDICT_REJECT if threshold.rejects(proba_approve, proba_reject) else VERDICT_ACCEPTED,
             }
             for index, (proba_approve, proba_reject) in enumerate(predictions)
         ]
         # The threshold in the report: it can change at the orchestrator, so a verdict records the one it used.
-        return {"document": {**self._aggregate(page_results), "reject_threshold": threshold}, "pages": page_results}
+        document = {**self._aggregate(page_results), "threshold": threshold.value, "threshold_target": threshold.target}
+        return {"document": document, "pages": page_results}
 
     def _aggregate(self, pages: list[dict[str, Any]]) -> dict[str, Any]:
         n_pages = len(pages)

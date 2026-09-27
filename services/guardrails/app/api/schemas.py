@@ -19,7 +19,10 @@ class PageResult(BaseModel):
     )
     verdict: Verdict = Field(
         ...,
-        description="`reject` when `proba_reject` reaches the reject threshold (`document.reject_threshold`)",
+        description=(
+            "Decided by `document.threshold`: target `accept` -> `reject` when `proba_approve` is below it; "
+            "target `reject` -> `reject` when `proba_reject` reaches it"
+        ),
         examples=["accepted"],
     )
 
@@ -43,16 +46,24 @@ class DocumentResult(BaseModel):
     n_pages: int = Field(..., ge=0, description="Pages judged (a PDF is capped at 20)", examples=[2])
     n_approve: int = Field(..., ge=0, description="Pages with verdict `accepted`", examples=[2])
     n_reject: int = Field(..., ge=0, description="Pages with verdict `reject`", examples=[0])
-    reject_threshold: float | None = Field(
+    threshold: float | None = Field(
         None,
         gt=0,
         lt=1,
         description=(
-            "The reject threshold the pages were judged with: the central orchestrator's "
-            "(`GUARDRAILS_THRESHOLD_URL`), else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint's "
-            "0.5). Null with the `remote` backend, which applies its own"
+            "The threshold the pages were judged with: the central orchestrator's (`GUARDRAILS_THRESHOLD_URL`), "
+            "else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint's 0.5, on the reject side). "
+            "Null with the `remote` backend, which applies its own"
         ),
         examples=[0.5],
+    )
+    threshold_target: Literal["accept", "reject"] | None = Field(
+        None,
+        description=(
+            "The side `threshold` applies to. `accept`: a page is accepted when `proba_approve >= threshold`. "
+            "`reject`: a page is rejected when `proba_reject >= threshold`. Null with the `remote` backend"
+        ),
+        examples=["reject"],
     )
 
 

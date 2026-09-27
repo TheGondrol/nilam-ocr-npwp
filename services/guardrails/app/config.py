@@ -20,9 +20,11 @@ class Settings(BaseServiceSettings):
     guardrails_torch_threads: int | None = None
     guardrails_reject_threshold: float | None = Field(None, gt=0, lt=1)
 
-    # The reject threshold is owned by the central orchestrator: GET GUARDRAILS_THRESHOLD_URL +
-    # GUARDRAILS_THRESHOLD_PATH answers {"reject_threshold": 0.5}, cached GUARDRAILS_THRESHOLD_CACHE_SECONDS.
-    # Unset, unreachable or an invalid answer -> GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's (0.5).
+    # The threshold is owned by the central orchestrator: GET GUARDRAILS_THRESHOLD_URL +
+    # GUARDRAILS_THRESHOLD_PATH answers {"threshold": 0.6, "target": "accept" | "reject"}, cached
+    # GUARDRAILS_THRESHOLD_CACHE_SECONDS (see app.clients.threshold for how each target decides).
+    # Unset, unreachable or an invalid answer -> reject side, GUARDRAILS_REJECT_THRESHOLD, else the
+    # checkpoint's (0.5).
     guardrails_threshold_url: str | None = None
     guardrails_threshold_path: str = "/v1/thresholds/guardrails"
     guardrails_threshold_api_key: str | None = None

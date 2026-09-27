@@ -531,6 +531,37 @@ Yang perlu kami tahu:
 Kontrak callback di bagian 7 adalah **usulan sepihak dari kami dan belum pernah
 disepakati**. Kalau bentuknya perlu berbeda, bilang sekarang selagi murah diubah.
 
+**Endpoint threshold guardrails (kalian yang menyediakan).** Ambang model guardrails disimpan di
+sisi kalian supaya bisa diubah tanpa deploy di sisi kami. Service guardrails kami membacanya
+dengan:
+
+    GET <URL kalian>/v1/thresholds/guardrails        (path bisa disesuaikan)
+    X-API-Key: <opsional>
+
+    {"threshold": 0.6, "target": "accept"}
+
+- `threshold`: angka di antara 0 dan 1 (tidak termasuk 0 dan 1).
+- `target`: sisi yang diatur ambang itu.
+  - `accept`: dokumen lolos kalau probabilitas accept dari model **≥** `threshold` (sudah
+    melewati batas minimum), selain itu ditolak.
+  - `reject`: dokumen ditolak kalau probabilitas reject **≥** `threshold`, dan lolos kalau di
+    bawah batas toleransi.
+
+Contoh, keluaran model probabilitas accept 0,7 (berarti reject 0,3):
+
+| Jawaban endpoint | Hasil |
+|---|---|
+| `{"threshold": 0.6, "target": "accept"}` | lolos (0,7 ≥ 0,6) |
+| `{"threshold": 0.6, "target": "reject"}` | lolos (0,3 < 0,6) |
+| `{"threshold": 0.8, "target": "accept"}` | ditolak (0,7 < 0,8) |
+| `{"threshold": 0.3, "target": "reject"}` | ditolak (0,3 ≥ 0,3) |
+
+Nilainya kami simpan 60 detik per pod, jadi perubahan di sisi kalian berlaku paling lambat
+semenit kemudian. Kalau endpoint mati atau jawabannya tidak valid, kami tetap memakai ambang
+terakhir yang pernah kalian berikan; kalau belum pernah ada, dipakai default (reject 0,5).
+Ambang yang dipakai tercatat di laporan guardrails (`document.threshold`,
+`document.threshold_target`). Endpoint ini belum ada; sampai ada, kami memakai default.
+
 ## 10. Amplop respons dan kode error
 
 Semua respons memakai amplop yang sama.

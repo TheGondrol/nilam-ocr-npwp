@@ -197,7 +197,8 @@ paths:
                         n_pages: 1
                         n_approve: 1
                         n_reject: 0
-                        reject_threshold: 0.5
+                        threshold: 0.5
+                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -219,7 +220,8 @@ paths:
                         n_pages: 1
                         n_approve: 0
                         n_reject: 1
-                        reject_threshold: 0.5
+                        threshold: 0.5
+                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.1179
@@ -365,18 +367,31 @@ components:
           description: Pages with verdict `reject`
           examples:
           - 0
-        reject_threshold:
+        threshold:
           anyOf:
           - type: number
             exclusiveMaximum: 1.0
             exclusiveMinimum: 0.0
           - type: 'null'
-          title: Reject Threshold
-          description: 'The reject threshold the pages were judged with: the central orchestrator''s (`GUARDRAILS_THRESHOLD_URL`),
-            else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s 0.5). Null with the
-            `remote` backend, which applies its own'
+          title: Threshold
+          description: 'The threshold the pages were judged with: the central orchestrator''s (`GUARDRAILS_THRESHOLD_URL`),
+            else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s 0.5, on the reject
+            side). Null with the `remote` backend, which applies its own'
           examples:
           - 0.5
+        threshold_target:
+          anyOf:
+          - type: string
+            enum:
+            - accept
+            - reject
+          - type: 'null'
+          title: Threshold Target
+          description: 'The side `threshold` applies to. `accept`: a page is accepted when `proba_approve
+            >= threshold`. `reject`: a page is rejected when `proba_reject >= threshold`. Null with the
+            `remote` backend'
+          examples:
+          - reject
       type: object
       required:
       - verdict
@@ -576,7 +591,8 @@ components:
           - accepted
           - reject
           title: Verdict
-          description: '`reject` when `proba_reject` reaches the reject threshold (`document.reject_threshold`)'
+          description: 'Decided by `document.threshold`: target `accept` -> `reject` when `proba_approve`
+            is below it; target `reject` -> `reject` when `proba_reject` reaches it'
           examples:
           - accepted
       type: object

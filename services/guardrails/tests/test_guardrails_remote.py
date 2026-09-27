@@ -184,7 +184,7 @@ def test_http_check_with_remote_backend(client, auth, use_classifier):
     assert body["request_id"] == "OCR_R1"
     assert body["data"]["passed"] is False
     # The remote model applies its own threshold, so the report does not state one.
-    assert body["data"]["document"] == {**REJECTED["data"]["document"], "reject_threshold": None}
+    assert body["data"]["document"] == {**REJECTED["data"]["document"], "threshold": None, "threshold_target": None}
 
 
 def test_http_model_unreachable_returns_503_envelope(client, auth, use_classifier):

@@ -25,7 +25,8 @@ _ACCEPTED_REPORT = {
         "n_pages": 1,
         "n_approve": 1,
         "n_reject": 0,
-        "reject_threshold": 0.5,
+        "threshold": 0.5,
+        "threshold_target": "reject",
     },
     "pages": [_ACCEPTED_PAGE],
 }
@@ -38,7 +39,8 @@ _REJECTED_REPORT = {
         "n_pages": 1,
         "n_approve": 0,
         "n_reject": 1,
-        "reject_threshold": 0.5,
+        "threshold": 0.5,
+        "threshold_target": "reject",
     },
     "pages": [_REJECTED_PAGE],
 }

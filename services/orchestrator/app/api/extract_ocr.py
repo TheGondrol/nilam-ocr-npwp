@@ -88,7 +88,8 @@ _GUARDRAILS_REPORT = {
         "n_pages": 1,
         "n_approve": 1,
         "n_reject": 0,
-        "reject_threshold": 0.5,
+        "threshold": 0.5,
+        "threshold_target": "reject",
     },
     "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
 }
