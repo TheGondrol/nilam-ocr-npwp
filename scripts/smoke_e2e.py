@@ -84,11 +84,16 @@ def _image() -> bytes:
     return buffer.getvalue()
 
 
-def _submit(client: httpx.Client, request_id: str, filename: str, content: bytes) -> httpx.Response:
+def _submit(
+    client: httpx.Client, request_id: str, filename: str, content: bytes, sequence: list[str] | None = None
+) -> httpx.Response:
+    data = {"request_id": request_id, "document_type": "npwp"}
+    if sequence is not None:
+        data["pipeline_name_sequence"] = json.dumps(sequence)
     return client.post(
         f"{URLS['orchestrator']}/v1/extract-ocr",
         headers=HEADERS,
-        data={"request_id": request_id, "document_type": "npwp"},
+        data=data,
         files={"file": (filename, content, "image/jpeg")},
     )
 
@@ -97,7 +102,8 @@ def _status(client: httpx.Client, request_id: str) -> httpx.Response:
     return client.get(f"{URLS['orchestrator']}/v1/extract-ocr/{request_id}", headers=HEADERS)
 
 
-def _poll(client: httpx.Client, request_id: str) -> dict[str, dict]:
+def _poll(client: httpx.Client, request_id: str, last: str = "scoring") -> dict[str, dict]:
+    """Job tiap tahap sampai tahap `last` (tahap terakhir sequence request itu) DONE / FAILED."""
     deadline = time.monotonic() + TIMEOUT_SECONDS
     jobs: dict[str, dict] = {}
     while time.monotonic() < deadline:
@@ -106,7 +112,7 @@ def _poll(client: httpx.Client, request_id: str) -> dict[str, dict]:
             if response.status_code == 200:
                 jobs[stage] = response.json()["data"]
         statuses = {stage: job["status"] for stage, job in jobs.items()}
-        if statuses.get("scoring") in {"DONE", "FAILED"} or "FAILED" in statuses.values():
+        if statuses.get(last) in {"DONE", "FAILED"} or "FAILED" in statuses.values():
             break
         time.sleep(0.3)
     return jobs
@@ -241,6 +247,79 @@ def guardrails_reject(client: httpx.Client) -> bool:
     )
 
 
+def _sequence_cut_short(client: httpx.Client, sequence: list[str], data_key: str) -> bool:
+    """Sequence yang berhenti sebelum scoring: tahap terakhirnya menjawab dengan hasilnya apa adanya (`data_key`
+    ada di `data`), tahap sesudahnya tidak pernah punya job, dan callback DONE-nya membawa `final: true`."""
+    last = sequence[-1]
+    request_id = f"REQ_{uuid.uuid4()}"
+    response = _submit(client, request_id, "npwp.jpg", _image(), sequence)
+    body = response.json()
+    print(
+        f"{' -> '.join(sequence)}: {response.status_code} job_status={body.get('job_status')} "
+        f"pipeline_last_stage={body.get('pipeline_last_stage')} errors={body.get('errors')}"
+    )
+    rejected = response.status_code == 400 and body.get("pipeline_last_stage") == "structuring"
+    if rejected:
+        # Aturan structuring tetap menolak (mis. KPP acak dari OCR mock); tetap bukti structuring jalan dan berhenti.
+        print(f"  ditolak aturan structuring: {body.get('message')!r}")
+    elif response.status_code not in (200, 202) or body.get("pipeline_last_stage") != last:
+        return False
+    elif response.status_code == 200 and data_key not in (body.get("data") or {}):
+        print(f"  data tidak berisi {data_key!r}: {json.dumps(body.get('data'))[:200]}")
+        return False
+
+    jobs = _poll(client, request_id, last)
+    time.sleep(1.0)  # beri waktu hand-off yang seharusnya tidak ada
+    after = STAGES[STAGES.index(last) + 1 :]
+    leaked = [s for s in after if client.get(f"{URLS[s]}/v1/{s}/jobs/{request_id}", headers=HEADERS).status_code != 404]
+    print(f"  {last} {jobs.get(last, {}).get('status')}; tahap sesudahnya tanpa job: {not leaked} {leaked or ''}")
+    ok = jobs.get(last, {}).get("status") == "DONE" and not leaked
+    if CALLBACK_PORT and not rejected:
+        time.sleep(1.0)
+        mine = [
+            (c["stage"], c["status"], c.get("final", False)) for c in callbacks if c.get("request_id") == request_id
+        ]
+        print("  callback diterima:", mine)
+        # Callback bisa datang tidak berurutan (outbox): cukup satu yang final, yaitu DONE dari tahap terakhir.
+        stage_name = {"extraction": "OCR", "structuring": "STRUCTURING"}[last]
+        ok = ok and [(stage, status) for stage, status, final in mine if final] == [(stage_name, "DONE")]
+    return ok
+
+
+def sequences(client: httpx.Client) -> bool:
+    """pipeline_name_sequence: memotong ujung pipeline, melewati guardrails, guardrails saja, dan sequence salah."""
+    print("== pipeline_name_sequence ==")
+    results = [
+        _sequence_cut_short(client, ["guardrails", "extraction"], "blocks"),
+        _sequence_cut_short(client, ["extraction", "structuring"], "fields"),
+    ]
+
+    request_id = f"REQ_{uuid.uuid4()}"
+    response = _submit(client, request_id, "npwp.jpg", _image(), ["guardrails"])
+    body = response.json()
+    status = _status(client, request_id)
+    print(
+        f"guardrails: {response.status_code} pipeline_last_stage={body.get('pipeline_last_stage')} "
+        f"data.passed={(body.get('data') or {}).get('passed')}; GET status -> {status.status_code} (tidak disimpan)"
+    )
+    results.append(
+        response.status_code in (200, 400)
+        and body.get("pipeline_last_stage") == "guardrails"
+        and status.status_code == 404
+    )
+
+    response = _submit(client, f"REQ_{uuid.uuid4()}", "npwp.jpg", _image(), ["extraction", "scoring"])
+    body = response.json()
+    print(f"extraction -> scoring: {response.status_code} errors={body.get('errors')}")
+    print(f"  message={body.get('message')!r}")
+    results.append(
+        response.status_code == 422
+        and body.get("errors") == "INVALID_PIPELINE_SEQUENCE"
+        and body.get("pipeline_last_stage") is None
+    )
+    return all(results)
+
+
 def main() -> int:
     if CALLBACK_PORT:
         server = ThreadingHTTPServer(("0.0.0.0", CALLBACK_PORT), _CallbackHandler)
@@ -250,7 +329,7 @@ def main() -> int:
     with httpx.Client(timeout=60.0) as client:
         for name, url in URLS.items():
             print(f"health {name}:", client.get(f"{url}/health").json()["backends"])
-        results = [async_pipeline(client), guardrails_reject(client)]
+        results = [async_pipeline(client), guardrails_reject(client), sequences(client)]
         if LATENCY_RUNS:
             results.append(latency(client, LATENCY_RUNS))
     print("HASIL:", "OK" if all(results) else "GAGAL")

@@ -1,6 +1,6 @@
 // Skenario k6: kirim NPWP ke orchestrator /v1/extract-ocr dengan laju kedatangan tetap
 // (open model), catat status HTTP-nya, dan laporkan tiap sampel ke tracker supaya
-// jumlah 200/ditolak/202/4xx/5xx dan waktu end-to-end (sampai callback SCORING) bisa dihitung.
+// jumlah 200/ditolak/202/4xx/5xx dan waktu end-to-end (sampai callback DONE tahap terakhir) bisa dihitung.
 //
 // Env (diisi tracker, atau manual lewat `k6 run -e ...`):
 //   RUN_ID        id run, dipakai sebagai prefiks request_id: LT_<RUN_ID>_<vu>-<iter>. Endpoint -test
@@ -16,6 +16,8 @@
 //   API_KEY       diisi kalau orchestrator tidak memakai AUTH_DISABLED
 //   ENDPOINT      path yang ditembak (default /v1/extract-ocr). Load test di dev: /v1/extract-ocr-test,
 //                 pipeline yang sama di tabel testing_* tanpa callback ke Orkestrasi (TESTING_ENDPOINTS)
+//   PIPELINE_NAME_SEQUENCE  service yang dijalankan, JSON array, mis. '["extraction"]' untuk mengukur OCR saja
+//                 (kosong = pipeline penuh). Tahap terakhirnya mengakhiri request dan mengirim callback `final`
 import http from 'k6/http'
 import { Counter, Trend } from 'k6/metrics'
 
@@ -28,6 +30,7 @@ const MODE = __ENV.MODE || 'constant'
 const WAIT = Number(__ENV.WAIT_SECONDS || 15)
 const API_KEY = __ENV.API_KEY || ''
 const ENDPOINT = __ENV.ENDPOINT || '/v1/extract-ocr'
+const SEQUENCE = __ENV.PIPELINE_NAME_SEQUENCE || ''
 
 const names = (__ENV.IMAGES || 'npwp1.jpg')
   .split(',')
@@ -91,15 +94,17 @@ const extractDuration = new Trend('extract_duration', true)
 export default function () {
   const image = images[(__VU + __ITER) % images.length]
   const requestId = `LT_${RUN}_${__VU}-${__ITER}`
+  const form = {
+    request_id: requestId,
+    run_id: RUN,
+    document_type: 'npwp',
+    file: http.file(image.data, image.name, contentType(image.name)),
+  }
+  if (SEQUENCE) form.pipeline_name_sequence = SEQUENCE
   const startedAt = Date.now()
   const res = http.post(
     `${TARGET}${ENDPOINT}`,
-    {
-      request_id: requestId,
-      run_id: RUN,
-      document_type: 'npwp',
-      file: http.file(image.data, image.name, contentType(image.name)),
-    },
+    form,
     {
       timeout: `${WAIT + 30}s`,
       tags: { name: 'extract-ocr' },
@@ -133,6 +138,7 @@ export default function () {
         status: res.status,
         job_status: body && body.job_status ? body.job_status : null,
         guardrails: body && body.guardrails != null ? body.guardrails : null,
+        pipeline_last_stage: body && body.pipeline_last_stage ? body.pipeline_last_stage : null,
         errors: body && body.errors ? body.errors : null,
         message: body && body.message ? body.message : res.error || null,
         started_at: startedAt / 1000,

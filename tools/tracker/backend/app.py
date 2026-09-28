@@ -2,7 +2,8 @@
 Tracker pipeline untuk uji coba lokal. Memerankan ORKESTRASI di sequence
 diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 
-    POST /api/requests               upload dokumen -> orchestrator /v1/extract-ocr (tunggu PIPELINE_WAIT_SECONDS)
+    POST /api/requests               upload dokumen -> orchestrator /v1/extract-ocr (tunggu PIPELINE_WAIT_SECONDS),
+                                     opsional dengan pipeline_name_sequence (JSON array) untuk memilih service
     POST /v1/callbacks/stage         dipanggil relay extraction / structuring / scoring (ORCHESTRATION_URL)
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
@@ -15,8 +16,9 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 Redis Streams sebagai bus event: tiap request punya stream `ocr:events:<request_id>`.
 Setiap event punya `type`:
     client    upload diterima
-    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya
-    stage     status tahap (PROCESSING / DONE / FAILED / REJECTED), `source`: db | callback
+    http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya, plus pipeline_last_stage
+    stage     status tahap (PROCESSING / DONE / FAILED / REJECTED; GUARDRAILS SKIPPED kalau tidak ada di
+              sequence), `source`: db | callback. Request berakhir di tahap terakhir sequence-nya
     outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n dan jawaban tracker
     pipeline  END: tidak ada lagi yang akan terjadi untuk request ini
@@ -80,7 +82,10 @@ JOB_PATHS = {stage: f"/v1/{prefix}/jobs" for stage, prefix in PREFIXES.items()}
 API_KEY = os.environ.get("API_KEY")  # kosong kalau service dijalankan dengan AUTH_DISABLED=true
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 STAGES = ["GUARDRAILS", "OCR", "STRUCTURING", "SCORING"]
-NEXT_STAGE = {"OCR": "STRUCTURING", "STRUCTURING": "SCORING"}
+# pipeline_name_sequence: service yang dijalankan satu request, dalam urutan guardrails -> extraction ->
+# structuring -> scoring (guardrails boleh tidak ada di depan, ujungnya boleh dipotong). Tahap tracker tiap service:
+PIPELINE_NAMES = ["guardrails", "extraction", "structuring", "scoring"]
+STAGE_OF_SERVICE = {"guardrails": "GUARDRAILS", "extraction": "OCR", "structuring": "STRUCTURING", "scoring": "SCORING"}
 
 TARGET = os.environ.get("TRACKER_TARGET", "local")
 POLL = os.environ.get("TRACKER_POLL") == "1"
@@ -140,9 +145,9 @@ async def emit(request_id: str, stage: str, status: str, *, type: str = "stage",
     summary.setdefault("created_at", event["ts"])
     summary["updated_at"] = event["ts"]
     if type == "stage":
-        # Jawaban orchestrator (GUARDRAILS DONE) datang setelah pipeline selesai atau berhenti; jangan sampai ia
-        # menutupi keadaan tahap yang lebih jauh (mis. STRUCTURING REJECTED) di daftar request.
-        entry_answer = stage == "GUARDRAILS" and status == "DONE"
+        # Jawaban orchestrator (GUARDRAILS DONE / SKIPPED) datang setelah pipeline selesai atau berhenti; jangan
+        # sampai ia menutupi keadaan tahap yang lebih jauh (mis. STRUCTURING REJECTED) di daftar request.
+        entry_answer = stage == "GUARDRAILS" and status in ("DONE", "SKIPPED")
         if not entry_answer or summary.get("stage") in (None, "CLIENT", "GUARDRAILS"):
             summary.update(stage=stage, status=status)
     elif type == "http":
@@ -154,13 +159,57 @@ async def emit(request_id: str, stage: str, status: str, *, type: str = "stage",
             wait_seconds=fields.get("wait_seconds"),
             body=fields.get("body"),
             rejected_by=fields.get("rejected_by"),
+            pipeline_last_stage=fields.get("pipeline_last_stage"),
         )
     elif type == "client":
-        summary.update(filename=fields.get("filename"), slow=fields.get("slow"), stage="CLIENT", status=status)
+        summary.update(
+            filename=fields.get("filename"),
+            slow=fields.get("slow"),
+            sequence=fields.get("sequence"),
+            stage="CLIENT",
+            status=status,
+        )
     elif type == "pipeline":
         summary["ended"] = True
     await redis.hset("ocr:requests", request_id, json.dumps(summary))
     log.info("event %s %s %s %s", type, request_id, stage, status)
+
+
+# --- pipeline_name_sequence --------------------------------------------------------
+
+
+def parse_sequence(raw: str) -> list[str] | None:
+    """`pipeline_name_sequence` dari form tracker sebagai JSON array; kosong = pipeline penuh. Aturan urutannya
+    tidak diperiksa di sini: sequence yang salah sengaja diteruskan supaya jawaban 422 orchestrator terlihat."""
+    if not raw.strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = None
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise HTTPException(status_code=422, detail="pipeline_name_sequence harus JSON array nama service")
+    return value or None
+
+
+def pipeline_stages(sequence: list[str] | None) -> list[str]:
+    """Tahap pipeline yang dijalankan sequence ini, berurutan, tanpa GUARDRAILS (yang dijawab orchestrator
+    sendiri); tanpa sequence = ketiganya. Kosong untuk ["guardrails"]: jawaban POST-nya sudah final."""
+    names = sequence or PIPELINE_NAMES
+    return [STAGE_OF_SERVICE[name] for name in names if name in STAGE_OF_SERVICE and name != "guardrails"]
+
+
+def next_stage(sequence: list[str] | None, stage: str) -> str | None:
+    """Tahap sesudah `stage` di sequence ini, atau None kalau `stage` yang terakhir."""
+    stages = pipeline_stages(sequence)
+    index = stages.index(stage) if stage in stages else len(stages)
+    return stages[index + 1] if index + 1 < len(stages) else None
+
+
+async def request_sequence(request_id: str) -> list[str] | None:
+    """Sequence yang dikirim untuk request ini, dari ringkasannya di Redis (tahan restart tracker)."""
+    summary = json.loads(await redis.hget("ocr:requests", request_id) or "{}")
+    return summary.get("sequence")
 
 
 # --- database watcher: outbox rows and job rows of one request -----------------
@@ -234,6 +283,10 @@ async def watch_db(request_id: str) -> None:
     if db is None:
         await emit(request_id, "OUTBOX", "UNAVAILABLE", type="outbox", error_message=db_error)
         return
+    stages = pipeline_stages(await request_sequence(request_id))
+    if not stages:  # ["guardrails"]: tidak ada tahap yang menyimpan apa pun
+        return
+    last = stages[-1]
     seen_jobs: dict[str, tuple[str, int]] = {}
     seen_rows: dict[int, dict[str, Any]] = {}
     rejected = False
@@ -291,11 +344,12 @@ async def watch_db(request_id: str) -> None:
                 await emit(request_id, "OUTBOX", "DELIVERED", type="outbox", message=seen_rows.pop(row_id))
 
         statuses = {stage: job["status"] for stage, job in jobs.items() if job is not None}
-        finished = rejected or statuses.get("SCORING") == "DONE" or "FAILED" in statuses.values()
+        # Request berakhir di tahap terakhir sequence-nya (SCORING kalau pipeline penuh).
+        finished = rejected or statuses.get(last) == "DONE" or "FAILED" in statuses.values()
         pending = [v for v in current.values() if not v["failed_at"]]
         dead = [v for v in current.values() if v["failed_at"]]
-        # Jalur 200: orchestrator baru menjawab setelah pipeline selesai, jadi jawabannya bisa tiba
-        # sepersekian detik setelah scoring DONE. END menutup SSE; tunda sampai jawaban itu tercatat
+        # Jalur 200: orchestrator baru menjawab setelah tahap terakhir selesai, jadi jawabannya bisa tiba
+        # sepersekian detik setelah tahap itu DONE. END menutup SSE; tunda sampai jawaban itu tercatat
         # supaya event GUARDRAILS DONE tidak tertulis di belakang END dan kartu tidak tersangkut PENDING.
         if finished and not pending and await guardrails_answered(request_id):
             await emit(request_id, "PIPELINE", "END", type="pipeline", dead_letters=len(dead))
@@ -329,10 +383,10 @@ async def rejected_by(request_id: str) -> str:
     return "structuring" if r.status_code == 400 else "guardrails"
 
 
-async def poll_stages(request_id: str) -> None:
-    """Pengganti callback di mode GKE: tarik status tiap tahap sampai selesai."""
+async def poll_stages(request_id: str, stages: list[str]) -> None:
+    """Pengganti callback di mode GKE: tarik status tiap tahap sequence ini sampai selesai."""
     deadline = time.time() + POLL_TIMEOUT
-    for stage in ("OCR", "STRUCTURING", "SCORING"):
+    for index, stage in enumerate(stages):
         while time.time() < deadline:
             await asyncio.sleep(POLL_INTERVAL)
             try:
@@ -353,8 +407,8 @@ async def poll_stages(request_id: str) -> None:
                 return
             if status == "DONE":
                 await emit(request_id, stage, "DONE", source="poll", result=data.get("result"))
-                if stage != "SCORING":
-                    await emit(request_id, NEXT_STAGE[stage], "PROCESSING", source="poll")
+                if index + 1 < len(stages):
+                    await emit(request_id, stages[index + 1], "PROCESSING", source="poll")
                 break
             if status == "FAILED":
                 await emit(request_id, stage, "FAILED", source="poll", error_message=data.get("error_message"))
@@ -375,7 +429,11 @@ async def submit(
     file: UploadFile = File(...),
     document_type: str = Form("npwp"),
     slow_seconds: int = Form(0),
+    pipeline_name_sequence: str = Form(""),
 ):
+    sequence = parse_sequence(pipeline_name_sequence)
+    stages = pipeline_stages(sequence)
+    with_guardrails = sequence is None or "guardrails" in sequence
     request_id = f"REQ_{uuid.uuid4().hex[:12]}"
     content = await file.read()
     filename = file.filename or "upload"
@@ -393,27 +451,35 @@ async def submit(
         size=len(content),
         document_type=document_type,
         slow=slow_seconds,
+        sequence=sequence,
         callback_mode=simulation["callback"],
         wait_seconds=WAIT_SECONDS,
     )
-    start_watcher(request_id)
+    if stages:
+        start_watcher(request_id)
 
+    fields = {"request_id": request_id, "document_type": document_type}
+    if sequence is not None:
+        fields["pipeline_name_sequence"] = json.dumps(sequence)
     started = time.perf_counter()
     try:
         r = await http.post(
-            f"{ORCHESTRATOR_URL}/v1/extract-ocr",
-            data={"request_id": request_id, "document_type": document_type},
-            files={"file": (filename, content, content_type)},
+            f"{ORCHESTRATOR_URL}/v1/extract-ocr", data=fields, files={"file": (filename, content, content_type)}
         )
         body = r.json()
     except (httpx.HTTPError, ValueError) as exc:
         await emit(request_id, "GUARDRAILS", "FAILED", error_message=f"orchestrator unreachable: {exc}")
+        stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
         raise HTTPException(status_code=503, detail="orchestrator service unavailable") from exc
     elapsed_ms = round((time.perf_counter() - started) * 1000)
+    # Service tempat jawaban ini berasal (guardrails / extraction / structuring / scoring); null kalau orchestrator
+    # menolak sebelum memanggil satu pun (cek file, sequence, params).
+    last_service = body.get("pipeline_last_stage")
     rejector = None
     if r.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR":
-        rejector = await rejected_by(request_id)
+        # Orchestrator lama tanpa pipeline_last_stage: baca penolaknya dari GET status.
+        rejector = last_service if last_service in ("guardrails", "structuring") else await rejected_by(request_id)
     await emit(
         request_id,
         "GUARDRAILS",
@@ -427,31 +493,43 @@ async def submit(
         wait_seconds=WAIT_SECONDS,
         body=body,
         rejected_by=rejector,
+        pipeline_last_stage=last_service,
+        sequence=sequence,
     )
+    entry_status = "DONE" if with_guardrails else "SKIPPED"
     if rejector == "guardrails":
         await emit(request_id, "GUARDRAILS", "REJECTED", elapsed_ms=elapsed_ms, error_message=body.get("message"))
         stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
         return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
     if rejector == "structuring":
-        # Lolos guardrails; OCR dan structuring jalan, lalu aturan structuring menolak. Kartu STRUCTURING
-        # menjadi REJECTED dari watcher DB (atau polling), yang juga menutup request.
-        await emit(request_id, "GUARDRAILS", "DONE", elapsed_ms=elapsed_ms)
+        # OCR dan structuring jalan, lalu aturan structuring menolak. Kartu STRUCTURING menjadi REJECTED dari
+        # watcher DB (atau polling), yang juga menutup request.
+        await emit(request_id, "GUARDRAILS", entry_status, elapsed_ms=elapsed_ms)
         if pool is None and not POLL:
             await emit(request_id, "STRUCTURING", "REJECTED", source="orchestrator", error_message=body.get("message"))
             await emit(request_id, "PIPELINE", "END", type="pipeline")
         elif POLL:
-            asyncio.create_task(poll_stages(request_id))
+            asyncio.create_task(poll_stages(request_id, stages))
         return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
-    if r.status_code not in (200, 202, 422):
+    # Pipeline jalan kalau jawabannya 200 / 202, atau 422 karena sebuah tahap gagal; 4xx / 5xx lain (cek file,
+    # sequence tidak valid, service tidak terjangkau) berarti tidak ada tahap yang memulai job.
+    pipeline_ran = r.status_code in (200, 202) or (
+        r.status_code == 422 and str(body.get("errors") or "").endswith("_FAILED")
+    )
+    if not pipeline_ran:
         await emit(request_id, "GUARDRAILS", "FAILED", http_status=r.status_code, error_message=body.get("message"))
+        stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
         return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
-    await emit(request_id, "GUARDRAILS", "DONE", elapsed_ms=elapsed_ms)
-    if pool is None:
-        await emit(request_id, "OCR", "PROCESSING", source="orchestrator")
-    if POLL:
-        asyncio.create_task(poll_stages(request_id))
+    await emit(request_id, "GUARDRAILS", entry_status, elapsed_ms=elapsed_ms)
+    if not stages:
+        # ["guardrails"]: report guardrails adalah jawabannya, tidak ada tahap, callback, maupun baris DB.
+        await emit(request_id, "PIPELINE", "END", type="pipeline")
+    elif pool is None:
+        await emit(request_id, stages[0], "PROCESSING", source="orchestrator")
+    if POLL and stages:
+        asyncio.create_task(poll_stages(request_id, stages))
     return {
         "request_id": request_id,
         "accepted": True,
@@ -490,6 +568,7 @@ async def callback(request: Request):
         accepted=http_status == 200,
         http_status=http_status,
         mode=mode,
+        final=body.get("final", False),
         error_message=body.get("error_message"),
     )
     if http_status != 200:
@@ -498,9 +577,13 @@ async def callback(request: Request):
     if status == "DONE" and result is None and stage in JOB_PATHS:
         result = await fetch_result(stage, request_id)
     await emit(request_id, stage, status, source="callback", result=result, error_message=body.get("error_message"))
-    if pool is None and status == "DONE" and stage in NEXT_STAGE:
-        await emit(request_id, NEXT_STAGE[stage], "PROCESSING", source="callback")
-    if pool is None and not POLL and (status == "FAILED" or stage == "SCORING"):
+    # Tahap terakhir sequence menandai callback DONE-nya `final: true`; body lama tanpa field itu: hanya SCORING.
+    ends = status == "FAILED" or (status == "DONE" and body.get("final", stage == "SCORING"))
+    if pool is None and status == "DONE" and not ends:
+        following = next_stage(await request_sequence(request_id), stage)
+        if following:
+            await emit(request_id, following, "PROCESSING", source="callback")
+    if pool is None and not POLL and ends:
         await emit(request_id, "PIPELINE", "END", type="pipeline")
     return {}
 

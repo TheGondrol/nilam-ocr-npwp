@@ -79,6 +79,8 @@ button.link { background: none; border: 0; padding: 0; color: var(--processing);
 .stage.done { border-left-color: var(--done); }
 .stage.failed { border-left-color: var(--failed); }
 .stage.rejected { border-left-color: var(--rejected); }
+/* Tidak ada di pipeline_name_sequence: tidak dijalankan. */
+.stage.skipped { border-left-style: dashed; opacity: 0.6; }
 .stage-head { display: flex; align-items: center; gap: 10px; }
 .index { width: 22px; height: 22px; border-radius: 50%; background: var(--line); font-size: 0.75rem; display: grid; place-items: center; }
 .label { font-weight: 600; }
@@ -91,6 +93,8 @@ button.link { background: none; border: 0; padding: 0; color: var(--processing);
 .pill.done, .dot.done { background: var(--done); }
 .pill.failed, .dot.failed { background: var(--failed); }
 .pill.rejected, .dot.rejected { background: var(--rejected); }
+.pill.skipped, .dot.skipped { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.tag { font-size: 0.66rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; color: var(--processing); border: 1px solid var(--processing); white-space: nowrap; }
 .pill.live { background: var(--processing); animation: pulse 1.2s infinite; }
 .pill.idle { background: var(--muted); }
 @keyframes pulse { 50% { opacity: 0.5; } }

@@ -31,6 +31,7 @@ dan dua simulasi:
 | **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; extraction menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): orchestrator menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
 | **Callback orkestrasi mati (503)** | tracker menjawab 503 untuk setiap callback yang datang | baris callback jadi RETRY dengan backoff (0,5 dtk ×2 … maks 5 menit), attempt bertambah, **handoff tetap terkirim dan tahap berikutnya tetap jalan**; orchestrator tetap 200 kalau pipeline cepat. Kembalikan ke *normal*: retry berikutnya 200, baris dihapus |
 | **Callback orkestrasi menolak (422)** | tracker menjawab 422 | baris jadi DEAD setelah satu attempt, tetap ada di tabel, backlog service menunjukkan `dead_letters`; tombol *Lepaskan* mengirimnya lagi |
+| **`pipeline_name_sequence`** (pilihan di form upload) | tracker meneruskan sequence yang dipilih ke orchestrator sebagai JSON array: penuh, tanpa guardrails, guardrails saja, sampai extraction, sampai structuring, extraction saja, atau satu contoh yang tidak valid | tahap di luar sequence tampil **SKIPPED**. Tahap terakhir mengakhiri request: `data` adalah hasilnya apa adanya, `pipeline_last_stage` menyebut tahap itu, dan callback DONE-nya membawa `final: true` (tracker menutup request di situ). Guardrails saja: jawaban POST sudah final, tanpa job dan callback. Sequence tidak valid (melompati structuring): **422** `INVALID_PIPELINE_SEQUENCE`, tidak ada yang jalan |
 
 Urutan yang enak untuk presentasi: (1) kirim tanpa simulasi -> 200 dan semua baris outbox
 DELIVERED dalam ~1 detik; (2) lambat 20 dtk -> 202, lalu tunggu callback SCORING; (3) callback
@@ -101,7 +102,7 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 
 | | |
 |---|---|
-| `POST /api/requests` | form `file`, `document_type`, `slow_seconds` (0 = tanpa simulasi) |
+| `POST /api/requests` | form `file`, `document_type`, `slow_seconds` (0 = tanpa simulasi), `pipeline_name_sequence` (JSON array; kosong = pipeline penuh; sengaja tidak divalidasi supaya 422 orchestrator bisa diperlihatkan) |
 | `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
@@ -110,7 +111,7 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `GET /api/loadtest/config` | file uji yang tersedia (contoh `images/` dan unggahan `assets/`), image/network/target k6, batas laju & durasi |
 | `POST /api/loadtest/images`, `DELETE /api/loadtest/images/{nama}` | unggah file uji ke `assets/` (di-.gitignore, dihapus otomatis saat run yang memakainya berakhir); hapus satu file |
 | `DELETE /api/loadtest/assets` | hapus semua unggahan yang tertinggal di `assets/`; 409 selama ada run berjalan |
-| `GET` / `POST /api/loadtest` | daftar run; mulai run `{"rate", "duration_seconds", "mode": "constant" \| "ramp", "images"}` |
+| `GET` / `POST /api/loadtest` | daftar run; mulai run `{"rate", "duration_seconds", "mode": "constant" \| "ramp", "images", "pipeline_name_sequence"}` (sequence opsional, diteruskan ke k6 sebagai `PIPELINE_NAME_SEQUENCE`) |
 | `POST /api/loadtest/{run}/samples` | dipanggil k6 tiap request: status, job_status, elapsed_ms |
 | `GET /api/loadtest/{run}` | statistik run: campuran 200/ditolak/202/4xx/5xx/timeout, p50/p95, end-to-end, alasan penolakan, ringkasan k6 |
 | `POST /api/loadtest/{run}/stop`, `DELETE /api/loadtest/{run}` | hentikan container k6; hapus run beserta baris `LT_<run>_%` di database |
@@ -119,7 +120,9 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 
 Menu **Load testing** menjalankan [../load-tester](../load-tester) (k6 di Docker) dan menghitung
 jawaban pintu masuk (200 selesai di dalam batas tunggu, 400 ditolak `DOWNSTREAM_VALIDATION_ERROR`, 202 hasil
-menyusul, 4xx, 5xx, timeout) serta waktu end-to-end dari submit sampai callback SCORING DONE. Dokumen yang
+menyusul, 4xx, 5xx, timeout) serta waktu end-to-end dari submit sampai callback DONE tahap terakhir
+(`final: true`; SCORING untuk pipeline penuh, jawaban 200 itu sendiri untuk "guardrails saja"). Satu run bisa
+memakai `pipeline_name_sequence`, mis. "extraction saja" untuk mengukur kapasitas OCR sendirian. Dokumen yang
 ditolak, baik lewat jawaban 400 maupun lewat callback FAILED `DOWNSTREAM_VALIDATION_ERROR` setelah 202,
 dihitung terpisah dari tuntas dan gagal, dengan daftar alasannya. Request uji berprefiks `LT_` dan
 tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NETWORK

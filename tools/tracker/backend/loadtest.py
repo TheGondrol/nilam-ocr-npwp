@@ -1,13 +1,15 @@
 """Load testing dari tracker: jalankan k6 di Docker, kumpulkan sampel yang dilaporkan k6 dan
 callback tahap untuk request berprefiks LT_, lalu hitung campuran 200/ditolak/202/4xx/5xx, latensi
-pintu masuk, dan waktu end-to-end sampai callback SCORING DONE.
+pintu masuk, dan waktu end-to-end sampai callback DONE tahap terakhir (`final`; SCORING kalau pipeline penuh).
+Satu run bisa memakai pipeline_name_sequence, mis. ["extraction"] untuk mengukur OCR saja.
 
 Kunci Redis:
   ocr:loadtests                 hash run_id -> meta (json)
   ocr:lt:<run>:samples          list sampel dari k6 (json), urut kedatangan
   ocr:lt:<run>:status           hash salah satu BUCKETS -> jumlah
   ocr:lt:<run>:cb               hash "<STAGE>:<STATUS>" -> jumlah callback yang tiba
-  ocr:lt:<run>:done             hash request_id -> ts callback SCORING DONE diterima
+  ocr:lt:<run>:done             hash request_id -> ts request tuntas: callback DONE `final` diterima, atau
+                                jawaban 200 untuk sequence ["guardrails"] (tanpa tahap, jawabannya final)
   ocr:lt:<run>:failed           hash request_id -> "<STAGE>: <pesan>"
   ocr:lt:<run>:rejected         hash request_id -> alasan penolakan (message jawaban 400 atau callback FAILED)
 """
@@ -52,6 +54,8 @@ BUCKETS = ("200", "rejected", "202", "4xx", "5xx", "timeout")
 # Callback FAILED dengan kode ini berarti aturan structuring menolak dokumen (ocr_common.npwp.REJECTED_CODE),
 # bukan tahap yang rusak.
 REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
+# Nama service pipeline_name_sequence; aturan urutannya diperiksa orchestrator (422 INVALID_PIPELINE_SEQUENCE).
+PIPELINE_NAMES = ("guardrails", "extraction", "structuring", "scoring")
 
 ctx: dict[str, Any] = {}
 watchers: dict[str, asyncio.Task[None]] = {}
@@ -187,6 +191,11 @@ async def _start_container(meta: dict[str, Any]) -> str:
         f"WAIT_SECONDS={ctx['wait_seconds']}",
         "-e",
         f"API_KEY={K6_API_KEY}",
+        *(
+            ["-e", f"PIPELINE_NAME_SEQUENCE={json.dumps(meta['pipeline_name_sequence'])}"]
+            if meta.get("pipeline_name_sequence")
+            else []
+        ),
         K6_IMAGE,
         "run",
         "--quiet",
@@ -259,7 +268,8 @@ async def record_callback(body: dict[str, Any], *, accepted: bool) -> None:
     await r.hincrby(_key(run, "cb"), f"{stage}:{status}", 1)
     if not accepted:
         return
-    if stage == "SCORING" and status == "DONE":
+    # Tahap terakhir sequence menandai callback DONE-nya `final: true`; body lama tanpa field itu: hanya SCORING.
+    if status == "DONE" and body.get("final", stage == "SCORING"):
         await r.hset(_key(run, "done"), request_id, time.time())
     elif status == "FAILED" and body.get("error_code") == REJECTED_CODE:
         # Penolakan yang datang setelah jawaban 202; kalau jawabannya sudah 400 ditolak, baris ini sama saja.
@@ -336,7 +346,7 @@ async def stats(run: str) -> dict[str, Any]:
     if starts and done_ts and done_ts[-1] > starts[0]:
         completed_per_minute = len(done_ts) / ((done_ts[-1] - starts[0]) / 60)
 
-    # Yang masih ditunggu hanya request yang pipeline-nya berjalan: jawaban 200 (callback SCORING menyusul), 202,
+    # Yang masih ditunggu hanya request yang pipeline-nya berjalan: jawaban 200 (callback final menyusul), 202,
     # dan timeout, sampai tuntas, gagal, atau ditolak. 4xx/5xx tidak memulai pipeline, kecuali 422 tahap gagal
     # yang sudah final bersama callback FAILED-nya; penolakan model guardrails tidak pernah punya callback.
     finished = set(done) | set(failed) | set(rejected)
@@ -486,6 +496,13 @@ async def start(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=f"duration_seconds harus 1..{MAX_DURATION}")
     if mode not in ("constant", "ramp"):
         raise HTTPException(status_code=422, detail="mode harus constant atau ramp")
+    sequence = body.get("pipeline_name_sequence") or None
+    if sequence is not None and (
+        not isinstance(sequence, list) or not all(name in PIPELINE_NAMES for name in sequence)
+    ):
+        raise HTTPException(
+            status_code=422, detail=f"pipeline_name_sequence harus daftar dari {', '.join(PIPELINE_NAMES)}"
+        )
     available = list_images()
     images = [name for name in (body.get("images") or available) if name in available]
     if not images:
@@ -500,6 +517,8 @@ async def start(request: Request) -> dict[str, Any]:
         "duration_seconds": duration,
         "mode": mode,
         "images": images,
+        # None = pipeline penuh.
+        "pipeline_name_sequence": sequence,
         # Unggahan yang dipakai run ini; dihapus begitu run berakhir (selesai, gagal, atau dihentikan).
         "uploads": [name for name in images if name in uploads],
         "target": K6_TARGET,
@@ -534,11 +553,16 @@ async def add_sample(run: str, request: Request) -> dict[str, Any]:
     )
     sample["status"] = status
     sample["received_at"] = time.time()
+    # Sequence ["guardrails"] tidak menjalankan tahap mana pun: jawaban 200 itu sendiri yang final.
+    answer_is_final = status == 200 and ((await _meta(run)) or {}).get("pipeline_name_sequence") == ["guardrails"]
     async with r.pipeline(transaction=False) as pipe:
         pipe.rpush(_key(run, "samples"), json.dumps(sample))
         pipe.hincrby(_key(run, "status"), bucket, 1)
         if rejected:
             pipe.hset(_key(run, "rejected"), sample["request_id"], sample.get("message") or "-")
+        if answer_is_final:
+            finished_at = float(sample["started_at"]) + float(sample["elapsed_ms"]) / 1000
+            pipe.hset(_key(run, "done"), sample["request_id"], finished_at)
         await pipe.execute()
     return {"ok": True}
 

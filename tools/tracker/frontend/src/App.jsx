@@ -14,6 +14,23 @@ const CALLBACK_MODES = [
   { value: 'down', label: 'mati (503)', hint: 'relay mengulang dengan backoff; pipeline tetap jalan' },
   { value: 'reject', label: 'menolak (422)', hint: 'relay berhenti: baris jadi dead letter' },
 ]
+// pipeline_name_sequence: service yang dijalankan satu request. Urutannya selalu guardrails -> extraction ->
+// structuring -> scoring; guardrails boleh tidak ada di depan dan ujungnya boleh dipotong, tidak boleh melompat.
+const SERVICE_OF_STAGE = { GUARDRAILS: 'guardrails', OCR: 'extraction', STRUCTURING: 'structuring', SCORING: 'scoring' }
+const SEQUENCES = [
+  { key: 'full', label: 'penuh (default)', value: null },
+  { key: 'no-guardrails', label: 'tanpa guardrails', value: ['extraction', 'structuring', 'scoring'] },
+  { key: 'guardrails', label: 'guardrails saja', value: ['guardrails'] },
+  { key: 'to-extraction', label: 'sampai extraction (OCR)', value: ['guardrails', 'extraction'] },
+  { key: 'to-structuring', label: 'sampai structuring', value: ['guardrails', 'extraction', 'structuring'] },
+  { key: 'extraction', label: 'extraction saja', value: ['extraction'] },
+  { key: 'invalid', label: 'tidak valid: melompati structuring (422)', value: ['extraction', 'scoring'], invalid: true },
+]
+const INVALID_SEQUENCE = 'INVALID_PIPELINE_SEQUENCE'
+
+function sequenceText(sequence) {
+  return sequence ? sequence.join(' → ') : 'penuh'
+}
 
 function fmtMs(ms) {
   if (ms == null) return ''
@@ -27,10 +44,12 @@ function fmtSec(seconds) {
 
 // --- turunan dari daftar event ------------------------------------------------
 
-function stageView(events, stage) {
+// `sequence`: pipeline_name_sequence request ini (null = penuh). Tahap yang tidak ada di dalamnya tidak dijalankan.
+function stageView(events, stage, sequence) {
   const mine = events.filter((e) => e.stage === stage && e.type === 'stage')
   const callbacks = events.filter((e) => e.stage === stage && e.type === 'callback')
   const http = stage === 'GUARDRAILS' ? events.find((e) => e.type === 'http') : null
+  if (sequence && !sequence.includes(SERVICE_OF_STAGE[stage])) return { status: 'SKIPPED', callbacks, http }
   if (mine.length === 0 && callbacks.length === 0) return { status: 'PENDING', callbacks, http }
   const last = mine[mine.length - 1]
   // Penolakan aturan structuring datang dua kali (baris DB REJECTED dan callback FAILED) dalam urutan acak.
@@ -75,13 +94,15 @@ function describe(e, t0) {
       const sim = []
       if (e.slow) sim.push(`OCR ditunda ${e.slow} dtk (nama file delay${e.slow}s-…)`)
       if (e.callback_mode && e.callback_mode !== 'ok') sim.push(`callback orkestrasi ${e.callback_mode}`)
+      if (e.sequence) sim.push(`pipeline_name_sequence ${sequenceText(e.sequence)}`)
       return `Orkestrasi (tracker) menerima ${e.filename}${sim.length ? ` · simulasi: ${sim.join(', ')}` : ''}`
     }
     case 'http':
       return `Orchestrator menjawab HTTP ${e.http_status}, job_status=${e.job_status ?? '-'}${
         e.errors ? ` (${e.errors})` : ''
-      } setelah ${fmtMs(e.elapsed_ms)} · batas tunggu ${e.wait_seconds} dtk`
+      }, pipeline_last_stage=${e.pipeline_last_stage ?? 'null'} setelah ${fmtMs(e.elapsed_ms)} · batas tunggu ${e.wait_seconds} dtk`
     case 'stage':
+      if (e.stage === 'GUARDRAILS' && e.status === 'SKIPPED') return `${LABELS.GUARDRAILS}: model guardrails dilewati (tidak ada di pipeline_name_sequence)`
       if (e.stage === 'GUARDRAILS') return `${LABELS.GUARDRAILS}: ${e.status}${e.error_message ? ` · ${e.error_message}` : ''}`
       if (e.status === 'REJECTED') return `${LABELS[e.stage]}: dokumen ditolak aturan ML · ${e.error_message}`
       if (e.source === 'db') {
@@ -114,7 +135,7 @@ function describe(e, t0) {
       }
     }
     case 'callback':
-      return `Callback ${e.stage} ${e.status} tiba (attempt ${e.attempt}) → orkestrasi menjawab ${e.http_status}${
+      return `Callback ${e.stage} ${e.status}${e.final ? ' (final: tahap terakhir sequence)' : ''} tiba (attempt ${e.attempt}) → orkestrasi menjawab ${e.http_status}${
         e.mode !== 'ok' ? ' (simulasi)' : ''
       }`
     case 'pipeline':
@@ -194,9 +215,11 @@ function httpClass(status) {
   return status === 200 ? 'done' : status === 202 ? 'processing' : status === 400 ? 'rejected' : 'failed'
 }
 
-function httpNote(status, rejectedBy) {
-  if (status === 200) return '200: hasil lengkap ada di response'
+function httpNote(status, rejectedBy, body) {
+  const last = body?.pipeline_last_stage
+  if (status === 200) return last && last !== 'scoring' ? `200: data = hasil ${last} apa adanya` : '200: hasil lengkap ada di response'
   if (status === 202) return '202: hanya request_id, hasil menyusul lewat callback'
+  if (status === 422 && body?.errors === INVALID_SEQUENCE) return '422: pipeline_name_sequence tidak valid, tidak ada yang jalan'
   if (status === 422) return '422: satu tahap gagal di dalam batas tunggu'
   if (status === 400) return rejectedBy === 'structuring' ? '400: ditolak aturan structuring' : '400: ditolak guardrails'
   return `HTTP ${status}`
@@ -217,9 +240,19 @@ function GuardrailsResponse({ http, t0 }) {
         </span>
       </div>
       <div className="meta">
-        {http.http_status === 200 && 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.'}
-        {http.http_status === 202 && 'Batas tunggu habis sebelum SCORING selesai: hasil menyusul lewat callback, dan bisa dibaca kapan saja lewat GET /v1/extract-ocr/{request_id} di orchestrator.'}
-        {http.http_status === 422 && 'Satu tahap gagal di dalam batas tunggu.'}
+        pipeline_name_sequence: <code>{sequenceText(http.sequence)}</code> · pipeline_last_stage:{' '}
+        <code>{http.pipeline_last_stage ?? 'null'}</code>
+      </div>
+      <div className="meta">
+        {http.http_status === 200 &&
+          (http.pipeline_last_stage && http.pipeline_last_stage !== 'scoring'
+            ? `Request berhenti di ${http.pipeline_last_stage} sesuai sequence: data adalah hasil ${http.pipeline_last_stage} apa adanya, bukan field kontrak.`
+            : 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.')}
+        {http.http_status === 202 && 'Batas tunggu habis sebelum tahap terakhir selesai: hasil menyusul lewat callback, dan bisa dibaca kapan saja lewat GET /v1/extract-ocr/{request_id} di orchestrator.'}
+        {http.http_status === 422 &&
+          (http.errors === INVALID_SEQUENCE
+            ? 'pipeline_name_sequence tidak valid: orchestrator menolak sebelum menjalankan apa pun.'
+            : 'Satu tahap gagal di dalam batas tunggu.')}
         {http.http_status === 400 &&
           (http.rejected_by === 'structuring'
             ? 'Lolos guardrails, lalu ditolak aturan structuring ML: OCR dan structuring sudah jalan, scoring tidak.'
@@ -230,17 +263,33 @@ function GuardrailsResponse({ http, t0 }) {
   )
 }
 
-function Stage({ stage, view, index, t0 }) {
+function Stage({ stage, view, index, t0, last }) {
   const cls = `stage ${view.status.toLowerCase()}`
   const rel = (ts) => `t+${fmtMs((ts - t0) * 1000)}`
   const rejected = view.callbacks.filter((c) => !c.accepted)
   const lastCallback = view.callbacks[view.callbacks.length - 1]
+  if (view.status === 'SKIPPED') {
+    return (
+      <div className={cls}>
+        <div className="stage-head">
+          <span className="index">{index + 1}</span>
+          <span className="label">{LABELS[stage]}</span>
+          <span className="pill skipped">SKIPPED</span>
+        </div>
+        <div className="hint small">
+          Tidak dijalankan: <code>{SERVICE_OF_STAGE[stage]}</code> tidak ada di pipeline_name_sequence.
+          {stage === 'GUARDRAILS' && ' Pengecekan file di orchestrator tetap jalan.'}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={cls}>
       <div className="stage-head">
         <span className="index">{index + 1}</span>
         <span className="label">{LABELS[stage]}</span>
         <span className={`pill ${view.status.toLowerCase()}`}>{view.status}</span>
+        {last && <span className="tag" title="Hasil tahap ini adalah data jawaban, dan callback DONE-nya membawa final: true">tahap terakhir</span>}
         {view.elapsed != null && <span className="elapsed">{fmtMs(view.elapsed)}</span>}
       </div>
       {view.error && <div className="error">{view.error}</div>}
@@ -535,6 +584,7 @@ function LoadTest({ overview, nav }) {
   const [duration, setDuration] = useState(60)
   const [mode, setMode] = useState('constant')
   const [images, setImages] = useState([])
+  const [sequenceKey, setSequenceKey] = useState('full')
   const [error, setError] = useState(null)
   const [starting, setStarting] = useState(false)
 
@@ -595,7 +645,13 @@ function LoadTest({ overview, nav }) {
       const r = await fetch('/api/loadtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rate, duration_seconds: duration, mode, images }),
+        body: JSON.stringify({
+          rate,
+          duration_seconds: duration,
+          mode,
+          images,
+          pipeline_name_sequence: SEQUENCES.find((s) => s.key === sequenceKey)?.value ?? null,
+        }),
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.detail ?? r.statusText)
@@ -646,7 +702,22 @@ function LoadTest({ overview, nav }) {
               <option value="ramp">naik bertahap</option>
             </select>
           </label>
+          <label className="field">
+            pipeline_name_sequence
+            <select value={sequenceKey} onChange={(e) => setSequenceKey(e.target.value)}>
+              {SEQUENCES.filter((s) => !s.invalid).map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                  {s.value ? `: ${sequenceText(s.value)}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
           <TestFiles config={config} selected={images} setSelected={setImages} onChanged={loadConfig} />
+          <div className="hint small">
+            Tuntas = callback DONE tahap terakhir sequence (<code>final: true</code>); untuk &quot;guardrails saja&quot;, jawaban 200 itu sendiri.
+            Mis. &quot;extraction saja&quot; mengukur kapasitas OCR tanpa guardrails, structuring, dan scoring.
+          </div>
           <div className="hint small">
             k6 ({config?.k6_image ?? 'grafana/k6'}
             {config && !config.k6_image_ready ? ', image belum ada: docker pull dulu' : ''}) jalan di network <code>{config?.network}</code> dan
@@ -670,6 +741,7 @@ function LoadTest({ overview, nav }) {
                 <span className={`dot ${runStatusClass(r.status)}`} />
                 <span className="rid">
                   {r.run_id} · {r.rate} rps · {r.duration_seconds} dtk
+                  {r.pipeline_name_sequence ? ` · ${sequenceText(r.pipeline_name_sequence)}` : ''}
                 </span>
                 <span className="meta">
                   <span className={`pill ${runStatusClass(r.status)}`}>{r.status}</span> {r.sent} dikirim · {r.counts?.['200'] ?? 0}×200 ·{' '}
@@ -688,7 +760,8 @@ function LoadTest({ overview, nav }) {
             <div className="head">
               <code>run {d.run_id}</code>
               <span className="meta">
-                {d.rate} rps · {d.duration_seconds} dtk · {d.mode === 'ramp' ? 'naik bertahap' : 'tetap'} · {d.images?.join(', ')}
+                {d.rate} rps · {d.duration_seconds} dtk · {d.mode === 'ramp' ? 'naik bertahap' : 'tetap'} · sequence{' '}
+                {sequenceText(d.pipeline_name_sequence)} · {d.images?.join(', ')}
               </span>
               <span className={`pill ${d.status === 'running' ? 'live' : runStatusClass(d.status)}`}>{d.status}</span>
               <span className="actions">
@@ -740,7 +813,12 @@ function LoadTest({ overview, nav }) {
             </div>
 
             <div className="panel">
-              <h2>End-to-end: submit sampai callback SCORING DONE</h2>
+              <h2>
+                End-to-end: submit sampai{' '}
+                {d.pipeline_name_sequence?.length === 1 && d.pipeline_name_sequence[0] === 'guardrails'
+                  ? 'jawaban 200 (guardrails saja)'
+                  : `callback DONE ${d.pipeline_name_sequence ? d.pipeline_name_sequence[d.pipeline_name_sequence.length - 1] : 'scoring'} (final)`}
+              </h2>
               <div className="tiles">
                 <Tile k="tuntas" v={d.completed} s={pct(d.completed, sent)} cls="done" />
                 <Tile k="ditolak" v={d.rejected ?? 0} s="model guardrails / aturan structuring" cls="rejected" />
@@ -880,6 +958,7 @@ function Pipeline({ nav, overview: sharedOverview }) {
   const [live, setLive] = useState(false)
   const [slow, setSlow] = useState(false)
   const [slowSeconds, setSlowSeconds] = useState(20)
+  const [sequenceKey, setSequenceKey] = useState('full')
   const [sim, setSim] = useState({ callback: 'ok', wait_seconds: 15, database: null })
   const overview = sharedOverview
   const [releasing, setReleasing] = useState(false)
@@ -926,6 +1005,8 @@ function Pipeline({ nav, overview: sharedOverview }) {
     form.append('file', file)
     form.append('document_type', 'npwp')
     form.append('slow_seconds', slow ? String(slowSeconds) : '0')
+    const sequence = SEQUENCES.find((s) => s.key === sequenceKey)?.value
+    form.append('pipeline_name_sequence', sequence ? JSON.stringify(sequence) : '')
     try {
       const r = await fetch('/api/requests', { method: 'POST', body: form })
       const body = await r.json()
@@ -978,6 +1059,10 @@ function Pipeline({ nav, overview: sharedOverview }) {
   }
 
   const clientEvent = events.find((e) => e.type === 'client')
+  const httpEvent = events.find((e) => e.type === 'http')
+  // Sequence yang ditolak (422) tidak menjalankan apa pun: kartu tampil apa adanya, tidak ada yang "dilewati".
+  const sequence = httpEvent?.errors === INVALID_SEQUENCE ? null : clientEvent?.sequence ?? null
+  const lastStage = [...STAGES].reverse().find((stage) => !sequence || sequence.includes(SERVICE_OF_STAGE[stage]))
   const t0 = clientEvent?.ts ?? events[0]?.ts ?? 0
   const outboxRows = useMemo(() => outboxView(events), [events])
   const unavailable = events.find((e) => e.type === 'outbox' && e.status === 'UNAVAILABLE')
@@ -1006,6 +1091,21 @@ function Pipeline({ nav, overview: sharedOverview }) {
           </label>
           <div className="hint small">
             batas tunggu orchestrator {sim.wait_seconds} dtk: di bawah itu jawabannya 200 + hasil, di atas itu 202 dan hasil menyusul lewat callback. Nama file diberi awalan <code>delay{slowSeconds}s-</code>; hook ini hanya hidup di ENVIRONMENT=local.
+          </div>
+          <label className="field">
+            pipeline_name_sequence
+            <select value={sequenceKey} onChange={(e) => setSequenceKey(e.target.value)}>
+              {SEQUENCES.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                  {s.value ? `: ${sequenceText(s.value)}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="hint small">
+            Service yang dijalankan request ini. Tahap terakhir mengakhiri request: hasilnya jadi <code>data</code> apa adanya dan callback DONE-nya
+            membawa <code>final: true</code>. Pengecekan file di orchestrator selalu jalan, dan aturan structuring tetap menolak kalau structuring jalan.
           </div>
           <button disabled={busy}>{busy ? `Menunggu orchestrator (maks. ${sim.wait_seconds} dtk)…` : 'Kirim dokumen'}</button>
         </form>
@@ -1048,11 +1148,12 @@ function Pipeline({ nav, overview: sharedOverview }) {
                     `${r.stage ?? ''} ${r.status ?? ''}`
                   )}
                   {r.slow ? ` · lambat ${r.slow} dtk` : ''}
+                  {r.sequence ? ` · ${sequenceText(r.sequence)}` : ''}
                 </span>
               </button>
               {r.body && (
                 <div className="resp">
-                  <span className="meta">{httpNote(r.http_status, r.rejected_by)}</span>
+                  <span className="meta">{httpNote(r.http_status, r.rejected_by, r.body)}</span>
                   <Json value={r.body} label="response" />
                 </div>
               )}
@@ -1074,10 +1175,17 @@ function Pipeline({ nav, overview: sharedOverview }) {
               <span className={`pill ${live ? 'live' : 'idle'}`}>{live ? 'LIVE' : 'selesai'}</span>
               {total != null && <span className="elapsed">total {fmtMs(total)}</span>}
             </div>
-            <GuardrailsResponse http={events.find((e) => e.type === 'http')} t0={t0} />
+            <GuardrailsResponse http={httpEvent} t0={t0} />
             <div className="stages">
               {STAGES.map((stage, i) => (
-                <Stage key={stage} stage={stage} index={i} view={stageView(events, stage)} t0={t0} />
+                <Stage
+                  key={stage}
+                  stage={stage}
+                  index={i}
+                  view={stageView(events, stage, sequence)}
+                  t0={t0}
+                  last={Boolean(sequence) && !sequence.includes('scoring') && stage === lastStage}
+                />
               ))}
             </div>
             <OutboxPanel

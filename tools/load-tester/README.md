@@ -5,8 +5,10 @@ Angka yang dicari bukan satu "RPS maksimum", melainkan dua hal:
 
 1. **Pintu masuk**: pada laju berapa jawaban `/v1/extract-ocr` masih 200 (pipeline selesai di dalam
    `PIPELINE_WAIT_SECONDS`), kapan bergeser ke 202, dan kapan mulai 5xx atau timeout.
-2. **End-to-end**: berapa dokumen per menit yang benar-benar tuntas (callback SCORING DONE) dan p95
-   waktunya dari submit sampai tuntas.
+2. **End-to-end**: berapa dokumen per menit yang benar-benar tuntas (callback DONE tahap terakhir, yang
+   membawa `final: true`; SCORING untuk pipeline penuh) dan p95 waktunya dari submit sampai tuntas.
+   Dengan `PIPELINE_NAME_SEQUENCE` satu bagian pipeline bisa diukur sendiri, mis. `["extraction"]` untuk
+   kapasitas OCR tanpa guardrails, structuring, dan scoring.
 
 Keduanya dihitung oleh tracker ([../tracker](../tracker)) di menu **Load testing**: k6 melaporkan
 tiap sampel ke `POST /api/loadtest/{run}/samples`, dan callback tahap untuk request berprefiks
@@ -51,7 +53,8 @@ Ringkasan k6 tiap run ditulis ke `out/<run>.json`.
       grafana/k6 run /scripts/extract-ocr.js
 
 Env skrip: `RUN_ID`, `TARGET`, `TRACKER` (kosong = tanpa lapor), `RATE`, `DURATION`, `MODE`
-(`constant` | `ramp`), `IMAGES`, `WAIT_SECONDS`, `API_KEY`, `ENDPOINT` (default `/v1/extract-ocr`).
+(`constant` | `ramp`), `IMAGES`, `WAIT_SECONDS`, `API_KEY`, `ENDPOINT` (default `/v1/extract-ocr`),
+`PIPELINE_NAME_SEQUENCE` (JSON array, mis. `'["guardrails","extraction"]'`; kosong = pipeline penuh).
 
 Load test ke **dev** (GKE) tanpa mengotori data Orkestrasi: port-forward orchestrator lalu tembak kembaran
 `-test`-nya, yang menulis ke tabel `testing_*` dan tidak mengirim callback (lihat README utama,
@@ -75,7 +78,7 @@ skrip; `LT_...` dari skrip diabaikan. Semua request satu run: `request_id LIKE '
   ditolak model atau aturan ML (lihat alasannya di tracker), bukan tanda beban.
 - **p50 / p95 extract-ocr**: lama koneksi ditahan orchestrator. Mendekati `PIPELINE_WAIT_SECONDS`
   berarti hampir semua jawaban 202.
-- **Tuntas (SCORING DONE)** dan **p95 end-to-end**: kapasitas sesungguhnya. Bandingkan dengan jumlah
+- **Tuntas (callback DONE `final` tahap terakhir)** dan **p95 end-to-end**: kapasitas sesungguhnya. Bandingkan dengan jumlah
   dikirim; selisihnya masih antre, gagal, atau ditolak.
 - **dropped_iterations** (dari k6): k6 tidak sanggup mempertahankan laju karena VU habis, artinya
   latensi sudah lebih panjang dari yang diperkirakan; laju yang tercapai lebih rendah dari yang
