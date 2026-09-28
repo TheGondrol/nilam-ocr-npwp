@@ -11,7 +11,6 @@ from app.dependencies import (
     get_pipeline,
     get_reaper,
     get_relay,
-    get_scorer,
     get_testing_pipeline,
     get_testing_reaper,
     get_testing_relay,
@@ -23,7 +22,6 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_scorer()
     get_trust_model()
     if settings.database_url:
         from ocr_common.pipeline.database import check_connection
@@ -62,26 +60,25 @@ app = create_app(
     title="OCR NPWP Scoring API",
     service_name="scoring",
     description=(
-        "Pipeline step 4 (last) for Indonesian NPWP documents: combines per-field confidence and "
-        "format validation into one document score plus an approve/review/reject decision. "
+        "Pipeline step 4 (last) for Indonesian NPWP documents: the ML team's trust model gives each extracted "
+        "field (nomor_npwp, nama) the probability that it is correct. "
         "**Async pipeline:** the structuring service POSTs /v1/scoring/jobs and gets 202; this service "
         "scores in the background, stores the result, and POSTs the stage callback carrying the final "
-        "result to the orchestrator. /v1/scoring/score is the same work, synchronous. "
+        "result to the orchestrator. /v1/scoring/confidence runs the trust model alone, synchronous. "
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
         {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback"},
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
-        {"name": "Scoring", "description": "Document score & approve/review/reject decision, synchronous"},
+        {"name": "Scoring", "description": "The trust model on one payload, synchronous (debugging)"},
     ],
     routers=[jobs.router, scoring.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "scoring": "trust_model",
-        "legacy_score": settings.scoring_backend,
         "storage": "postgres" if settings.database_url else "memory",
     },
     readiness=database_readiness(settings.database_url),
-    backends_example={"scoring": "trust_model", "legacy_score": "heuristic", "storage": "postgres"},
+    backends_example={"scoring": "trust_model", "storage": "postgres"},
     readiness_example={"database": "ok"},
     lifespan=lifespan,
 )

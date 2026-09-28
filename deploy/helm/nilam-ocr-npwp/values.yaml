@@ -193,9 +193,6 @@ services:
     replicaCount: 1
     startupFailureThreshold: 15
     env:
-      SCORING_BACKEND: heuristic
-      SCORING_APPROVE_THRESHOLD: "0.8"
-      SCORING_REVIEW_THRESHOLD: "0.5"
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
     resources:
       requests:

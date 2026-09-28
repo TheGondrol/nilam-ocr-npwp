@@ -7,31 +7,6 @@ from ocr_common.pipeline.schemas import GuardrailsResult, OcrPayload
 from ocr_common.web.schemas import PIPELINE_SEQUENCE_DESCRIPTION, REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnvelope
 
 
-class BoundingBox(BaseModel):
-    x1: float = Field(..., description="Left", examples=[35])
-    y1: float = Field(..., description="Top", examples=[389])
-    x2: float = Field(..., description="Right", examples=[637])
-    y2: float = Field(..., description="Bottom", examples=[437])
-
-
-class TextLine(BaseModel):
-    text: str = Field(..., description="One OCR text line", examples=["NPWP : 12.345.678.9-012.345"])
-    confidence: float = Field(1.0, ge=0, le=1, description="Recognition score of this line", examples=[0.9992])
-    bbox: BoundingBox | None = Field(
-        None,
-        description=(
-            "Position of the line (`blocks[].bbox` of the OCR result). The `npwp_rules` backend finds the name by "
-            "its distance to the NPWP number, because real cards print the name without a label. Without `bbox` "
-            "the position is derived from the order of the lines"
-        ),
-    )
-    page: int = Field(0, ge=0, description="0-based page number", examples=[0])
-
-
-class StructureRequest(BaseModel):
-    lines: list[TextLine] = Field(..., min_length=1, description="OCR text lines in reading order (top to bottom)")
-
-
 class StructuredField(BaseModel):
     value: str | None = Field(None, description="null when the field was not found", examples=["12.345.678.9-012.345"])
     confidence: float = Field(
@@ -106,10 +81,6 @@ class StructuredDocument(BaseModel):
         ),
         examples=[None],
     )
-
-
-class StructureResponse(SuccessEnvelope):
-    data: StructuredDocument
 
 
 class StructuringJobRequest(BaseModel):

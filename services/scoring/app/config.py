@@ -8,11 +8,6 @@ class Settings(PipelineSettings):
 
     scoring_model_path: str = "weights/trust_model.joblib"
 
-    scoring_backend: str = "heuristic"
-
-    scoring_approve_threshold: float = 0.8
-    scoring_review_threshold: float = 0.5
-
 
 @lru_cache
 def get_settings() -> Settings:

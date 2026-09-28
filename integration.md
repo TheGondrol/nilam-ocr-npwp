@@ -355,7 +355,6 @@ Keduanya dipanggil berantai oleh service sebelumnya dan internal; kalian tidak m
 | extraction | `POST /v1/extraction/jobs` | orchestrator, otomatis |
 | structuring | `POST /v1/structuring/jobs` | extraction, otomatis |
 | structuring | `GET /v1/structuring/jobs/{request_id}` | orchestrator (status) |
-| structuring | `POST /v1/structuring/structure` | debugging, sinkron |
 | scoring | `POST /v1/scoring/jobs` | structuring, otomatis |
 | scoring | `GET /v1/scoring/jobs/{request_id}` | orchestrator (status) |
 | scoring | `POST /v1/scoring/confidence` | debugging, sinkron |

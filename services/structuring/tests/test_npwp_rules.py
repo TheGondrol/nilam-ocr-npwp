@@ -10,6 +10,7 @@ from app.dependencies import get_structurer
 from app.ml import npwp_rules
 from app.ml.npwp_rules import NpwpRulesStructurer
 from app.ml.rule_based import RuleBasedNpwpStructurer
+from app.services.structuring_service import StructuringService
 
 _SAMPLE = json.loads((Path(__file__).parent / "fixtures" / "remote_npwp_response.json").read_text(encoding="utf-8"))[0]
 
@@ -331,22 +332,18 @@ def test_two_page_upload_takes_number_and_name_from_the_first_page_that_has_them
     assert (result["nomor_npwp"]["value"], result["nama"]["value"]) == ("12.345.678.9-012.345", "BUDI SANTOSO")
 
 
-def test_http_structure_with_real_card(client, auth):
-    response = client.post("/v1/structuring/structure", json={"lines": NEW_CARD}, headers=auth)
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
+def test_the_configured_service_reads_a_real_card():
+    data = StructuringService(get_structurer()).structure(NEW_CARD)
     assert data["fields"]["nomor_npwp"]["value"] == "4318085607040052"
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"
     assert {"flag", "flag_reason", "reject_reason"} <= set(data)
 
 
-def test_http_bundled_document_is_200_with_its_reject_reason(client, auth):
-    # The synchronous debugging endpoint reports the verdict; only the pipeline turns it into a 400.
+def test_a_bundled_document_carries_its_reject_reason():
+    # The stage result keeps the verdict; the pipeline turns `reject_reason` into a 400 for the client.
     lines = [*NEW_CARD, _line("KARTU TANDA PENDUDUK", 1200)]
-    response = client.post("/v1/structuring/structure", json={"lines": lines}, headers=auth)
-    assert response.status_code == 200
-    data = response.json()["data"]
+    data = StructuringService(get_structurer()).structure(lines)
     assert data["flag"] is True
-    assert "KARTU TANDA PENDUDUK" in data["flag_reason"]
-    assert "KARTU TANDA PENDUDUK" in data["reject_reason"]
+    assert data["flag_reason"] is not None and "KARTU TANDA PENDUDUK" in data["flag_reason"]
+    assert data["reject_reason"] is not None and "KARTU TANDA PENDUDUK" in data["reject_reason"]
     assert data["fields"]["nama"]["value"] == "RAHMAT HIDAYAT"

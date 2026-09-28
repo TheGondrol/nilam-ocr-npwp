@@ -19,11 +19,39 @@ from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, JobAccepted
 from ocr_common.web.security import verify_api_key
 
 from app.api.schemas import StructuringJobRequest, StructuringJobStatusResponse
-from app.api.structuring import STRUCTURED_EXAMPLE
 from app.dependencies import get_job_service, get_pipeline
 from app.services.job_service import StructuringJobService
 
 router = APIRouter(tags=["Pipeline"], dependencies=[Depends(verify_api_key)])
+
+STRUCTURED_EXAMPLE = {
+    "document_type": "npwp",
+    "fields": {
+        "nomor_npwp": {
+            "value": "12.345.678.9-012.345",
+            "confidence": 0.9992,
+            "source": "NPWP : 12.345.678.9-012.345",
+            "signals": {
+                "candidate_count": 1,
+                "has_homoglyph": False,
+                "invalid_province_prefix": False,
+                "invalid_kecamatan_prefix": False,
+                "invalid_birthdate": False,
+                "invalid_kpp_prefix": False,
+            },
+        },
+        "nama": {
+            "value": "BUDI SANTOSO",
+            "confidence": 0.9773,
+            "source": "BUDI SANTOSO",
+            "signals": {"name_base": "BUDI SANTOSO", "corrected": False},
+        },
+        "nama_badan": {"value": None, "confidence": 0.0, "source": None, "signals": None},
+    },
+    "flag": False,
+    "flag_reason": None,
+    "reject_reason": None,
+}
 
 _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "STRUCTURING", "created_at": "2026-09-18T04:00:01+00:00"}
 

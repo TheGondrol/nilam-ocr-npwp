@@ -69,26 +69,3 @@ def test_service_rejects_blank_input():
 
 def test_health_lists_backend(client):
     assert client.get("/health").json()["backends"] == {"structuring": "npwp_rules", "storage": "memory"}
-
-
-def test_http_structure(client, auth):
-    response = client.post("/v1/structuring/structure", json={"lines": LINES}, headers=auth)
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["document_type"] == "npwp"
-    assert data["fields"]["nama"]["value"] == "BUDI SANTOSO"
-    assert (data["flag"], data["flag_reason"]) == (False, None)
-
-
-def test_http_structure_blank_lines_returns_400(client, auth):
-    response = client.post("/v1/structuring/structure", json={"lines": [{"text": " "}]}, headers=auth)
-    assert response.status_code == 400
-    assert response.json()["message"] == "No text lines to structure"
-
-
-def test_validation_error_uses_envelope_with_code(client, auth):
-    response = client.post("/v1/structuring/structure", json={"lines": "not-a-list"}, headers=auth)
-    assert response.status_code == 422
-    body = response.json()
-    assert body["errors"] == "VALIDATION_ERROR"
-    assert body["message"].startswith("body.lines:")

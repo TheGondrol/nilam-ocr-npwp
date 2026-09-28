@@ -6,10 +6,9 @@ from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, success_examples
 from ocr_common.web.security import verify_api_key
 
-from app.api.schemas import ConfidenceRequest, ConfidenceResponse, ScoreRequest, ScoreResponse
-from app.dependencies import get_confidence_service, get_scoring_service
+from app.api.schemas import ConfidenceRequest, ConfidenceResponse
+from app.dependencies import get_confidence_service
 from app.services.confidence_service import ConfidenceService
-from app.services.scoring_service import ScoringService
 
 router = APIRouter(tags=["Scoring"], dependencies=[Depends(verify_api_key)])
 
@@ -69,52 +68,4 @@ async def confidence(
     service: ConfidenceService = Depends(get_confidence_service),
 ):
     data = await run_in_threadpool(service.predict, body.model_dump())
-    return envelope(200, "Success", data, get_request_id(request))
-
-
-@router.post(
-    "/v1/scoring/score",
-    response_model=ScoreResponse,
-    operation_id="scoreDocument",
-    deprecated=True,
-    summary="Legacy: heuristic document score (used only by the legacy extract-ocr contract)",
-    description=(
-        "Combines per-field confidence and format validation into one document score "
-        "(the `guardrails` value of extract-ocr), then applies the configured "
-        "thresholds to decide approve / review / reject."
-    ),
-    responses={
-        200: success_examples(
-            "The document was scored",
-            approve=(
-                "A person's card: `nama_badan` is optional, so missing it does not lower the score",
-                envelope(
-                    200,
-                    "Success",
-                    {
-                        "score": 0.9904,
-                        "decision": "approve",
-                        "field_scores": [
-                            {"name": "nomor_npwp", "score": 0.9992, "issues": []},
-                            {"name": "nama", "score": 0.9773, "issues": []},
-                            {"name": "nama_badan", "score": 0.0, "issues": ["missing"]},
-                        ],
-                        "reasons": [],
-                    },
-                    REQUEST_ID_EXAMPLE,
-                ),
-            ),
-        ),
-        400: error(400, "Unsupported document_type or no fields", "No fields to score"),
-        401: UNAUTHORIZED,
-        422: error(422, "Validation Error", "body.fields: Field required", errors="VALIDATION_ERROR"),
-    },
-)
-async def score(
-    request: Request,
-    body: ScoreRequest,
-    service: ScoringService = Depends(get_scoring_service),
-):
-    fields = {name: value.model_dump() for name, value in body.fields.items()}
-    data = service.score(body.document_type, fields)
     return envelope(200, "Success", data, get_request_id(request))

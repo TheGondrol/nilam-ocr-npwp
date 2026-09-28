@@ -222,5 +222,4 @@ def test_http_confidence_requires_api_key(client):
 
 def test_health_names_the_model(client):
     backends = client.get("/health").json()["backends"]
-    assert backends["scoring"] == "trust_model"
-    assert backends["legacy_score"] == "heuristic"
+    assert backends == {"scoring": "trust_model", "storage": "memory"}

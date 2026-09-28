@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: OCR NPWP Scoring API
-  description: 'Pipeline step 4 (last) for Indonesian NPWP documents: combines per-field confidence and
-    format validation into one document score plus an approve/review/reject decision. **Async pipeline:**
-    the structuring service POSTs /v1/scoring/jobs and gets 202; this service scores in the background,
-    stores the result, and POSTs the stage callback carrying the final result to the orchestrator. /v1/scoring/score
-    is the same work, synchronous. All endpoints except /health require an X-API-Key header.
+  description: 'Pipeline step 4 (last) for Indonesian NPWP documents: the ML team''s trust model gives
+    each extracted field (nomor_npwp, nama) the probability that it is correct. **Async pipeline:** the
+    structuring service POSTs /v1/scoring/jobs and gets 202; this service scores in the background, stores
+    the result, and POSTs the stage callback carrying the final result to the orchestrator. /v1/scoring/confidence
+    runs the trust model alone, synchronous. All endpoints except /health require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -104,7 +104,6 @@ paths:
                     device: cpu
                     backends:
                       scoring: trust_model
-                      legacy_score: heuristic
                       storage: postgres
   /ready:
     get:
@@ -578,87 +577,6 @@ paths:
                 errors: VALIDATION_ERROR
       security:
       - APIKeyHeader: []
-  /v1/scoring/score:
-    post:
-      tags:
-      - Scoring
-      summary: 'Legacy: heuristic document score (used only by the legacy extract-ocr contract)'
-      description: Combines per-field confidence and format validation into one document score (the `guardrails`
-        value of extract-ocr), then applies the configured thresholds to decide approve / review / reject.
-      operationId: scoreDocument
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ScoreRequest'
-        required: true
-      responses:
-        '200':
-          description: The document was scored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScoreResponse'
-              examples:
-                approve:
-                  summary: 'A person''s card: `nama_badan` is optional, so missing it does not lower the
-                    score'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      score: 0.9904
-                      decision: approve
-                      field_scores:
-                      - name: nomor_npwp
-                        score: 0.9992
-                        issues: []
-                      - name: nama
-                        score: 0.9773
-                        issues: []
-                      - name: nama_badan
-                        score: 0.0
-                        issues:
-                        - missing
-                      reasons: []
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '400':
-          description: Unsupported document_type or no fields
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: No fields to score
-                errors: No fields to score
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'body.fields: Field required'
-                errors: VALIDATION_ERROR
-      deprecated: true
-      security:
-      - APIKeyHeader: []
 webhooks:
   stageCallback:
     post:
@@ -962,56 +880,6 @@ components:
       - name_confidence
       title: FieldConfidences
       description: 'Output of the ML team''s trust model: probability that each extracted field is correct.'
-    FieldScore:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Field name
-          examples:
-          - nomor_npwp
-        score:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Score
-          description: OCR confidence, or 0 when missing / badly formatted
-          examples:
-          - 0.96
-        issues:
-          items:
-            type: string
-          type: array
-          title: Issues
-          description: '`missing`, or `invalid format: ...`'
-          examples:
-          - []
-      type: object
-      required:
-      - name
-      - score
-      title: FieldScore
-    FieldValue:
-      properties:
-        value:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Value
-          description: null when the field was not found
-          examples:
-          - 12.345.678.9-012.345
-        confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Confidence
-          description: OCR score of the line the value came from
-          default: 1.0
-          examples:
-          - 0.96
-      type: object
-      title: FieldValue
     FinalField:
       properties:
         value:
@@ -1636,111 +1504,6 @@ components:
       - checks
       title: ReadyResponse
       description: '`GET /ready`.'
-    ScoreReport:
-      properties:
-        score:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Score
-          description: Weighted mean of the field scores
-          examples:
-          - 0.91
-        decision:
-          type: string
-          enum:
-          - approve
-          - review
-          - reject
-          title: Decision
-          description: '`score` against the configured thresholds (0.8 / 0.5 by default)'
-          examples:
-          - approve
-        field_scores:
-          items:
-            $ref: '#/components/schemas/FieldScore'
-          type: array
-          title: Field Scores
-          description: One entry per scored field
-        reasons:
-          items:
-            type: string
-          type: array
-          title: Reasons
-          description: Why a required field lowered the score
-          examples:
-          - []
-      type: object
-      required:
-      - score
-      - decision
-      - field_scores
-      title: ScoreReport
-    ScoreRequest:
-      properties:
-        document_type:
-          type: string
-          title: Document Type
-          description: Only `npwp` is supported
-          default: npwp
-          examples:
-          - npwp
-        fields:
-          additionalProperties:
-            $ref: '#/components/schemas/FieldValue'
-          type: object
-          title: Fields
-          description: Structured fields (`data.fields` of the structuring service)
-          examples:
-          - nomor_npwp:
-              confidence: 0.96
-              value: 12.345.678.9-012.345
-      type: object
-      required:
-      - fields
-      title: ScoreRequest
-    ScoreResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/ScoreReport'
-      type: object
-      required:
-      - data
-      title: ScoreResponse
     ScoringJobRequest:
       properties:
         request_id:
@@ -2107,6 +1870,6 @@ tags:
 - name: Callbacks
   description: Requests this service SENDS to the orchestrator (see Webhooks)
 - name: Scoring
-  description: Document score & approve/review/reject decision, synchronous
+  description: The trust model on one payload, synchronous (debugging)
 - name: Health
   description: Liveness and readiness probes; no API key

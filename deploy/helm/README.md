@@ -175,7 +175,7 @@ Mengganti tag image atau satu env var tanpa menyentuh file:
 
 ```powershell
 helm upgrade nilam-ocr-npwp deploy/helm/nilam-ocr-npwp -n nilam-ocr-npwp --reuse-values `
-  --set image.tag=<sha> --set services.scoring.env.SCORING_APPROVE_THRESHOLD="0.85"
+  --set image.tag=<sha> --set services.scoring.env.PIPELINE_DRAIN_TIMEOUT_SECONDS="45"
 ```
 
 Rollback: `helm -n nilam-ocr-npwp rollback nilam-ocr-npwp`.

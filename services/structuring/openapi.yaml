@@ -4,8 +4,8 @@ info:
   description: 'Pipeline step 3 for Indonesian NPWP documents: turns raw OCR text lines into named fields
     (nomor_npwp, nama, nama_badan) with per-field confidence. **Async pipeline:** the OCR service POSTs
     /v1/structuring/jobs and gets 202; this service structures in the background, stores the result, POSTs
-    a stage callback to the orchestrator, and hands the job to the scoring service. /v1/structuring/structure
-    is the same work, synchronous. All endpoints except /health require an X-API-Key header.
+    a stage callback to the orchestrator, and hands the job to the scoring service. All endpoints except
+    /health require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -508,129 +508,6 @@ paths:
                 errors: VALIDATION_ERROR
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /v1/structuring/structure:
-    post:
-      tags:
-      - Structuring
-      summary: Turn OCR lines into named fields, synchronous (no job, no callback)
-      description: 'Maps raw text lines (e.g. from the extraction service) to named document fields with
-        per-field confidence, using the ML team''s rules (`npwp_rules`). Nothing is rejected on content:
-        a bundled second document, a CAPTCHA or lookup screenshot, a missing or single-word name, a letter
-        in the number, an invalid Kode Wilayah / birthdate / KPP code or more than 2 pages set `flag`
-        and `flag_reason` for the reviewer and lower the trust model''s confidence.'
-      operationId: structureLines
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StructureRequest'
-        required: true
-      responses:
-        '200':
-          description: The fields found in the lines
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StructureResponse'
-              examples:
-                person:
-                  summary: A person's card
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      document_type: npwp
-                      fields:
-                        nomor_npwp:
-                          value: 12.345.678.9-012.345
-                          confidence: 0.9992
-                          source: 'NPWP : 12.345.678.9-012.345'
-                          signals:
-                            candidate_count: 1
-                            has_homoglyph: false
-                            invalid_province_prefix: false
-                            invalid_kecamatan_prefix: false
-                            invalid_birthdate: false
-                            invalid_kpp_prefix: false
-                        nama:
-                          value: BUDI SANTOSO
-                          confidence: 0.9773
-                          source: BUDI SANTOSO
-                          signals:
-                            name_base: BUDI SANTOSO
-                            corrected: false
-                        nama_badan:
-                          confidence: 0.0
-                      flag: false
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-                flagged:
-                  summary: 'A single-word name: returned, but flagged for review'
-                  value:
-                    status_code: 200
-                    status_desc: OK
-                    message: Success
-                    data:
-                      document_type: npwp
-                      fields:
-                        nomor_npwp:
-                          value: 12.345.678.9-012.345
-                          confidence: 0.9992
-                          source: 'NPWP : 12.345.678.9-012.345'
-                          signals:
-                            candidate_count: 1
-                            has_homoglyph: false
-                            invalid_province_prefix: false
-                            invalid_kecamatan_prefix: false
-                            invalid_birthdate: false
-                            invalid_kpp_prefix: false
-                        nama:
-                          value: SUKIRMAN
-                          confidence: 0.9611
-                          source: SUKIRMAN
-                          signals:
-                            name_base: SUKIRMAN
-                            corrected: false
-                        nama_badan:
-                          confidence: 0.0
-                      flag: true
-                      flag_reason: Nama hanya terdiri dari 1 kata, mohon dicek kembali
-                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '400':
-          description: No usable text in `lines`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: No text lines to structure
-                errors: No text lines to structure
-        '401':
-          description: Missing or invalid X-API-Key
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 401
-                status_desc: Unauthorized
-                message: Invalid or missing API key
-                errors: Invalid or missing API key
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 422
-                status_desc: Unprocessable Entity
-                message: 'body.lines: Field required'
-                errors: VALIDATION_ERROR
-      security:
-      - APIKeyHeader: []
 webhooks:
   stageCallback:
     post:
@@ -693,39 +570,6 @@ webhooks:
               schema: {}
 components:
   schemas:
-    BoundingBox:
-      properties:
-        x1:
-          type: number
-          title: X1
-          description: Left
-          examples:
-          - 35
-        y1:
-          type: number
-          title: Y1
-          description: Top
-          examples:
-          - 389
-        x2:
-          type: number
-          title: X2
-          description: Right
-          examples:
-          - 637
-        y2:
-          type: number
-          title: Y2
-          description: Bottom
-          examples:
-          - 437
-      type: object
-      required:
-      - x1
-      - y1
-      - x2
-      - y2
-      title: BoundingBox
     BoundingBoxPayload:
       properties:
         x1:
@@ -1409,61 +1253,6 @@ components:
       - status
       title: StageCallback
       description: Body of the callback a stage POSTs to the orchestrator when it finishes.
-    StructureRequest:
-      properties:
-        lines:
-          items:
-            $ref: '#/components/schemas/TextLine'
-          type: array
-          minItems: 1
-          title: Lines
-          description: OCR text lines in reading order (top to bottom)
-      type: object
-      required:
-      - lines
-      title: StructureRequest
-    StructureResponse:
-      properties:
-        status_code:
-          type: integer
-          title: Status Code
-          description: Same as the HTTP status code
-          default: 200
-          examples:
-          - 200
-        status_desc:
-          type: string
-          title: Status Desc
-          description: Reason phrase of `status_code`
-          default: OK
-          examples:
-          - OK
-        message:
-          type: string
-          title: Message
-          description: Human-readable outcome
-          default: Success
-          examples:
-          - Success
-        errors:
-          type: 'null'
-          title: Errors
-          description: Always null on success
-        request_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Request Id
-          description: 'The request_id this response belongs to: the one sent in the form / body / path,
-            otherwise the `X-Request-ID` header, otherwise one generated by the service'
-          examples:
-          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        data:
-          $ref: '#/components/schemas/StructuredDocument'
-      type: object
-      required:
-      - data
-      title: StructureResponse
     StructuredDocument:
       properties:
         document_type:
@@ -1743,42 +1532,6 @@ components:
       required:
       - data
       title: StructuringJobStatusResponse
-    TextLine:
-      properties:
-        text:
-          type: string
-          title: Text
-          description: One OCR text line
-          examples:
-          - 'NPWP : 12.345.678.9-012.345'
-        confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Confidence
-          description: Recognition score of this line
-          default: 1.0
-          examples:
-          - 0.9992
-        bbox:
-          anyOf:
-          - $ref: '#/components/schemas/BoundingBox'
-          - type: 'null'
-          description: Position of the line (`blocks[].bbox` of the OCR result). The `npwp_rules` backend
-            finds the name by its distance to the NPWP number, because real cards print the name without
-            a label. Without `bbox` the position is derived from the order of the lines
-        page:
-          type: integer
-          minimum: 0.0
-          title: Page
-          description: 0-based page number
-          default: 0
-          examples:
-          - 0
-      type: object
-      required:
-      - text
-      title: TextLine
   securitySchemes:
     APIKeyHeader:
       type: apiKey
@@ -1790,7 +1543,5 @@ tags:
   description: 'Asynchronous pipeline stage: 202, background work, callback, hand-off'
 - name: Callbacks
   description: Requests this service SENDS to the orchestrator (see Webhooks)
-- name: Structuring
-  description: Raw text -> named fields, synchronous
 - name: Health
   description: Liveness and readiness probes; no API key
