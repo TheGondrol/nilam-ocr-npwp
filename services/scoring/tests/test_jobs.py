@@ -3,8 +3,9 @@ import pytest
 from ocr_common.pipeline import STAGE_SCORING, InMemoryJobRepository, StagePipeline
 from ocr_common.testing import RecordingCallback, make_client, wait_for_job
 
-from app.dependencies import get_confidence_service, get_job_service
+from app.dependencies import get_confidence_service, get_job_service, get_trust_model
 from app.main import app
+from app.services.confidence_service import ConfidenceService
 from app.services.job_service import ScoringJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
@@ -193,6 +194,90 @@ def test_a_sequence_without_scoring_or_out_of_order_is_422(harness, auth, sequen
 
     response = client.post(
         "/v1/scoring/jobs", headers=auth, json={**_payload("REQ_seq_bad"), "pipeline_name_sequence": sequence}
+    )
+
+    assert response.status_code == 422
+
+
+class RecordingRepository(InMemoryJobRepository):
+    """Keeps the outcome row's `result_data` the SQL repository would write."""
+
+    def __init__(self):
+        super().__init__()
+        self.outcomes: dict[str, dict | None] = {}
+
+    async def complete(self, request_id, result, *, outcome_data=None, rejection=None, messages=()):
+        self.outcomes[request_id] = outcome_data
+        await super().complete(request_id, result, outcome_data=outcome_data, rejection=rejection, messages=messages)
+
+
+class FixedConfidence(ConfidenceService):
+    """The trust model's probabilities fixed at npwp 0.8, name 0.6."""
+
+    def predict(self, payload):
+        return {"npwp_confidence": 0.8, "name_confidence": 0.6}
+
+
+@pytest.fixture
+def outcome_harness():
+    repository = RecordingRepository()
+    pipeline = StagePipeline(stage=STAGE_SCORING, repository=repository, callback=RecordingCallback())
+    service = ScoringJobService(pipeline, FixedConfidence(get_trust_model()), 0.5)
+    app.dependency_overrides[get_job_service] = lambda: service
+    with make_client(app) as client:
+        yield client, repository, service
+    app.dependency_overrides.pop(get_job_service, None)
+
+
+def test_column_confidence_threshold_sets_each_fields_confidence(outcome_harness, auth):
+    client, repository, _ = outcome_harness
+    body = {**_payload("REQ_col"), "column_confidence_threshold": {"nomor_npwp": 0.9, "nama": 0.5}}
+
+    assert client.post("/v1/scoring/jobs", headers=auth, json=body).status_code == 202
+    wait_for_job(client, "/v1/scoring/jobs/REQ_col")
+
+    assert repository.outcomes["REQ_col"] == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+    }
+
+
+def test_a_field_left_out_uses_field_confidence_threshold(outcome_harness, auth):
+    client, repository, _ = outcome_harness
+
+    client.post("/v1/scoring/jobs", headers=auth, json={**_payload("REQ_none")})
+    client.post(
+        "/v1/scoring/jobs",
+        headers=auth,
+        json={**_payload("REQ_nama"), "column_confidence_threshold": {"nama": 0.7}},
+    )
+    wait_for_job(client, "/v1/scoring/jobs/REQ_none")
+    wait_for_job(client, "/v1/scoring/jobs/REQ_nama")
+
+    assert [repository.outcomes["REQ_none"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [1, 1]
+    assert [repository.outcomes["REQ_nama"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [1, 0]
+
+
+async def test_a_stale_job_is_run_again_with_its_stored_column_thresholds(outcome_harness):
+    _, repository, service = outcome_harness
+    service._results = FakeResults(structuring={"REQ_stale_col": STRUCTURING})
+    input = {"document_type": "npwp", "guardrails": GUARDRAILS, "column_confidence_threshold": {"nomor_npwp": 0.9}}
+    await repository.claim("REQ_stale_col", input=input)
+
+    await service.resume("REQ_stale_col", input)
+    await service._pipeline.runner.drain(5)
+
+    assert repository.outcomes["REQ_stale_col"]["nomor_npwp"]["confidence"] == 0
+
+
+@pytest.mark.parametrize(
+    "thresholds", [{"npwp": 0.9}, {"nomor_npwp": 1.5}, {"nama": -0.1}, {"nama": "tinggi"}, [0.9, 0.5]]
+)
+def test_an_invalid_column_confidence_threshold_is_422(harness, auth, thresholds):
+    client, _ = harness
+
+    response = client.post(
+        "/v1/scoring/jobs", headers=auth, json={**_payload("REQ_col_bad"), "column_confidence_threshold": thresholds}
     )
 
     assert response.status_code == 422

@@ -12,19 +12,28 @@ DOCUMENT_TYPE = "npwp"
 REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
 NPWP_FIELDS = ("nomor_npwp", "nama", "nama_badan")
 TRUST_SCORES = ("npwp_confidence", "name_confidence")
+# The fields of the `extract-ocr` contract's `data`, the keys of a per-field threshold.
+CONTRACT_FIELDS = ("nomor_npwp", "nama")
 
 
-def contract_fields(result: FinalResult, threshold: float) -> ContractData:
+def contract_fields(
+    result: FinalResult, threshold: float, column_thresholds: Mapping[str, float] | None = None
+) -> ContractData:
     """The `data` of the orchestrator's `extract-ocr` contract: `nomor_npwp` and `nama` (the person's
     name, or the company's registered name) with `confidence` 1 when the trust model's probability
-    reaches `threshold`, else 0. The structuring rules' flag stays internal: it is already in the
-    trust model's probability, and a document with a rejecting flag never gets this far."""
+    reaches the field's threshold, else 0. A field's threshold is its entry in `column_thresholds`
+    (the central orchestrator's `column_confidence_threshold`), else `threshold`. The structuring
+    rules' flag stays internal: it is already in the trust model's probability, and a document with a
+    rejecting flag never gets this far."""
     fields = result["fields"]
     scoring = result["scoring"]
+    columns = column_thresholds or {}
     name = fields.get("nama") if _has_value(fields.get("nama")) else fields.get("nama_badan")
     return {
-        "nomor_npwp": _field(fields.get("nomor_npwp"), scoring.get("npwp_confidence"), threshold),
-        "nama": _field(name, scoring.get("name_confidence"), threshold),
+        "nomor_npwp": _field(
+            fields.get("nomor_npwp"), scoring.get("npwp_confidence"), columns.get("nomor_npwp", threshold)
+        ),
+        "nama": _field(name, scoring.get("name_confidence"), columns.get("nama", threshold)),
     }
 
 

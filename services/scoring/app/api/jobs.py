@@ -42,7 +42,8 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "created_at": "202
         "runs the trust model, stores the result (`scoring_results`), and POSTs the `SCORING` callback, which "
         "carries the **final result** of the request.\n\n"
         "The outcome is two per-field confidences. There is no document-level score and no approve / reject "
-        "decision: thresholds belong to the orchestrator."
+        "decision. The outcome row (`ORCHESTRATION_OUTCOME_TABLE`) turns each confidence into `0`/`1` with the "
+        "field's `column_confidence_threshold` from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`."
     ),
     responses={
         202: success_examples(
@@ -75,7 +76,13 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
     ocr = body.ocr.model_dump() if body.ocr is not None else None
     structuring = body.structuring.model_dump() if body.structuring is not None else None
     data = await service.submit(
-        body.request_id, body.document_type, guardrails, ocr, structuring, body.pipeline_name_sequence
+        body.request_id,
+        body.document_type,
+        guardrails,
+        ocr,
+        structuring,
+        body.pipeline_name_sequence,
+        body.column_confidence_threshold,
     )
     return envelope(202, "Accepted", data, body.request_id)
 

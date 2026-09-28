@@ -175,7 +175,8 @@ paths:
 
 
         The outcome is two per-field confidences. There is no document-level score and no approve / reject
-        decision: thresholds belong to the orchestrator.'
+        decision. The outcome row (`ORCHESTRATION_OUTCOME_TABLE`) turns each confidence into `0`/`1` with
+        the field''s `column_confidence_threshold` from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`.'
       operationId: submitScoringJob
       requestBody:
         content:
@@ -1554,6 +1555,23 @@ components:
             - extraction
             - structuring
             - scoring
+        column_confidence_threshold:
+          anyOf:
+          - additionalProperties:
+              type: number
+              maximum: 1.0
+              minimum: 0.0
+            type: object
+          - type: 'null'
+          title: Column Confidence Threshold
+          description: 'Per field, from the central orchestrator: the trust model''s probability that
+            field''s value is correct must reach for its `confidence` to be `1` (else `0`), always on
+            the accept side. Keys: `nomor_npwp`, `nama`; a field left out (or the whole map omitted) uses
+            `FIELD_CONFIDENCE_THRESHOLD`. Applied to the outcome row (`ORCHESTRATION_OUTCOME_TABLE`);
+            the callback keeps the raw probabilities'
+          examples:
+          - nama: 0.5
+            nomor_npwp: 0.9
       type: object
       required:
       - request_id

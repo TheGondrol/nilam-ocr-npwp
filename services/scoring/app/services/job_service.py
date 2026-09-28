@@ -7,7 +7,7 @@ from ocr_common.errors import BadRequest, UnprocessableEntity
 from ocr_common.npwp import DOCUMENT_TYPE, contract_fields, final_result
 from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
-from ocr_common.types import FinalResult, ScoringResult
+from ocr_common.types import ContractData, FinalResult, ScoringResult
 
 from app.services.confidence_service import ConfidenceService
 
@@ -36,9 +36,12 @@ class ScoringJobService:
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any] | None,
         sequence: Sequence[str] | None = None,
+        column_thresholds: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         """Scoring is always the last service of a pipeline_name_sequence, so it ends every request it runs
-        for; `sequence` is only kept with the job for the orchestrator's GET."""
+        for; `sequence` is only kept with the job for the orchestrator's GET. `column_thresholds` (the
+        central orchestrator's `column_confidence_threshold`) turns each field's trust probability into the
+        0/1 `confidence` of the outcome row; a field it leaves out uses FIELD_CONFIDENCE_THRESHOLD."""
         if structuring is None and self._results is None:
             raise UnprocessableEntity(
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
@@ -49,11 +52,12 @@ class ScoringJobService:
             request_id,
             work,
             callback_result=final,
-            outcome_data=lambda scoring: contract_fields(final(scoring), self._confidence_threshold),
+            outcome_data=self._outcome_data(final, column_thresholds),
             input={
                 "document_type": document_type,
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
+                "column_confidence_threshold": dict(column_thresholds) if column_thresholds else None,
             },
         )
 
@@ -68,11 +72,16 @@ class ScoringJobService:
             request_id,
             work,
             callback_result=final,
-            outcome_data=lambda scoring: contract_fields(final(scoring), self._confidence_threshold),
+            outcome_data=self._outcome_data(final, input.get("column_confidence_threshold")),
         )
 
     async def get(self, request_id: str) -> dict[str, Any]:
         return await self._pipeline.get(request_id)
+
+    def _outcome_data(
+        self, final: Final, column_thresholds: Mapping[str, float] | None
+    ) -> Callable[[Mapping[str, Any]], ContractData]:
+        return lambda scoring: contract_fields(final(scoring), self._confidence_threshold, column_thresholds)
 
     def _spec(
         self,
