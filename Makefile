@@ -19,7 +19,7 @@ LOCK_FLAGS ?=
 LOCK := $(PY) -m uv pip compile --generate-hashes --python-version 3.11 --python-platform x86_64-unknown-linux-gnu --custom-compile-command "make lock" $(LOCK_FLAGS)
 lock: $(SERVICES:%=lock-%) lock-db
 lock-orchestrator:
-	$(LOCK) services/orchestrator/requirements.txt libs/ocr_common/pyproject.toml -o services/orchestrator/requirements.lock
+	$(LOCK) services/orchestrator/requirements.txt libs/ocr_common/pyproject.toml --extra db -o services/orchestrator/requirements.lock
 lock-guardrails:
 	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --emit-index-url -o services/guardrails/requirements.lock
 lock-extraction lock-structuring lock-scoring: lock-%:

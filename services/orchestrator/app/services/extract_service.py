@@ -21,6 +21,7 @@ from app.clients.extraction import ExtractionJobClient
 from app.clients.guardrails import GuardrailsClient, GuardrailsThreshold
 from app.config import Settings
 from app.services.document_checks import check_document
+from app.services.guardrails_log import GuardrailsLog, NoGuardrailsLog
 from app.services.pipeline_waiter import PipelineWait, StageError, WaitOutcome
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,15 @@ class ExtractOcrService:
     wait for OCR -> structuring -> scoring, or for the services the request's pipeline_name_sequence names."""
 
     def __init__(
-        self, guardrails: GuardrailsClient, extraction: ExtractionJobClient, waiter: PipelineWait, settings: Settings
+        self,
+        guardrails: GuardrailsClient,
+        extraction: ExtractionJobClient,
+        waiter: PipelineWait,
+        settings: Settings,
+        log: GuardrailsLog | None = None,
     ):
         self._guardrails = guardrails
+        self._log = log or NoGuardrailsLog()
         self._extraction = extraction
         self._waiter = waiter
         self._settings = settings
@@ -76,6 +83,7 @@ class ExtractOcrService:
                 report = await self._guardrails.check(request_id, filename, content_type, content, guardrails_threshold)
             except ServiceError as exc:
                 raise StageError(GUARDRAILS, exc) from exc
+            await self._log.record(request_id, report, threshold_from_request=guardrails_threshold is not None)
             if not report["passed"]:
                 return {**report, "job": None, "pipeline": None, "result": None}
             verdict: dict[str, Any] = report

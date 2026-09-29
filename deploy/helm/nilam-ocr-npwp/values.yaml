@@ -67,11 +67,13 @@ commonEnv:
 #                dan NetworkPolicy-nya menerima namespace di networkPolicy.clientNamespaces. Hanya
 #                orchestrator; yang lain internal.
 #   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
+#   database   : butuh DATABASE_URL tanpa konfigurasi Orkestrasi (orchestrator: tabel guardrails_results).
 #   upstreams  : service lain yang dipanggil; chart mengisi <NAMA>_SERVICE_URL dan NetworkPolicy dari sini.
 # Nama service dipakai sebagai nama port Kubernetes: maksimal 15 karakter, huruf kecil/angka, tanpa `-`.
 services:
   # Pintu masuk tunggal: POST /v1/extract-ocr (cek guardrails, hand-off ke extraction, tunggu pipeline)
-  # dan GET /v1/extract-ocr/{request_id}. Stateless: tanpa DB, tanpa callback.
+  # dan GET /v1/extract-ocr/{request_id}. Tanpa callback; DB hanya untuk mencatat setiap putusan guardrails
+  # (guardrails_results, migrasi 0008), best-effort: DB yang mati tidak menggagalkan request.
   orchestrator:
     enabled: true
     image:
@@ -80,6 +82,7 @@ services:
     port: 8034
     entrypoint: true
     pipeline: false
+    database: true
     upstreams: [guardrails, extraction, structuring, scoring]
     replicaCount: 2
     startupFailureThreshold: 15

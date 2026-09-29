@@ -459,12 +459,13 @@ hanya tempat datanya yang berbeda. Aktif hanya dengan `TESTING_ENDPOINTS=true` (
 | `POST`/`GET /v1/structuring/jobs` | `POST`/`GET /v1/structuring/jobs-test` | extraction, orchestrator |
 | `POST`/`GET /v1/scoring/jobs` | `POST`/`GET /v1/scoring/jobs-test` | structuring, orchestrator |
 
-Guardrails tidak punya kembaran: `/v1/guardrails/check` tidak menyimpan apa pun, jadi kembaran di orchestrator memanggil endpoint yang sama.
+Guardrails tidak punya kembaran: `/v1/guardrails/check` tidak menyimpan apa pun, jadi kembaran di orchestrator memanggil endpoint yang sama; putusannya dicatat orchestrator di `testing_guardrails_results`.
 
 Yang berbeda dari jalur live:
 
 - **Tabel**: `testing_ocr_jobs`/`_results`, `testing_structuring_jobs`/`_results`,
-  `testing_scoring_jobs`/`_results`, `testing_pipeline_outbox` (migrasi `0006`). Tabel live tidak disentuh.
+  `testing_scoring_jobs`/`_results`, `testing_pipeline_outbox` (migrasi `0006`), `testing_guardrails_results`
+  (migrasi `0008`). Tabel live tidak disentuh.
 - **Tidak ada efek ke Orkestrasi**: tanpa callback, tanpa `orchestration_extract_ocr`, tanpa
   `ocr.orchestration_api_events`.
 - **Metrik** memakai label `stage="TESTING_OCR"` / `TESTING_STRUCTURING` / `TESTING_SCORING`, jadi angka load
@@ -514,7 +515,7 @@ Setelah selesai, kosongkan tabelnya (isinya tidak dipakai apa pun):
 
 ```sql
 TRUNCATE testing_ocr_results, testing_ocr_jobs, testing_structuring_results, testing_structuring_jobs,
-         testing_scoring_results, testing_scoring_jobs, testing_pipeline_outbox;
+         testing_scoring_results, testing_scoring_jobs, testing_pipeline_outbox, testing_guardrails_results;
 ```
 
 ### Perhatikan
@@ -544,8 +545,9 @@ Satu database PostgreSQL; **semua tabel repo ini di schema `public`**. Database 
 | `ocr_jobs` / `ocr_results` | extraction | status tahap OCR per `request_id` dan blok teks mentah |
 | `structuring_jobs` / `structuring_results` | structuring | status tahap structuring dan field bernama |
 | `scoring_jobs` / `scoring_results` | scoring | status tahap scoring dan skor trust model |
+| `guardrails_results` | orchestrator | setiap putusan guardrails, **termasuk dokumen yang ditolak**: `passed`, `verdict`, `confidence`, `threshold`, `threshold_target`, `threshold_source` (`request` = dari Orkestrasi pusat, `service` = milik guardrails), `n_pages`, `reason`, `report` (JSONB, dengan probabilitas per halaman). Append-only: `request_id` yang dikirim ulang dinilai ulang (migrasi `0008`) |
 
-`*_jobs`: `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `input` (JSONB: `document_type`, laporan guardrails, `file_url`; dipakai pengambil job basi untuk mengulang job), `created_at`, `updated_at`, `ds`. `*_results`: `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Orchestrator dan guardrails tidak punya tabel: orchestrator membaca status tahap lewat API, bukan lewat database.
+`*_jobs`: `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `input` (JSONB: `document_type`, laporan guardrails, `file_url`; dipakai pengambil job basi untuk mengulang job), `created_at`, `updated_at`, `ds`. `*_results`: `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Orchestrator membaca status tahap lewat API, bukan lewat database; tabelnya hanya `guardrails_results`, ditulis best-effort (timeout `GUARDRAILS_LOG_TIMEOUT_SECONDS`, 2 dtk): kalau gagal hanya tercatat di log dan jawaban ke Orkestrasi pusat tidak terpengaruh. Tanpa `DATABASE_URL` orchestrator tidak mencatat apa pun. Guardrails tidak punya tabel.
 
 Kolom didefinisikan **sekali** di [`ocr_common/pipeline/tables.py`](libs/ocr_common/ocr_common/pipeline/tables.py). Migrasi Alembic di [db/](db/) dan `create_all` di test memakai definisi yang sama, dan `make db-check` gagal kalau keduanya menyimpang.
 

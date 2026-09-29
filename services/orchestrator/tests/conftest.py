@@ -4,7 +4,13 @@ from ocr_common.testing import auth_headers, make_client, set_test_env
 
 set_test_env(AUTH_DISABLED="false")
 
-from app.dependencies import get_extraction_client, get_guardrails_client, get_pipeline_waiter  # noqa: E402
+from app.dependencies import (  # noqa: E402
+    get_extraction_client,
+    get_guardrails_client,
+    get_guardrails_log,
+    get_pipeline_waiter,
+    get_testing_guardrails_log,
+)
 from app.main import app  # noqa: E402
 from app.services.pipeline_waiter import WaitOutcome  # noqa: E402
 
@@ -105,6 +111,18 @@ class StubExtraction:
         pass
 
 
+class RecordingGuardrailsLog:
+    """Keeps the verdicts the service asks to record, instead of writing guardrails_results."""
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    async def record(self, request_id, report, *, threshold_from_request) -> None:
+        self.records.append(
+            {"request_id": request_id, "report": report, "threshold_from_request": threshold_from_request}
+        )
+
+
 class StubWaiter:
     def __init__(self) -> None:
         self.outcome = DONE
@@ -158,3 +176,13 @@ def stub_waiter():
     app.dependency_overrides[get_pipeline_waiter] = lambda: stub
     yield stub
     app.dependency_overrides.pop(get_pipeline_waiter, None)
+
+
+@pytest.fixture(autouse=True)
+def guardrails_log():
+    log = RecordingGuardrailsLog()
+    app.dependency_overrides[get_guardrails_log] = lambda: log
+    app.dependency_overrides[get_testing_guardrails_log] = lambda: log
+    yield log
+    app.dependency_overrides.pop(get_guardrails_log, None)
+    app.dependency_overrides.pop(get_testing_guardrails_log, None)

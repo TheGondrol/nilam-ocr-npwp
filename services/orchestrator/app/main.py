@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from ocr_common.pipeline.database import dispose_engines
 from ocr_common.web.app import create_app
 
 from app.api import extract_ocr, testing
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
             for stage in get_stages():
                 await stage.aclose()
             get_stages.cache_clear()
+    await dispose_engines()  # the guardrails_results writer's pool, when DATABASE_URL is set
 
 
 app = create_app(
@@ -41,8 +43,9 @@ app = create_app(
         "`POST /v1/extract-ocr` checks the file, has the guardrails service judge it, hands a document that "
         "passes to the OCR stage (extraction, which chains to structuring and scoring), and waits up to "
         "`PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is still running. "
-        "`GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later time. This "
-        "service stores nothing: the stages keep the jobs, and they send the result callback. All endpoints "
+        "`GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later time. The "
+        "stages keep the jobs and send the result callback; this service only keeps every guardrails verdict "
+        "(`guardrails_results`, the rejected documents included) when `DATABASE_URL` is set. All endpoints "
         "except /health, /ready and /metrics require an X-API-Key header."
     ),
     tags=[

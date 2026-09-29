@@ -8,6 +8,8 @@ x-database: &database
       condition: service_completed_successfully
 
 services:
+  orchestrator:
+    <<: *database
   extraction:
     <<: *database
   structuring:

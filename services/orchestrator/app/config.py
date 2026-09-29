@@ -32,6 +32,11 @@ class Settings(BaseServiceSettings):
     pipeline_wait_seconds: float = Field(15.0, ge=0)
     pipeline_poll_interval_seconds: float = Field(0.5, gt=0)
 
+    # The shared database, only to keep every guardrails verdict (guardrails_results), the rejected ones
+    # included. Unset: nothing is kept. A write is best-effort, bounded by GUARDRAILS_LOG_TIMEOUT_SECONDS.
+    database_url: str | None = None
+    guardrails_log_timeout_seconds: float = Field(2.0, gt=0)
+
     @model_validator(mode="after")
     def _guard_orchestrator(self) -> Self:
         # All four always: GET /v1/extract-ocr/{request_id} reads the stages even when POST does not wait.

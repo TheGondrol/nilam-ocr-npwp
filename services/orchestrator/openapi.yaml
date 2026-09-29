@@ -6,8 +6,9 @@ info:
     a document that passes to the OCR stage (extraction, which chains to structuring and scoring), and
     waits up to `PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is
     still running. `GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later
-    time. This service stores nothing: the stages keep the jobs, and they send the result callback. All
-    endpoints except /health, /ready and /metrics require an X-API-Key header.
+    time. The stages keep the jobs and send the result callback; this service only keeps every guardrails
+    verdict (`guardrails_results`, the rejected documents included) when `DATABASE_URL` is set. All endpoints
+    except /health, /ready and /metrics require an X-API-Key header.
 
 
     ## Conventions (the same for every nilam-ocr service)
