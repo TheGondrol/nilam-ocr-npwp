@@ -14,7 +14,8 @@ DEFAULT_CODES = {
     400: "BAD_REQUEST",
     401: "UNAUTHORIZED",
     403: "FORBIDDEN",
-    404: "REQUEST_ID_NOT_FOUND",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
     409: "CONFLICT",
     413: "FILE_TOO_LARGE",
     422: "VALIDATION_ERROR",
@@ -31,6 +32,10 @@ TOO_MANY_PAGES = "TOO_MANY_PAGES"
 INVALID_FILE_SOURCE = "INVALID_FILE_SOURCE"
 FILE_URL_REJECTED = "FILE_URL_REJECTED"
 FILE_TOO_LARGE = "FILE_TOO_LARGE"
+
+# The code of `NotFound`: no job or request for the request_id asked about. A path that does not exist is
+# `NOT_FOUND` instead.
+REQUEST_ID_NOT_FOUND = "REQUEST_ID_NOT_FOUND"
 
 
 def error_code(status_code: int, code: str | None = None) -> str:
@@ -71,6 +76,9 @@ class NotFound(_StatusError):
     """404: no job or request for this request_id."""
 
     status_code = 404
+
+    def __init__(self, message: str, code: str | None = REQUEST_ID_NOT_FOUND):
+        super().__init__(message, code)
 
 
 class Conflict(_StatusError):

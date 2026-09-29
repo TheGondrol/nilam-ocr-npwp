@@ -167,6 +167,7 @@ async def submit_job(body: StructuringJobRequest, service: StructuringJobService
             "No structuring job for this request_id",
             f"No STRUCTURING job found for request_id: {REQUEST_ID_EXAMPLE}",
             request_id=REQUEST_ID_EXAMPLE,
+            errors="REQUEST_ID_NOT_FOUND",
         ),
         422: error(
             422,

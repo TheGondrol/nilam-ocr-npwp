@@ -263,6 +263,21 @@ def test_every_error_carries_a_stable_code():
     assert "secret" not in crash.text
 
 
+def test_a_path_or_method_that_does_not_exist_has_its_own_code():
+    """An unknown path is not an unknown request_id, and a wrong method is not a generic error."""
+    probe = TestClient(create_app(settings=settings, title="Demo", description="demo"))
+
+    missing = probe.get("/v1/nope").json()
+    wrong_method = probe.post("/health").json()
+
+    assert (missing["status_code"], missing["errors"]) == (404, "NOT_FOUND")
+    assert (wrong_method["status_code"], wrong_method["status_desc"], wrong_method["errors"]) == (
+        405,
+        "Method Not Allowed",
+        "METHOD_NOT_ALLOWED",
+    )
+
+
 def test_an_error_names_the_service_it_comes_from():
     from ocr_common.errors import UpstreamUnavailable
 

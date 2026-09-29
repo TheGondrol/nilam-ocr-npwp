@@ -246,6 +246,7 @@ async def submit_job(
             "No OCR job for this request_id",
             f"No OCR job found for request_id: {REQUEST_ID_EXAMPLE}",
             request_id=REQUEST_ID_EXAMPLE,
+            errors="REQUEST_ID_NOT_FOUND",
         ),
         422: error(
             422,

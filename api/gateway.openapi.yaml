@@ -33,22 +33,24 @@ info:
     \ null; on error `data` is null.\n\n**Errors.** `errors` is a stable, machine-readable code; branch\
     \ on it, not on the wording of `message`.\nThe document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`,\
     \ `UNREADABLE_FILE`, `TOO_MANY_PAGES`,\n`INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE`\
-    \ (413). Otherwise the code of the status:\n`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR`\
-    \ (422), `INTERNAL_SERVER_ERROR` (500),\n`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504),\
-    \ unless an endpoint documents a more precise one.\n`400` = the request or the document is unusable\
-    \ (do not retry unchanged). `503` / `504` are safe to retry.\n\n**request_id.** Minted by the central\
-    \ orchestrator and carried through every stage. Where an endpoint has\nno request_id of its own, the\
-    \ `X-Request-ID` request header is used (and echoed in the response header);\nwithout it the service\
-    \ generates one.\n\n**Asynchronous stages** (internal: only the orchestrator NPWP and the previous\
-    \ stage call them). `POST\n.../jobs` answers `202` immediately and does the work in the background.\
-    \ The outcome is reported by a\ncallback to the central orchestrator (see *Webhooks*), and can be\
-    \ read at any time with\n`GET .../jobs/{request_id}`, which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}`\
-    \ combines\nover the three stages. Submitting the same request_id again is idempotent:\n`202` with\
-    \ `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING`\
-    \ for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess\
-    \ running it died). A job still running when the service shuts down is reported `FAILED`. Because\n\
-    the request was already answered `202`, a problem with the document itself (unreadable file, no text,\n\
-    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
+    \ (413). Otherwise the code of the status:\n`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404, an\
+    \ unknown request_id), `NOT_FOUND` (404, a path that does\nnot exist), `METHOD_NOT_ALLOWED` (405),\
+    \ `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),\n`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT`\
+    \ (504), unless an endpoint documents a more precise one.\n`400` = the request or the document is\
+    \ unusable (do not retry unchanged). `503` / `504` are safe to retry.\n\n**request_id.** Minted by\
+    \ the central orchestrator and carried through every stage. Where an endpoint has\nno request_id of\
+    \ its own, the `X-Request-ID` request header is used (and echoed in the response header);\nwithout\
+    \ it the service generates one.\n\n**Asynchronous stages** (internal: only the orchestrator NPWP and\
+    \ the previous stage call them). `POST\n.../jobs` answers `202` immediately and does the work in the\
+    \ background. The outcome is reported by a\ncallback to the central orchestrator (see *Webhooks*),\
+    \ and can be read at any time with\n`GET .../jobs/{request_id}`, which the orchestrator NPWP's `GET\
+    \ /v1/extract-ocr/{request_id}` combines\nover the three stages. Submitting the same request_id again\
+    \ is idempotent:\n`202` with `duplicate: true`, the work is not repeated, unless the earlier attempt\
+    \ `FAILED` or has been\n`PROCESSING` for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`,\
+    \ 5 minutes by default: the\nprocess running it died). A job still running when the service shuts\
+    \ down is reported `FAILED`. Because\nthe request was already answered `202`, a problem with the document\
+    \ itself (unreadable file, no text,\nunsupported document type) shows up as a `FAILED` job and callback,\
+    \ not as a `4xx`.\n"
 tags:
 - name: 1. Start the pipeline
   description: 'The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for

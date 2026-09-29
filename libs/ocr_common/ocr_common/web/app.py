@@ -73,7 +73,8 @@ status. On success `errors` is null; on error `data` is null.
 **Errors.** `errors` is a stable, machine-readable code; branch on it, not on the wording of `message`.
 The document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`, `UNREADABLE_FILE`, `TOO_MANY_PAGES`,
 `INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the status:
-`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),
+`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404, an unknown request_id), `NOT_FOUND` (404, a path that does
+not exist), `METHOD_NOT_ALLOWED` (405), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),
 `DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents a more precise one.
 `400` = the request or the document is unusable (do not retry unchanged). `503` / `504` are safe to retry.
 

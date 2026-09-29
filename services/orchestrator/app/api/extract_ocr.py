@@ -547,6 +547,7 @@ async def extract_ocr(
             404,
             "No stage has a job and no guardrails verdict is kept for this request_id",
             f"No request found for request_id {RID}",
+            errors="REQUEST_ID_NOT_FOUND",
         ),
         422: {
             "model": ExtractOcrResponse,

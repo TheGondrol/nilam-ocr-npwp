@@ -30,8 +30,10 @@ info:
     `INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the
     status:
 
-    `UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR`
-    (500),
+    `UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404, an unknown request_id), `NOT_FOUND` (404, a path
+    that does
+
+    not exist), `METHOD_NOT_ALLOWED` (405), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),
 
     `DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents a more precise
     one.
