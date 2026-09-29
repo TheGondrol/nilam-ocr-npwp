@@ -35,6 +35,24 @@ def test_refusals_before_the_pipeline_carry_their_code(client, auth, files, form
     assert (response.status_code, response.json()["errors"]) == (status, code)
 
 
+@pytest.mark.parametrize(
+    "content_type", ["application/octet-stream", "", "image/pjpeg", "image/jpeg; charset=binary", "IMAGE/JPG"]
+)
+def test_a_jpg_is_accepted_whatever_type_the_client_declares(client, auth, content_type):
+    signed = b"\xff\xd8\xff\xe0" + JPEG  # a generic type is resolved from the real JPEG signature
+    expected = _submit(client, auth, files={"file": ("npwp.jpg", signed, "image/jpeg")}).status_code
+
+    response = _submit(client, auth, files={"file": ("npwp.jpg", signed, content_type)})
+
+    assert response.status_code == expected, response.json()
+
+
+def test_a_file_that_is_no_supported_kind_is_still_refused_under_a_generic_type(client, auth):
+    response = _submit(client, auth, files={"file": ("npwp.jpg", b"hello", "application/octet-stream")})
+
+    assert (response.status_code, response.json()["errors"]) == (400, "UNSUPPORTED_FILE_TYPE")
+
+
 def test_a_file_above_the_limit_is_413_file_too_large(client, auth):
     app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(update={"max_upload_bytes": 4})
     try:

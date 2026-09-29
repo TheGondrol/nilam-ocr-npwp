@@ -16,15 +16,13 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
+from ocr_common.content_types import GENERIC_TYPES, sniff_content_type
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_SCHEMES = {"http", "https"}
 _CHUNK_BYTES = 64 * 1024
 _TLS = ssl.create_default_context()
-_GENERIC_TYPES = ("", "application/octet-stream", "binary/octet-stream")
-# File signatures, checked before any name: a MinIO Console share link, for one, answers
-# `application/octet-stream` on a path that ends in an opaque token, not in the file name.
-_SIGNATURES = ((b"%PDF-", "application/pdf"), (b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"))
 
 
 class FetchUrlError(Exception):
@@ -155,7 +153,7 @@ async def fetch(
 
     filename = _disposition_filename(disposition) or parsed.path.rsplit("/", 1)[-1] or "download"
     content_type = (header_type or "").split(";")[0].strip().lower()
-    if content_type in _GENERIC_TYPES:
+    if content_type in GENERIC_TYPES:
         content_type = _guess_content_type(content, filename)
     return content, filename, content_type
 
@@ -172,11 +170,13 @@ def _disposition_filename(header: str | None) -> str | None:
 
 
 def _guess_content_type(content: bytes, filename: str) -> str:
-    """The type of a download served as `application/octet-stream`: from the file's signature, else from
-    the name's extension, else JPEG (the image check downstream then reports an unreadable file)."""
-    for signature, content_type in _SIGNATURES:
-        if content.startswith(signature):
-            return content_type
+    """The type of a download served as `application/octet-stream`: from the file's signature (checked before
+    any name: a MinIO Console share link, for one, answers `application/octet-stream` on a path that ends in an
+    opaque token, not in the file name), else from the name's extension, else JPEG (the image check downstream
+    then reports an unreadable file)."""
+    sniffed = sniff_content_type(content)
+    if sniffed:
+        return sniffed
     lowered = filename.lower()
     if lowered.endswith(".pdf"):
         return "application/pdf"
