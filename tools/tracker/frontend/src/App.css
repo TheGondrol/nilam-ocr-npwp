@@ -194,3 +194,35 @@ button.link.danger { color: var(--failed); font-size: inherit; }
 button.small.danger { background: var(--failed); border-color: var(--failed); }
 button.small.ghost { background: var(--panel); color: var(--text); border-color: var(--line); }
 .error { color: var(--failed); font-size: 0.82rem; margin-top: 6px; }
+
+/* skenario gangguan */
+.field.wide { grid-template-columns: 1fr; }
+.small-link { font-size: 0.75rem; text-align: left; }
+button.small.danger { background: var(--failed); border-color: var(--failed); }
+.warn-box { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--rejected); border-radius: 6px; background: #fff7ed; }
+.chaos-form { margin-top: 8px; }
+h2.inline { margin: 0; }
+.pill.level-pass { background: var(--done); }
+.pill.level-warn { background: var(--rejected); }
+.pill.level-fail, .pill.level-error { background: var(--failed); }
+.pill.level-info, .pill.level-stopped { background: var(--muted); }
+.pill.level-running { background: var(--processing); animation: pulse 1.2s infinite; }
+.scenario { border-left: 4px solid var(--pending); }
+.scenario-pass { border-left-color: var(--done); }
+.scenario-warn { border-left-color: var(--rejected); }
+.scenario-fail, .scenario-error { border-left-color: var(--failed); }
+.scenario-running { border-left-color: var(--processing); }
+.scenario-title { font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.scenario .meta { font-size: 0.8rem; }
+.run-report { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.rid-link { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem; margin-right: 8px; }
+.checks { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.86rem; }
+.checks td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.checks td:first-child { width: 64px; }
+.checks td.t { width: 70px; text-align: right; white-space: nowrap; }
+.checks .detail { margin-top: 2px; word-break: break-word; }
+.checks tr.check-warn td { background: #fffbeb; }
+.checks tr.check-fail td { background: #fef2f2; }
+.steps { margin: 6px 0 0; padding-left: 20px; font-size: 0.8rem; max-height: 320px; overflow: auto; }
+.steps li { padding: 1px 0; }
+.steps li.error { color: var(--failed); }

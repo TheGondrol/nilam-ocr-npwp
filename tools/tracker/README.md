@@ -31,6 +31,11 @@ dan dua simulasi:
 | **Pipeline lambat** (OCR ditunda N detik) | nama file diberi awalan `delay<N>s-`; extraction menghormatinya hanya dengan `ENVIRONMENT=local` (`ocr_common/simulation.py`) | N > `PIPELINE_WAIT_SECONDS` (15): orchestrator menjawab **202**, tahap-tahap tetap selesai, hasil datang lewat callback SCORING. N kecil atau tanpa simulasi: **200** dengan data |
 | **Callback orkestrasi mati (503)** | tracker menjawab 503 untuk setiap callback yang datang | baris callback jadi RETRY dengan backoff (0,5 dtk ×2 … maks 5 menit), attempt bertambah, **handoff tetap terkirim dan tahap berikutnya tetap jalan**; orchestrator tetap 200 kalau pipeline cepat. Kembalikan ke *normal*: retry berikutnya 200, baris dihapus |
 | **Callback orkestrasi menolak (422)** | tracker menjawab 422 | baris jadi DEAD setelah satu attempt, tetap ada di tabel, backlog service menunjukkan `dead_letters`; tombol *Lepaskan* mengirimnya lagi |
+| **X-Callback-Key salah (401)** | tracker menjawab 401 (atau memang salah: `TRACKER_CALLBACK_KEY` diisi dan beda dengan `ORCHESTRATION_CALLBACK_KEY`) | sama dengan 422: dead letter, tidak terkirim sampai dilepas |
+| **Callback lambat** | tracker mencatat callback, lalu baru menjawab 200 setelah `TRACKER_CALLBACK_SLOW_SECONDS` (12), di atas `ORCHESTRATION_TIMEOUT_SECONDS` relay (10) | relay menganggapnya gagal (504) dan mengirim ulang: timeline menandai kedatangan berikutnya **DUPLIKAT** |
+| **Callback tersendat** | 503 untuk `TRACKER_CALLBACK_FLAKY_FAILURES` (2) kedatangan pertama tiap pesan, sesudahnya 200 | pulih sendiri dengan backoff, diterima tepat sekali |
+| **Dokumen sebagai `file_url`** (pilihan di form, lokal saja) | tracker menyimpan file dan mengirim `file_url=http://host.docker.internal:8090/api/files/...` seperti contoh cURL pusat | orchestrator dan extraction mengunduhnya; job yang dijalankan ulang reaper bisa mengunduh lagi |
+| **Kirim ulang `request_id`** (isian di form) | POST lagi dengan request_id yang sudah ada | uji idempotensi: hasil tersimpan dijawab lagi, atau job FAILED dijalankan lagi |
 | **`pipeline_name_sequence`** (pilihan di form upload) | tracker meneruskan sequence yang dipilih ke orchestrator sebagai JSON array: penuh, tanpa guardrails, guardrails saja, sampai extraction, sampai structuring, extraction saja, atau satu contoh yang tidak valid | tahap di luar sequence tampil **SKIPPED**. Tahap terakhir mengakhiri request: `data` adalah hasilnya apa adanya, `pipeline_last_stage` menyebut tahap itu, dan callback DONE-nya membawa `final: true` (tracker menutup request di situ). Guardrails saja: jawaban POST sudah final, tanpa job dan callback. Sequence tidak valid (melompati structuring): **422** `INVALID_PIPELINE_SEQUENCE`, tidak ada yang jalan |
 
 Urutan yang enak untuk presentasi: (1) kirim tanpa simulasi -> 200 dan semua baris outbox
@@ -41,6 +46,48 @@ RETRY; nyalakan lagi -> semuanya terkirim; (4) callback menolak -> dead letter -
 Prasyarat pola outbox terlihat: service dijalankan dengan `DATABASE_URL` (stack
 `docker-compose.db.yml`, semua migrasi dengan `make db-upgrade`) dan `PIPELINE_OUTBOX=true` (sudah di
 `services/*/.env`). Tanpa itu service memakai mode langsung dan panel outbox tetap kosong.
+
+Callback datang dalam dua format, sesuai `ORCHESTRATION_CALLBACK_FORMAT` service: `stage` ke
+`/v1/callbacks/stage` (default lokal, satu per tahap) atau `result` ke `/v1/ocr-callback` (seperti di dev: satu
+per request, dengan `X-Callback-Key`). Tracker menerima keduanya; untuk latihan yang paling mirip dev isi di
+`services/{extraction,structuring,scoring}/.env`:
+
+    ORCHESTRATION_CALLBACK_FORMAT=result
+    ORCHESTRATION_CALLBACK_PATH=/v1/ocr-callback
+    ORCHESTRATION_CALLBACK_KEY=local-callback-key     # dan TRACKER_CALLBACK_KEY yang sama di tools/tracker/.env
+
+## Skenario gangguan (uji kesiapan)
+
+Menu **Skenario gangguan** menjalankan daftar "shit happens" secara otomatis di stack lokal: tiap skenario
+mengirim dokumen sungguhan lewat orchestrator, membuat gangguannya pada saat yang tepat (container di-`docker stop`
+= SIGTERM seperti rolling restart, `docker kill` = SIGKILL seperti OOM, Postgres dimatikan, atau cara tracker menjawab
+callback), lalu memeriksa tabel job, `pipeline_outbox`, dan callback. Hasilnya per cek: **PASS** (sesuai harapan),
+**WARN** (perilaku benar, tapi tim / Orkestrasi pusat harus tahu), **FAIL** (perbaiki sebelum go-live). Tiap
+request skenario bisa dibuka di menu Pipeline; gangguannya tercatat di timeline-nya. Kodenya di
+[backend/chaos.py](backend/chaos.py).
+
+| Skenario | Yang dicek |
+|---|---|
+| Jalur normal | 200 completed, satu callback akhir, outbox kosong |
+| Orkestrasi pusat mati 20 dtk (503) | pipeline tetap selesai, callback RETRY dengan backoff, terkirim sendiri setelah pulih, tepat sekali |
+| Orkestrasi pusat tersendat | pulih tanpa tindakan manual, tanpa duplikat |
+| Orkestrasi pusat lambat | relay mengirim ulang: pusat menerima duplikat (WARN: pusat harus idempoten) |
+| Orkestrasi pusat menolak (401) | dead letter setelah 1 attempt, terlihat di `GET /v1/<tahap>/outbox`, terkirim setelah `POST /v1/<tahap>/outbox/release` |
+| Structuring mati 25 dtk | handoff RETRY lalu terkirim, pusat mendapat 202 (bukan 5xx), pipeline selesai |
+| Rolling restart, job pendek | job diselesaikan dalam drain, pipeline selesai |
+| Rolling restart, job panjang | job FAILED "interrupted", kiriman ulang request_id yang sama selesai |
+| SIGKILL, upload / file_url | reaper mengambil alih setelah lease; upload = FAILED minta kirim ulang, file_url = selesai sendiri |
+| Database mati 20 dtk | request baru 5xx, request terputus tidak tertinggal PROCESSING, keadaan akhir sampai ke pusat |
+| Kirim ulang request_id selesai / dua POST bersamaan | tidak ada pipeline ganda, tidak ada callback ganda |
+| Guardrails / extraction mati saat request masuk | 5xx dengan `pipeline_last_stage`, tidak ada job setengah jalan |
+
+Prasyarat: mode lokal dengan database (`run.sh --stack`), dokumen uji yang lolos guardrails dan aturan structuring
+(`tools/load-tester/images`, atau unggahan `assets/`; dengan `EXTRACTION_BACKEND=mock` pilih yang lolos), dan untuk tiga
+skenario bertanda *butuh lease pendek* sebaiknya `PIPELINE_JOB_LEASE_SECONDS=30` + `PIPELINE_STALE_JOB_INTERVAL_SECONDS=5`
+di `services/*/.env` serta `TRACKER_JOB_LEASE_SECONDS=30` + `TRACKER_STALE_JOB_INTERVAL_SECONDS=5` di sini (dengan
+lease default 300 dtk skenario itu menunggu > 5 menit). Satu run pada satu waktu; di akhir tiap skenario container
+dinyalakan lagi dan callback kembali normal. Di sidebar juga ada **gangguan manual** (stop / kill satu service
+selama N detik) untuk dicoba sambil mengirim dokumen sendiri.
 
 ## Memilih target: GKE atau lokal
 
@@ -106,7 +153,12 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
-| `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject"}` |
+| `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject" \| "unauthorized" \| "slow" \| "flaky"}` |
+| `POST /v1/ocr-callback` | callback format result (dev); diperiksa `X-Callback-Key` kalau `TRACKER_CALLBACK_KEY` diisi |
+| `GET /api/files/{token}/{nama}` | dokumen yang dikirim sebagai `file_url` |
+| `GET` / `POST /api/chaos`, `POST /api/chaos/{service}/start` | keadaan container; `{"service", "action": "stop" \| "kill", "seconds"}` (lokal saja) |
+| `GET /api/scenarios`, `POST /api/scenarios/run`, `POST /api/scenarios/stop` | daftar + hasil terakhir; `{"scenarios": [...] \| null, "image"}`; hentikan |
+| `GET /api/scenarios/runs[/{id}]`, `DELETE /api/scenarios/runs` | laporan run (langkah, cek, request_id); hapus riwayat |
 | `GET /api/outbox` | backlog tiap service dari `GET /v1/<tahap>/outbox` |
 | `GET /api/loadtest/config` | file uji yang tersedia (contoh `images/` dan unggahan `assets/`), image/network/target k6, batas laju & durasi |
 | `POST /api/loadtest/images`, `DELETE /api/loadtest/images/{nama}` | unggah file uji ke `assets/` (di-.gitignore, dihapus otomatis saat run yang memakainya berakhir); hapus satu file |
@@ -132,3 +184,7 @@ K6_API_KEY, LOAD_TESTER_DIR.
 Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EXTRACTION_URL, STRUCTURING_URL,
 SCORING_URL (default 127.0.0.1:8030-8034), TRACKER_POLL, REDIS_URL, API_KEY, PORT,
 TRACKER_DATABASE_URL, TRACKER_DB_INTERVAL (0.25), TRACKER_WAIT_SECONDS (15, label saja).
+Simulasi dan skenario: TRACKER_CALLBACK_KEY, TRACKER_CALLBACK_SLOW_SECONDS (12), TRACKER_CALLBACK_FLAKY_FAILURES (2),
+TRACKER_FILE_BASE_URL (http://host.docker.internal:PORT), TRACKER_CONTAINER_PREFIX (nilam-ocr-),
+TRACKER_STOP_GRACE_SECONDS (45), TRACKER_DRAIN_SECONDS (30), TRACKER_JOB_LEASE_SECONDS (300),
+TRACKER_STALE_JOB_INTERVAL_SECONDS (30); empat terakhir harus sama dengan env service.

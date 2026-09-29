@@ -13,6 +13,13 @@ const CALLBACK_MODES = [
   { value: 'ok', label: 'normal (2xx)', hint: 'callback diterima, baris outbox dihapus' },
   { value: 'down', label: 'mati (503)', hint: 'relay mengulang dengan backoff; pipeline tetap jalan' },
   { value: 'reject', label: 'menolak (422)', hint: 'relay berhenti: baris jadi dead letter' },
+  { value: 'unauthorized', label: 'X-Callback-Key salah (401)', hint: 'sama dengan 422: dead letter, perlu release manual' },
+  { value: 'slow', label: 'lambat (> timeout relay)', hint: 'dicatat lalu dijawab terlambat: relay mengirim ulang, pusat menerima duplikat' },
+  { value: 'flaky', label: 'tersendat (503 lalu 200)', hint: 'beberapa kedatangan pertama tiap pesan 503, sesudahnya 200' },
+]
+const SOURCES = [
+  { value: 'upload', label: 'upload (multipart file)' },
+  { value: 'file_url', label: 'file_url (seperti contoh cURL pusat)' },
 ]
 // pipeline_name_sequence: service yang dijalankan satu request. Urutannya selalu guardrails -> extraction ->
 // structuring -> scoring; guardrails boleh tidak ada di depan dan ujungnya boleh dipotong, tidak boleh melompat.
@@ -95,7 +102,10 @@ function describe(e, t0) {
       if (e.slow) sim.push(`OCR ditunda ${e.slow} dtk (nama file delay${e.slow}s-…)`)
       if (e.callback_mode && e.callback_mode !== 'ok') sim.push(`callback orkestrasi ${e.callback_mode}`)
       if (e.sequence) sim.push(`pipeline_name_sequence ${sequenceText(e.sequence)}`)
-      return `Orkestrasi (tracker) menerima ${e.filename}${sim.length ? ` · simulasi: ${sim.join(', ')}` : ''}`
+      if (e.source === 'file_url') sim.push('dikirim sebagai file_url')
+      if (e.origin) sim.push(e.origin.replace('scenario:', 'skenario '))
+      const what = e.resend ? `KIRIM ULANG request_id yang sama (${e.filename})` : `menerima ${e.filename}`
+      return `Orkestrasi (tracker) ${what}${sim.length ? ` · ${sim.join(', ')}` : ''}`
     }
     case 'http':
       return `Orchestrator menjawab HTTP ${e.http_status}, job_status=${e.job_status ?? '-'}${
@@ -134,10 +144,17 @@ function describe(e, t0) {
           return `#${m.id} ${e.status}`
       }
     }
-    case 'callback':
-      return `Callback ${e.stage} ${e.status}${e.final ? ' (final: tahap terakhir sequence)' : ''} tiba (attempt ${e.attempt}) → orkestrasi menjawab ${e.http_status}${
-        e.mode !== 'ok' ? ' (simulasi)' : ''
+    case 'callback': {
+      const kind =
+        e.format === 'result' ? `Callback result (${e.status === 'DONE' ? 'completed' : 'failed'}, dari ${e.stage})` : `Callback ${e.stage} ${e.status}`
+      const note = e.mode === 'key' ? ' (X-Callback-Key salah)' : e.mode !== 'ok' ? ` (simulasi ${e.mode})` : ''
+      return `${kind}${e.final && e.format !== 'result' ? ' (final)' : ''} tiba (attempt ${e.attempt}) → orkestrasi menjawab ${e.http_status}${note}${
+        e.duplicate ? ' · DUPLIKAT: pesan ini sudah pernah diterima' : ''
       }`
+    }
+    case 'chaos':
+      if (e.stage === 'DATABASE') return e.status === 'DOWN' ? `Database tidak terbaca: ${e.error_message}` : 'Database terbaca lagi'
+      return `Gangguan: ${e.text}`
     case 'pipeline':
       if (e.timeout) return 'Pemantauan dihentikan: waktu habis'
       return e.dead_letters ? `Selesai dengan ${e.dead_letters} dead letter di outbox` : 'Selesai: outbox kosong, semua pesan terkirim'
@@ -918,6 +935,9 @@ function Nav({ view, setView }) {
       <button className={view === 'loadtest' ? 'active' : ''} onClick={() => setView('loadtest')}>
         Load testing
       </button>
+      <button className={view === 'scenarios' ? 'active' : ''} onClick={() => setView('scenarios')}>
+        Skenario gangguan
+      </button>
     </div>
   )
 }
@@ -925,12 +945,15 @@ function Nav({ view, setView }) {
 export default function App() {
   const [view, setView] = useState(() => {
     try {
-      return localStorage.getItem('tracker.view') === 'loadtest' ? 'loadtest' : 'pipeline'
+      // #scenarios / #loadtest membuka menu itu langsung (tautan, screenshot headless).
+      const stored = window.location.hash.slice(1) || localStorage.getItem('tracker.view')
+      return ['loadtest', 'scenarios'].includes(stored) ? stored : 'pipeline'
     } catch (_) {
       return 'pipeline'
     }
   })
   const [overview, setOverview] = useState(null)
+  const [focus, setFocus] = useState(null)
   useEffect(() => {
     try {
       localStorage.setItem('tracker.view', view)
@@ -946,10 +969,21 @@ export default function App() {
   }, [])
   const nav = <Nav view={view} setView={setView} />
   if (view === 'loadtest') return <LoadTest overview={overview} nav={nav} />
-  return <Pipeline nav={nav} overview={overview} />
+  if (view === 'scenarios')
+    return (
+      <Scenarios
+        nav={nav}
+        overview={overview}
+        openRequest={(rid) => {
+          setFocus({ rid, at: Date.now() })
+          setView('pipeline')
+        }}
+      />
+    )
+  return <Pipeline nav={nav} overview={overview} focus={focus} />
 }
 
-function Pipeline({ nav, overview: sharedOverview }) {
+function Pipeline({ nav, overview: sharedOverview, focus }) {
   const [requests, setRequests] = useState([])
   const [current, setCurrent] = useState(null)
   const [events, setEvents] = useState([])
@@ -959,6 +993,8 @@ function Pipeline({ nav, overview: sharedOverview }) {
   const [slow, setSlow] = useState(false)
   const [slowSeconds, setSlowSeconds] = useState(20)
   const [sequenceKey, setSequenceKey] = useState('full')
+  const [source, setSource] = useState('upload')
+  const [resendId, setResendId] = useState('')
   const [sim, setSim] = useState({ callback: 'ok', wait_seconds: 15, database: null })
   const overview = sharedOverview
   const [releasing, setReleasing] = useState(false)
@@ -971,6 +1007,10 @@ function Pipeline({ nav, overview: sharedOverview }) {
     loadRequests()
     fetch('/api/simulation').then((r) => r.json()).then(setSim)
   }, [])
+  // Dibuka dari menu skenario: tampilkan request itu.
+  useEffect(() => {
+    if (focus?.rid) setCurrent(focus.rid)
+  }, [focus])
 
   // Buka SSE untuk request yang dipilih: replay dari awal, lalu live.
   useEffect(() => {
@@ -1007,11 +1047,19 @@ function Pipeline({ nav, overview: sharedOverview }) {
     form.append('slow_seconds', slow ? String(slowSeconds) : '0')
     const sequence = SEQUENCES.find((s) => s.key === sequenceKey)?.value
     form.append('pipeline_name_sequence', sequence ? JSON.stringify(sequence) : '')
+    form.append('source', source)
+    form.append('request_id', resendId.trim())
     try {
       const r = await fetch('/api/requests', { method: 'POST', body: form })
       const body = await r.json()
       if (!r.ok) throw new Error(body.detail ?? r.statusText)
-      setCurrent(body.request_id)
+      if (body.request_id === current) {
+        // Kiriman ulang request yang sedang dilihat: buka SSE lagi supaya event barunya terlihat.
+        setCurrent(null)
+        setTimeout(() => setCurrent(body.request_id), 0)
+      } else {
+        setCurrent(body.request_id)
+      }
       loadRequests()
     } catch (err) {
       setError(String(err.message ?? err))
@@ -1107,7 +1155,28 @@ function Pipeline({ nav, overview: sharedOverview }) {
             Service yang dijalankan request ini. Tahap terakhir mengakhiri request: hasilnya jadi <code>data</code> apa adanya dan callback DONE-nya
             membawa <code>final: true</code>. Pengecekan file di orchestrator selalu jalan, dan aturan structuring tetap menolak kalau structuring jalan.
           </div>
-          <button disabled={busy}>{busy ? `Menunggu orchestrator (maks. ${sim.wait_seconds} dtk)…` : 'Kirim dokumen'}</button>
+          <label className="field wide">
+            dokumen dikirim sebagai
+            <select value={source} onChange={(e) => setSource(e.target.value)} disabled={Boolean(sim.target) && sim.target !== 'local'}>
+              {SOURCES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field wide">
+            request_id (kosong = baru; isi = kirim ulang)
+            <input value={resendId} placeholder="REQ_…" onChange={(e) => setResendId(e.target.value)} />
+          </label>
+          {current && (
+            <button type="button" className="link small-link" onClick={() => setResendId(current)}>
+              pakai request_id yang sedang dilihat
+            </button>
+          )}
+          <button disabled={busy}>
+            {busy ? `Menunggu orchestrator (maks. ${sim.wait_seconds} dtk)…` : resendId.trim() ? 'Kirim ulang request_id ini' : 'Kirim dokumen'}
+          </button>
         </form>
         {error && <div className="error">{error}</div>}
 
@@ -1125,6 +1194,8 @@ function Pipeline({ nav, overview: sharedOverview }) {
         </div>
         <div className="hint small">
           Berlaku untuk callback yang datang mulai sekarang. Matikan, kirim dokumen, lalu nyalakan lagi: pesan yang tertahan terkirim pada retry berikutnya.
+          Lambat = dijawab setelah {sim.callback_slow_seconds ?? 12} dtk; tersendat = {sim.callback_flaky_failures ?? 2}× 503 per pesan.
+          {sim.callback_key ? ' /v1/ocr-callback memeriksa X-Callback-Key (TRACKER_CALLBACK_KEY).' : ''}
           {sim.database === false && <div className="error">Pemantau outbox mati: {sim.database_error}</div>}
         </div>
 
@@ -1198,6 +1269,328 @@ function Pipeline({ nav, overview: sharedOverview }) {
             <Timeline events={events} t0={t0} />
           </>
         )}
+      </main>
+    </div>
+  )
+}
+
+// --- skenario gangguan ("shit happens") ---------------------------------------------
+
+const LEVEL_LABEL = { pass: 'PASS', warn: 'WARN', fail: 'FAIL', info: 'INFO', error: 'ERROR', running: 'JALAN', stopped: 'DIHENTIKAN' }
+const CHAOS_SERVICES = ['orchestrator', 'guardrails', 'extraction', 'structuring', 'scoring', 'postgres']
+
+function LevelPill({ level }) {
+  return <span className={`pill level-${level}`}>{LEVEL_LABEL[level] ?? level}</span>
+}
+
+function fmtClock(ts) {
+  return ts ? new Date(ts * 1000).toLocaleTimeString() : ''
+}
+
+function RunReport({ run, openRequest }) {
+  const [showSteps, setShowSteps] = useState(false)
+  return (
+    <div className="run-report">
+      <div className="meta">
+        {fmtClock(run.started_at)}
+        {run.ended_at ? ` · ${fmtSec(run.ended_at - run.started_at)}` : ' · berjalan…'}
+        {run.request_ids.length > 0 && ' · '}
+        {run.request_ids.map((rid) => (
+          <button key={rid} className="link rid-link" onClick={() => openRequest(rid)}>
+            {rid}
+          </button>
+        ))}
+      </div>
+      {run.checks.length > 0 && (
+        <table className="checks">
+          <tbody>
+            {run.checks.map((c, i) => (
+              <tr key={i} className={`check-${c.level}`}>
+                <td>
+                  <LevelPill level={c.level} />
+                </td>
+                <td>
+                  <div>{c.label}</div>
+                  {c.detail && <div className="meta detail">{c.detail}</div>}
+                </td>
+                <td className="meta t">t+{c.t} dtk</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <button className="link small-link" onClick={() => setShowSteps(!showSteps)}>
+        {showSteps ? 'sembunyikan' : 'lihat'} langkah ({run.steps.length})
+      </button>
+      {(showSteps || run.status === 'running' || run.status === 'error') && (
+        <ol className="steps">
+          {run.steps.map((s, i) => (
+            <li key={i} className={s.text.startsWith('ERROR') ? 'error' : ''}>
+              <span className="meta">t+{s.t}</span> {s.text}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+function ChaosPanel({ chaos, reload }) {
+  const [service, setService] = useState('structuring')
+  const [action, setAction] = useState('stop')
+  const [seconds, setSeconds] = useState(20)
+  const [error, setError] = useState(null)
+
+  async function disrupt(e) {
+    e.preventDefault()
+    setError(null)
+    const r = await fetch('/api/chaos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service, action, seconds }),
+    })
+    if (!r.ok) setError((await r.json()).detail ?? r.statusText)
+    reload()
+  }
+
+  async function startNow(name) {
+    await fetch(`/api/chaos/${name}/start`, { method: 'POST' })
+    reload()
+  }
+
+  if (!chaos) return null
+  const disrupted = new Set(chaos.disruptions.map((d) => d.service))
+  return (
+    <>
+      <div className="backlog">
+        {chaos.containers.map((c) => (
+          <div key={c.service} className={`backlog-item ${c.status !== 'running' ? 'bad' : ''}`}>
+            <span className="k">{c.service}</span>
+            <span className="v">
+              {c.status}
+              {c.health ? ` · ${c.health}` : ''}
+              {c.status !== 'running' && c.status !== 'missing' && (
+                <>
+                  {' '}
+                  <button className="link" onClick={() => startNow(c.service)}>
+                    nyalakan
+                  </button>
+                </>
+              )}
+              {disrupted.has(c.service) && ' · diganggu'}
+            </span>
+          </div>
+        ))}
+      </div>
+      <form onSubmit={disrupt} className="chaos-form">
+        <label className="field wide">
+          service
+          <select value={service} onChange={(e) => setService(e.target.value)}>
+            {CHAOS_SERVICES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field wide">
+          cara
+          <select value={action} onChange={(e) => setAction(e.target.value)}>
+            <option value="stop">SIGTERM (rolling restart, drain dulu)</option>
+            <option value="kill">SIGKILL (OOM / node hilang)</option>
+          </select>
+        </label>
+        <label className="field">
+          mati selama (dtk)
+          <input type="number" min="1" max="600" value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} />
+        </label>
+        <button disabled={!chaos.available}>Ganggu</button>
+      </form>
+      <div className="hint small">
+        Untuk dicoba manual sambil mengirim dokumen di menu Pipeline; gangguannya ikut tercatat di timeline request yang sedang hidup. SIGTERM menunggu
+        grace {chaos.stop_grace_seconds} dtk seperti terminationGracePeriodSeconds di chart.
+      </div>
+      {error && <div className="error">{error}</div>}
+    </>
+  )
+}
+
+function Scenarios({ nav, overview, openRequest }) {
+  const [data, setData] = useState(null)
+  const [chaos, setChaos] = useState(null)
+  const [image, setImage] = useState('')
+  const [error, setError] = useState(null)
+  const [open, setOpen] = useState({})
+
+  const load = () =>
+    fetch('/api/scenarios')
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d)
+        setImage((current) => current || d.images[0] || '')
+      })
+      .catch(() => {})
+  const loadChaos = () =>
+    fetch('/api/chaos')
+      .then((r) => r.json())
+      .then(setChaos)
+      .catch(() => {})
+
+  useEffect(() => {
+    load()
+    loadChaos()
+    const timer = setInterval(() => {
+      load()
+      loadChaos()
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [])
+
+  async function run(ids) {
+    setError(null)
+    const r = await fetch('/api/scenarios/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenarios: ids, image }),
+    })
+    if (!r.ok) setError((await r.json()).detail ?? r.statusText)
+    load()
+  }
+
+  async function stopRun() {
+    await fetch('/api/scenarios/stop', { method: 'POST' })
+    load()
+  }
+
+  const running = Boolean(data?.running)
+  const settings = data?.settings
+  const scenarios = data?.scenarios ?? []
+  const totals = { pass: 0, warn: 0, fail: 0, error: 0, never: 0 }
+  for (const s of scenarios) {
+    const status = s.last?.status
+    if (!status) totals.never += 1
+    else if (status in totals) totals[status] += 1
+  }
+  const longLease = settings && settings.job_lease_seconds > 60
+
+  return (
+    <div className="app">
+      <aside>
+        <h1>NPWP pipeline tracker</h1>
+        {nav}
+        {data && !data.available && (
+          <div className="error">Skenario hanya di mode lokal (docker compose). Komentari blok GKE di tools/tracker/.env.</div>
+        )}
+        <label className="field wide">
+          dokumen uji (harus lolos guardrails dan aturan structuring)
+          <select value={image} onChange={(e) => setImage(e.target.value)}>
+            {(data?.images ?? []).map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="actions">
+          <button className="small" disabled={running || !data?.available} onClick={() => run(null)}>
+            Jalankan semua
+          </button>
+          {running && (
+            <button className="small danger" onClick={stopRun}>
+              Hentikan
+            </button>
+          )}
+        </div>
+        {settings && (
+          <>
+            <h2>Pengaturan yang dipakai</h2>
+            <ul className="facts">
+              <li>
+                <span className="k">batas tunggu</span>
+                {settings.wait_seconds} dtk
+              </li>
+              <li>
+                <span className="k">grace SIGTERM</span>
+                {settings.stop_grace_seconds} dtk
+              </li>
+              <li>
+                <span className="k">drain job</span>
+                {settings.drain_seconds} dtk
+              </li>
+              <li>
+                <span className="k">lease job</span>
+                {settings.job_lease_seconds} dtk
+              </li>
+              <li>
+                <span className="k">reaper tiap</span>
+                {settings.stale_job_interval_seconds} dtk
+              </li>
+              <li>
+                <span className="k">callback lambat</span>
+                {settings.callback_slow_seconds} dtk
+              </li>
+            </ul>
+            {longLease && (
+              <div className="hint small warn-box">
+                Lease {settings.job_lease_seconds} dtk: skenario crash dan database menunggu reaper &gt; {fmtSec(settings.job_lease_seconds)}. Untuk latihan isi{' '}
+                <code>PIPELINE_JOB_LEASE_SECONDS=30</code> dan <code>PIPELINE_STALE_JOB_INTERVAL_SECONDS=5</code> di services/*/.env, lalu{' '}
+                <code>TRACKER_JOB_LEASE_SECONDS=30</code> dan <code>TRACKER_STALE_JOB_INTERVAL_SECONDS=5</code> di tools/tracker/.env.
+              </div>
+            )}
+          </>
+        )}
+        <h2>Gangguan manual</h2>
+        <ChaosPanel chaos={chaos} reload={loadChaos} />
+        <h2>Backlog outbox tiap service</h2>
+        <Backlog overview={overview} />
+      </aside>
+      <main>
+        <div className="head">
+          <h2 className="inline">Uji kesiapan: apa yang terjadi kalau sesuatu rusak</h2>
+          <span className="meta">
+            {totals.pass} PASS · {totals.warn} WARN · {totals.fail} FAIL
+            {totals.error ? ` · ${totals.error} ERROR` : ''}
+            {totals.never ? ` · ${totals.never} belum dijalankan` : ''}
+          </span>
+        </div>
+        <p className="hint small">
+          Tiap skenario mengirim dokumen sungguhan lewat orchestrator, membuat gangguannya pada saat yang tepat, lalu memeriksa database, outbox, dan callback.
+          PASS = sesuai harapan; WARN = perilakunya benar tapi harus diketahui tim atau Orkestrasi pusat; FAIL = harus diperbaiki sebelum go-live. Satu run pada
+          satu waktu; di akhir tiap skenario container dinyalakan lagi dan callback kembali normal.
+        </p>
+        {error && <div className="error">{error}</div>}
+        {scenarios.map((s) => {
+          const last = s.last
+          const status = last?.status
+          const expanded = open[s.id] ?? ['running', 'fail', 'error', 'warn'].includes(status)
+          return (
+            <section key={s.id} className={`panel scenario scenario-${status ?? 'never'}`}>
+              <div className="panel-head">
+                <div>
+                  <div className="scenario-title">
+                    {status ? <LevelPill level={status} /> : <span className="pill idle">BELUM</span>} {s.title}
+                    {s.needs_lease && <span className="tag">butuh lease pendek</span>}
+                  </div>
+                  <div className="meta">{s.simulates}</div>
+                  <div className="meta">
+                    <b>Siap berarti:</b> {s.expect}
+                  </div>
+                </div>
+                <div className="actions">
+                  {last && (
+                    <button className="link" onClick={() => setOpen({ ...open, [s.id]: !expanded })}>
+                      {expanded ? 'tutup' : 'hasil'}
+                    </button>
+                  )}
+                  <button className="small" disabled={running || !data?.available} onClick={() => run([s.id])}>
+                    Jalankan
+                  </button>
+                </div>
+              </div>
+              {last && expanded && <RunReport run={last} openRequest={openRequest} />}
+            </section>
+          )
+        })}
       </main>
     </div>
   )

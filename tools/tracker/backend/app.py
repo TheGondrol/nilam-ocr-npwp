@@ -4,12 +4,16 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
 
     POST /api/requests               upload dokumen -> orchestrator /v1/extract-ocr (tunggu PIPELINE_WAIT_SECONDS),
                                      opsional dengan pipeline_name_sequence (JSON array) untuk memilih service
-    POST /v1/callbacks/stage         dipanggil relay extraction / structuring / scoring (ORCHESTRATION_URL)
+    POST /v1/callbacks/stage         dipanggil relay extraction / structuring / scoring, format stage
+    POST /v1/ocr-callback            sama, format result (ORCHESTRATION_CALLBACK_FORMAT=result, seperti di dev)
+    GET  /api/files/{token}/{nama}   dokumen yang dikirim sebagai file_url (seperti Orkestrasi pusat)
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
     POST /api/requests/{id}/outbox/release   lepaskan dead letter request itu (failed_at = NULL)
-    GET/PUT /api/simulation          bagaimana tracker menjawab callback: ok | down (503) | reject (422),
+    GET/PUT /api/simulation          bagaimana tracker menjawab callback: ok | down (503) | reject (422) |
+                                     unauthorized (401) | slow (200 setelah timeout relay) | flaky (503 lalu 200),
                                      dan reject threshold guardrails yang dibagikan (default 0.5)
+    /api/chaos, /api/scenarios       gangguan container dan skenario uji kesiapan (chaos.py, mode lokal)
     GET  /v1/thresholds/guardrails   DUMMY endpoint threshold Orkestrasi pusat (GUARDRAILS_THRESHOLD_URL)
     GET  /api/outbox                 backlog outbox tiap service (GET /v1/<tahap>/outbox)
 
@@ -20,7 +24,8 @@ Setiap event punya `type`:
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED; GUARDRAILS SKIPPED kalau tidak ada di
               sequence), `source`: db | callback. Request berakhir di tahap terakhir sequence-nya
     outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
-    callback  tiap callback yang datang ke tracker, dengan attempt ke-n dan jawaban tracker
+    callback  tiap callback yang datang ke tracker, dengan attempt ke-n, jawaban tracker, dan duplicate
+    chaos     gangguan yang terjadi selama request hidup (container di-stop / di-kill / dinyalakan, DB tak terbaca)
     pipeline  END: tidak ada lagi yang akan terjadi untuk request ini
 
 Baris outbox dan status job dibaca langsung dari PostgreSQL (TRACKER_DATABASE_URL),
@@ -38,10 +43,12 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, cast
+from urllib.parse import quote
 
+import chaos
 import httpx
 import loadtest
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -100,7 +107,21 @@ DB_URL = os.environ.get("TRACKER_DATABASE_URL") or (
 DB_INTERVAL = float(os.environ.get("TRACKER_DB_INTERVAL", "0.25"))
 DB_WATCH_TIMEOUT = float(os.environ.get("TRACKER_DB_WATCH_TIMEOUT", "900"))
 
-CALLBACK_MODES = {"ok": 200, "down": 503, "reject": 422}
+# Jawaban tracker (sebagai Orkestrasi pusat) untuk callback. slow: 200, tapi baru setelah
+# CALLBACK_SLOW_SECONDS, di atas ORCHESTRATION_TIMEOUT_SECONDS relay (10): relay menganggapnya gagal (504) dan
+# mengirim ulang, padahal tracker sudah mencatatnya, jadi Orkestrasi menerima duplikat. flaky: 503 untuk
+# CALLBACK_FLAKY_FAILURES kedatangan pertama tiap pesan, sesudahnya 200.
+CALLBACK_MODES = {"ok": 200, "down": 503, "reject": 422, "unauthorized": 401, "slow": 200, "flaky": 200}
+CALLBACK_SLOW_SECONDS = float(os.environ.get("TRACKER_CALLBACK_SLOW_SECONDS", "12"))
+CALLBACK_FLAKY_FAILURES = int(os.environ.get("TRACKER_CALLBACK_FLAKY_FAILURES", "2"))
+# Kalau diisi, /v1/ocr-callback memeriksa X-Callback-Key seperti Orkestrasi pusat (401 kalau beda).
+CALLBACK_KEY = os.environ.get("TRACKER_CALLBACK_KEY") or None
+REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
+# file_url yang diberikan ke orchestrator: harus terjangkau dari container (lokal saja).
+FILE_BASE_URL = (
+    os.environ.get("TRACKER_FILE_BASE_URL") or f"http://host.docker.internal:{os.environ.get('PORT', '8090')}"
+)
+MAX_FILES = 200
 
 
 @asynccontextmanager
@@ -125,6 +146,7 @@ redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=XREAD_BL
 http = httpx.AsyncClient(timeout=120.0, headers={"X-API-Key": API_KEY} if API_KEY else {})
 simulation: dict[str, Any] = {"callback": "ok", "guardrails_threshold": 0.5, "guardrails_threshold_target": "reject"}
 watchers: dict[str, asyncio.Task[None]] = {}
+files: dict[str, tuple[bytes, str]] = {}  # token -> (isi, content type) untuk file_url
 pool: Any = None
 db_error: str | None = None
 
@@ -232,6 +254,7 @@ async def get_pool():
 
 loadtest.configure(redis=redis, get_pool=get_pool, wait_seconds=WAIT_SECONDS, tables=TABLES)
 app.include_router(loadtest.router)
+app.include_router(chaos.router)
 
 
 async def fetch_result(stage: str, request_id: str) -> Any:
@@ -291,18 +314,29 @@ async def watch_db(request_id: str) -> None:
     seen_rows: dict[int, dict[str, Any]] = {}
     rejected = False
     deadline = time.time() + DB_WATCH_TIMEOUT
+    db_down = False
     while time.time() < deadline:
-        async with db.acquire() as conn:
-            jobs = {}
-            for stage, table in TABLES.items():
-                jobs[stage] = await conn.fetchrow(
-                    f"SELECT status, attempts, error_message FROM {table}_jobs WHERE request_id = $1", request_id
+        try:
+            async with db.acquire() as conn:
+                jobs = {}
+                for stage, table in TABLES.items():
+                    jobs[stage] = await conn.fetchrow(
+                        f"SELECT status, attempts, error_message FROM {table}_jobs WHERE request_id = $1", request_id
+                    )
+                rows = await conn.fetch(
+                    "SELECT id, stage, kind, payload, attempts, next_attempt_at, failed_at, last_error, created_at "
+                    "FROM pipeline_outbox WHERE request_id = $1 ORDER BY id",
+                    request_id,
                 )
-            rows = await conn.fetch(
-                "SELECT id, stage, kind, payload, attempts, next_attempt_at, failed_at, last_error, created_at "
-                "FROM pipeline_outbox WHERE request_id = $1 ORDER BY id",
-                request_id,
-            )
+        except Exception as exc:  # noqa: BLE001 - skenario Postgres mati: tunggu sampai terbaca lagi
+            if not db_down:
+                db_down = True
+                await emit(request_id, "DATABASE", "DOWN", type="chaos", error_message=f"{type(exc).__name__}: {exc}")
+            await asyncio.sleep(1.0)
+            continue
+        if db_down:
+            db_down = False
+            await emit(request_id, "DATABASE", "UP", type="chaos")
 
         for stage, job in jobs.items():
             if job is None:
@@ -424,24 +458,52 @@ async def poll_stages(request_id: str, stages: list[str]) -> None:
 # --- the orchestrator's one call -------------------------------------------------
 
 
-@app.post("/api/requests")
-async def submit(
-    file: UploadFile = File(...),
-    document_type: str = Form("npwp"),
-    slow_seconds: int = Form(0),
-    pipeline_name_sequence: str = Form(""),
-):
-    sequence = parse_sequence(pipeline_name_sequence)
+def store_file(content: bytes, filename: str, content_type: str) -> str:
+    """Simpan dokumen untuk dikirim sebagai file_url, seperti Orkestrasi pusat (MinIO); URL-nya diunduh
+    orchestrator untuk guardrails dan extraction, dan sekali lagi oleh extraction kalau job-nya dijalankan ulang."""
+    token = uuid.uuid4().hex
+    files[token] = (content, content_type)
+    while len(files) > MAX_FILES:
+        files.pop(next(iter(files)))
+    return f"{FILE_BASE_URL}/api/files/{token}/{quote(filename)}"
+
+
+@app.get("/api/files/{token}/{filename}")
+async def serve_file(token: str, filename: str):
+    item = files.get(token)
+    if item is None:
+        raise HTTPException(status_code=404, detail="file tidak ada (tracker di-restart, atau sudah tergusur)")
+    content, content_type = item
+    return Response(content=content, media_type=content_type)
+
+
+async def run_request(
+    content: bytes,
+    filename: str,
+    content_type: str,
+    *,
+    document_type: str = "npwp",
+    slow_seconds: int = 0,
+    sequence: list[str] | None = None,
+    source: str = "upload",
+    request_id: str | None = None,
+    resend: bool | None = None,
+    origin: str | None = None,
+) -> dict[str, Any]:
+    """Satu panggilan orchestrator /v1/extract-ocr seperti Orkestrasi pusat, dengan event-event-nya. Dipakai
+    form upload dan skenario gangguan. `source`: upload (multipart `file`) atau file_url. `request_id` yang
+    sudah ada = kirim ulang request itu (uji idempotensi); `resend=False` untuk request_id baru yang dibuat
+    pemanggil. Tidak pernah raise untuk jawaban orchestrator; `unreachable` True kalau orchestrator tidak
+    terjangkau."""
     stages = pipeline_stages(sequence)
     with_guardrails = sequence is None or "guardrails" in sequence
-    request_id = f"REQ_{uuid.uuid4().hex[:12]}"
-    content = await file.read()
-    filename = file.filename or "upload"
+    if resend is None:
+        resend = request_id is not None
+    request_id = request_id or f"REQ_{uuid.uuid4().hex[:12]}"
     if slow_seconds > 0:
         # Hook lokal di extraction (ENVIRONMENT=local): tahap OCR ditunda sebelum bekerja,
         # supaya pipeline melewati PIPELINE_WAIT_SECONDS dan orchestrator menjawab 202.
         filename = f"delay{slow_seconds}s-{filename}"
-    content_type = file.content_type or "image/jpeg"
     await emit(
         request_id,
         "CLIENT",
@@ -452,6 +514,9 @@ async def submit(
         document_type=document_type,
         slow=slow_seconds,
         sequence=sequence,
+        source=source,
+        resend=resend,
+        origin=origin,
         callback_mode=simulation["callback"],
         wait_seconds=WAIT_SECONDS,
     )
@@ -461,23 +526,36 @@ async def submit(
     fields = {"request_id": request_id, "document_type": document_type}
     if sequence is not None:
         fields["pipeline_name_sequence"] = json.dumps(sequence)
+    upload = None
+    if source == "file_url":
+        fields["file_url"] = store_file(content, filename, content_type)
+    else:
+        upload = {"file": (filename, content, content_type)}
     started = time.perf_counter()
     try:
-        r = await http.post(
-            f"{ORCHESTRATOR_URL}/v1/extract-ocr", data=fields, files={"file": (filename, content, content_type)}
-        )
+        r = await http.post(f"{ORCHESTRATOR_URL}/v1/extract-ocr", data=fields, files=upload)
         body = r.json()
     except (httpx.HTTPError, ValueError) as exc:
         await emit(request_id, "GUARDRAILS", "FAILED", error_message=f"orchestrator unreachable: {exc}")
         stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
-        raise HTTPException(status_code=503, detail="orchestrator service unavailable") from exc
+        return {"request_id": request_id, "accepted": False, "unreachable": True, "reason": str(exc)}
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     # Service tempat jawaban ini berasal (guardrails / extraction / structuring / scoring); null kalau orchestrator
     # menolak sebelum memanggil satu pun (cek file, sequence, params).
     last_service = body.get("pipeline_last_stage")
+    answer = {
+        "request_id": request_id,
+        "http_status": r.status_code,
+        "job_status": body.get("job_status"),
+        "errors": body.get("errors"),
+        "message": body.get("message"),
+        "pipeline_last_stage": last_service,
+        "elapsed_ms": elapsed_ms,
+        "data": body.get("data"),
+    }
     rejector = None
-    if r.status_code == 400 and body.get("errors") == "DOWNSTREAM_VALIDATION_ERROR":
+    if r.status_code == 400 and body.get("errors") == REJECTED_CODE:
         # Orchestrator lama tanpa pipeline_last_stage: baca penolaknya dari GET status.
         rejector = last_service if last_service in ("guardrails", "structuring") else await rejected_by(request_id)
     await emit(
@@ -501,7 +579,7 @@ async def submit(
         await emit(request_id, "GUARDRAILS", "REJECTED", elapsed_ms=elapsed_ms, error_message=body.get("message"))
         stop_watcher(request_id)
         await emit(request_id, "PIPELINE", "END", type="pipeline")
-        return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
+        return {**answer, "accepted": False, "reason": body.get("message")}
     if rejector == "structuring":
         # OCR dan structuring jalan, lalu aturan structuring menolak. Kartu STRUCTURING menjadi REJECTED dari
         # watcher DB (atau polling), yang juga menutup request.
@@ -511,7 +589,7 @@ async def submit(
             await emit(request_id, "PIPELINE", "END", type="pipeline")
         elif POLL:
             asyncio.create_task(poll_stages(request_id, stages))
-        return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
+        return {**answer, "accepted": False, "reason": body.get("message")}
     # Pipeline jalan kalau jawabannya 200 / 202, atau 422 karena sebuah tahap gagal; 4xx / 5xx lain (cek file,
     # sequence tidak valid, service tidak terjangkau) berarti tidak ada tahap yang memulai job.
     pipeline_ran = r.status_code in (200, 202) or (
@@ -519,9 +597,11 @@ async def submit(
     )
     if not pipeline_ran:
         await emit(request_id, "GUARDRAILS", "FAILED", http_status=r.status_code, error_message=body.get("message"))
-        stop_watcher(request_id)
-        await emit(request_id, "PIPELINE", "END", type="pipeline")
-        return {"request_id": request_id, "accepted": False, "reason": body.get("message")}
+        # Kiriman ulang request yang sudah punya job: watcher-nya tetap memantau job itu.
+        if not resend:
+            stop_watcher(request_id)
+            await emit(request_id, "PIPELINE", "END", type="pipeline")
+        return {**answer, "accepted": False, "reason": body.get("message")}
     await emit(request_id, "GUARDRAILS", entry_status, elapsed_ms=elapsed_ms)
     if not stages:
         # ["guardrails"]: report guardrails adalah jawabannya, tidak ada tahap, callback, maupun baris DB.
@@ -530,62 +610,181 @@ async def submit(
         await emit(request_id, stages[0], "PROCESSING", source="orchestrator")
     if POLL and stages:
         asyncio.create_task(poll_stages(request_id, stages))
-    return {
-        "request_id": request_id,
-        "accepted": True,
-        "http_status": r.status_code,
-        "job_status": body.get("job_status"),
-    }
+    return {**answer, "accepted": True}
+
+
+@app.post("/api/requests")
+async def submit(
+    file: UploadFile = File(...),
+    document_type: str = Form("npwp"),
+    slow_seconds: int = Form(0),
+    pipeline_name_sequence: str = Form(""),
+    source: str = Form("upload"),
+    request_id: str = Form(""),
+):
+    if source not in ("upload", "file_url"):
+        raise HTTPException(status_code=422, detail="source harus upload atau file_url")
+    if source == "file_url" and TARGET != "local":
+        raise HTTPException(
+            status_code=422, detail="file_url hanya di mode lokal: pod di cluster tidak bisa mengunduh dari laptop"
+        )
+    content = await file.read()
+    out = await run_request(
+        content,
+        file.filename or "upload",
+        file.content_type or "image/jpeg",
+        document_type=document_type,
+        slow_seconds=slow_seconds,
+        sequence=parse_sequence(pipeline_name_sequence),
+        source=source,
+        request_id=request_id.strip() or None,
+    )
+    if out.get("unreachable"):
+        raise HTTPException(status_code=503, detail="orchestrator service unavailable")
+    out.pop("data", None)
+    return out
 
 
 # --- callbacks from the relays ---------------------------------------------------
 
 
-@app.post("/v1/callbacks/stage")
-async def callback(request: Request):
-    """Kontrak callback yang diusulkan repo ini: {request_id, stage, status, result, error_message}.
-    Jawaban tracker mengikuti simulasi: ok -> 200, down -> 503 (relay mengulang dengan backoff),
-    reject -> 422 (relay berhenti: dead letter)."""
-    body = await request.json()
+def callback_answer(mode: str, arrival: int, key_ok: bool) -> int:
+    """HTTP status tracker (sebagai Orkestrasi pusat) untuk kedatangan ke-`arrival` sebuah pesan callback."""
+    if not key_ok:
+        return 401
+    if mode == "flaky":
+        return 503 if arrival <= CALLBACK_FLAKY_FAILURES else 200
+    return CALLBACK_MODES[mode]
+
+
+def is_final(body: dict[str, Any]) -> bool:
+    """Callback yang mengakhiri request: FAILED di tahap mana pun, atau DONE tahap terakhir sequence-nya
+    (`final: true`; body lama tanpa field itu: hanya SCORING)."""
+    return body["status"] == "FAILED" or (
+        body["status"] == "DONE" and bool(body.get("final", body["stage"] == "SCORING"))
+    )
+
+
+async def callback_stats(request_id: str) -> dict[str, Any]:
+    """Berapa kali callback akhir request ini tiba dan diterima, dan keadaan akhir yang diterima berurutan
+    (DONE / FAILED), untuk cek duplikat dan keadaan akhir yang saling bertentangan."""
+    counts = await redis.hgetall(f"ocr:cbfinal:{request_id}")
+    statuses = await redis.lrange(f"ocr:cbfinal_status:{request_id}", 0, -1)
+    return {
+        "arrived": int(counts.get("arrived", 0)),
+        "accepted": int(counts.get("accepted", 0)),
+        "statuses": statuses,
+    }
+
+
+async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = True, payload: Any = None):
+    """Satu callback, sudah dalam bentuk stage `{request_id, stage, status, result, error_message, error_code,
+    final}`. Jawabannya mengikuti simulasi: ok -> 200, down -> 503 (relay mengulang dengan backoff), reject ->
+    422 / unauthorized -> 401 (relay berhenti: dead letter), slow -> dicatat lalu 200 setelah
+    CALLBACK_SLOW_SECONDS (relay sudah timeout dan akan mengirim ulang: duplikat), flaky -> 503 lalu 200."""
     request_id, stage, status = body["request_id"], body["stage"], body["status"]
     mode = simulation["callback"]
-    http_status = CALLBACK_MODES[mode]
-    if request_id.startswith("LT_"):
+    final = is_final(body)
+    message_key = f"{stage}:{status}"
+    load_test = request_id.startswith("LT_")
+    arrival = await redis.hincrby(f"ocr:callbacks:{request_id}", message_key, 1)
+    if load_test:
+        # Hanya untuk simulasi flaky; request load test bisa ribuan, jangan tinggalkan kuncinya.
+        await redis.expire(f"ocr:callbacks:{request_id}", 3600)
+    http_status = callback_answer(mode, arrival, key_ok)
+    accepted = http_status == 200
+    duplicate = False
+    if accepted and not load_test:
+        duplicate = await redis.hincrby(f"ocr:callbacks_ok:{request_id}", message_key, 1) > 1
+    if final and not load_test:
+        await redis.hincrby(f"ocr:cbfinal:{request_id}", "arrived", 1)
+        if accepted:
+            await redis.hincrby(f"ocr:cbfinal:{request_id}", "accepted", 1)
+            await redis.rpush(f"ocr:cbfinal_status:{request_id}", status)
+
+    if load_test:
         # Request dari load tester: dihitung terpisah, tidak masuk daftar request dan stream event.
-        await loadtest.record_callback(body, accepted=http_status == 200)
-        if http_status != 200:
-            return JSONResponse(
-                status_code=http_status, content={"detail": f"simulasi: orkestrasi menjawab {http_status}"}
+        await loadtest.record_callback(body, accepted=accepted)
+    else:
+        await emit(
+            request_id,
+            stage,
+            status,
+            type="callback",
+            attempt=arrival,
+            accepted=accepted,
+            duplicate=duplicate,
+            http_status=http_status,
+            mode=mode if key_ok else "key",
+            format=fmt,
+            final=final,
+            error_message=body.get("error_message"),
+            error_code=body.get("error_code"),
+            payload=payload,
+        )
+        if accepted:
+            result = body.get("result")
+            if status == "DONE" and result is None and stage in JOB_PATHS:
+                result = await fetch_result(stage, request_id)
+            await emit(
+                request_id, stage, status, source="callback", result=result, error_message=body.get("error_message")
             )
-        return {"ok": True}
-    attempt = await redis.hincrby(f"ocr:callbacks:{request_id}", f"{stage}:{status}", 1)
-    await emit(
-        request_id,
-        stage,
-        status,
-        type="callback",
-        attempt=attempt,
-        accepted=http_status == 200,
-        http_status=http_status,
-        mode=mode,
-        final=body.get("final", False),
-        error_message=body.get("error_message"),
-    )
-    if http_status != 200:
-        return JSONResponse(status_code=http_status, content={"detail": f"simulasi: orkestrasi menjawab {http_status}"})
-    result = body.get("result")
-    if status == "DONE" and result is None and stage in JOB_PATHS:
-        result = await fetch_result(stage, request_id)
-    await emit(request_id, stage, status, source="callback", result=result, error_message=body.get("error_message"))
-    # Tahap terakhir sequence menandai callback DONE-nya `final: true`; body lama tanpa field itu: hanya SCORING.
-    ends = status == "FAILED" or (status == "DONE" and body.get("final", stage == "SCORING"))
-    if pool is None and status == "DONE" and not ends:
-        following = next_stage(await request_sequence(request_id), stage)
-        if following:
-            await emit(request_id, following, "PROCESSING", source="callback")
-    if pool is None and not POLL and ends:
-        await emit(request_id, "PIPELINE", "END", type="pipeline")
-    return {}
+            if pool is None and status == "DONE" and not final:
+                following = next_stage(await request_sequence(request_id), stage)
+                if following:
+                    await emit(request_id, following, "PROCESSING", source="callback")
+            if pool is None and not POLL and final:
+                await emit(request_id, "PIPELINE", "END", type="pipeline")
+
+    if mode == "slow" and accepted:
+        # Dicatat di atas, tapi jawabannya datang setelah timeout relay.
+        await asyncio.sleep(CALLBACK_SLOW_SECONDS)
+    if not accepted:
+        detail = "X-Callback-Key salah" if not key_ok else f"simulasi: orkestrasi menjawab {http_status}"
+        return JSONResponse(status_code=http_status, content={"detail": detail})
+    return {"ok": True}
+
+
+@app.post("/v1/callbacks/stage")
+async def callback(request: Request):
+    """Callback format stage (ORCHESTRATION_CALLBACK_FORMAT=stage, default lokal): satu per tahap,
+    {request_id, stage, status, result, error_message, error_code, final}."""
+    body = await request.json()
+    return await receive_callback(body, fmt="stage")
+
+
+@app.post("/v1/ocr-callback")
+async def result_callback(request: Request):
+    """Callback format result, yang dipakai di dev (ORCHESTRATION_CALLBACK_FORMAT=result,
+    ORCHESTRATION_CALLBACK_PATH=/v1/ocr-callback): satu per request saat berakhir,
+    {request_id, status: completed | failed, result, guardrails, error_code, error_message}. Diterjemahkan ke
+    tahap yang mengakhirinya supaya kartu dan cek skenario sama dengan format stage."""
+    body = await request.json()
+    key_ok = CALLBACK_KEY is None or request.headers.get("x-callback-key") == CALLBACK_KEY
+    request_id = body["request_id"]
+    stages = pipeline_stages(await request_sequence(request_id)) or ["SCORING"]
+    if body.get("status") == "completed":
+        stage, status = stages[-1], "DONE"
+    else:
+        code = str(body.get("error_code") or "")
+        failed_stage = code.removesuffix("_FAILED")
+        if code == REJECTED_CODE:
+            stage = "STRUCTURING"
+        elif code.endswith("_FAILED") and failed_stage in TABLES:
+            stage = failed_stage
+        else:
+            stage = stages[-1]
+        status = "FAILED"
+    stage_body = {
+        "request_id": request_id,
+        "stage": stage,
+        "status": status,
+        "result": None,  # hasil tahapnya dibaca dari service; body result-nya ikut sebagai payload
+        "error_message": body.get("error_message"),
+        "error_code": body.get("error_code"),
+        "final": True,
+    }
+    return await receive_callback(stage_body, fmt="result", key_ok=key_ok, payload=body)
 
 
 # --- simulation, outbox, listing ----------------------------------------------
@@ -593,7 +792,16 @@ async def callback(request: Request):
 
 @app.get("/api/simulation")
 async def get_simulation():
-    return {**simulation, "wait_seconds": WAIT_SECONDS, "database": pool is not None, "database_error": db_error}
+    return {
+        **simulation,
+        "wait_seconds": WAIT_SECONDS,
+        "database": pool is not None,
+        "database_error": db_error,
+        "callback_slow_seconds": CALLBACK_SLOW_SECONDS,
+        "callback_flaky_failures": CALLBACK_FLAKY_FAILURES,
+        "callback_key": CALLBACK_KEY is not None,
+        "target": TARGET,
+    }
 
 
 @app.put("/api/simulation")
@@ -718,6 +926,39 @@ async def health():
         "simulation": simulation,
         "services": services,
     }
+
+
+async def set_callback_mode(mode: str) -> None:
+    simulation["callback"] = mode
+    log.info("simulation: callback=%s", mode)
+
+
+def live_requests() -> list[str]:
+    return [request_id for request_id, task in watchers.items() if not task.done()]
+
+
+chaos.configure(
+    redis=redis,
+    get_pool=get_pool,
+    run_request=run_request,
+    set_callback_mode=set_callback_mode,
+    callback_stats=callback_stats,
+    emit=emit,
+    live_requests=live_requests,
+    service_urls={
+        "orchestrator": ORCHESTRATOR_URL,
+        "guardrails": SERVICES["GUARDRAILS"],
+        "extraction": SERVICES["OCR"],
+        "structuring": SERVICES["STRUCTURING"],
+        "scoring": SERVICES["SCORING"],
+    },
+    http=http,
+    images_dir=loadtest.LT_DIR / "images",
+    target=TARGET,
+    wait_seconds=WAIT_SECONDS,
+    callback_slow_seconds=CALLBACK_SLOW_SECONDS,
+    flaky_failures=CALLBACK_FLAKY_FAILURES,
+)
 
 
 if __name__ == "__main__":
