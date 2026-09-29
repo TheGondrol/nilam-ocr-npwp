@@ -2,7 +2,7 @@ import io
 
 from PIL import Image, UnidentifiedImageError
 
-from ocr_common.errors import BadRequest
+from ocr_common.errors import UNREADABLE_FILE, BadRequest
 
 
 def render_pages(content_type: str | None, content: bytes, *, dpi: int, max_pages: int) -> list[Image.Image]:
@@ -18,7 +18,7 @@ def _open_image(content: bytes) -> Image.Image:
         image = Image.open(io.BytesIO(content))
         image.load()
     except (UnidentifiedImageError, OSError) as exc:
-        raise BadRequest("Uploaded file is not a readable image") from exc
+        raise BadRequest("Uploaded file is not a readable image", UNREADABLE_FILE) from exc
     return image.convert("RGB")
 
 
@@ -28,12 +28,12 @@ def _render_pdf(content: bytes, *, dpi: int, max_pages: int) -> list[Image.Image
     try:
         document = fitz.open(stream=content, filetype="pdf")
     except Exception as exc:
-        raise BadRequest("Uploaded file is not a readable PDF") from exc
+        raise BadRequest("Uploaded file is not a readable PDF", UNREADABLE_FILE) from exc
 
     pages: list[Image.Image] = []
     with document:
         if document.page_count == 0:
-            raise BadRequest("PDF has no pages")
+            raise BadRequest("PDF has no pages", UNREADABLE_FILE)
         zoom = dpi / 72.0
         for index in range(min(document.page_count, max_pages)):
             pixmap = document[index].get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)

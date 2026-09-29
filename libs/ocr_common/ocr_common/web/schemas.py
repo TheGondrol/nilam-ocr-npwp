@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ocr_common.errors import error_code
 from ocr_common.web.envelope import envelope
 
 REQUEST_ID_EXAMPLE = "REQ_9cb01af2-493d-446d-b191-af120333f6d0"
@@ -177,7 +178,7 @@ def error(
         "description": description,
         "content": {
             "application/json": {
-                "example": envelope(status_code, message, None, request_id, errors=errors or message),
+                "example": envelope(status_code, message, None, request_id, errors=error_code(status_code, errors)),
             }
         },
     }

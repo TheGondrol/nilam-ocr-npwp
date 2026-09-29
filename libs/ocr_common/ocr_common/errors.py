@@ -3,17 +3,51 @@ any of them into the standard error envelope in one exception handler, so routes
 and never translate.
 
 Use the named subclasses when raising; `ServiceError(status_code, message)` itself is for the one
-case where the status is data (a remote service's 4xx passed through unchanged)."""
+case where the status is data (a remote service's 4xx passed through unchanged).
+
+`code` is the stable, machine-readable value of the envelope's `errors` (the API spec's Error Codes): the
+client branches on it, never on the wording of `message`. Without one, `error_code` falls back to the code of
+the status."""
+
+# The code of an error raised without a more precise one.
+DEFAULT_CODES = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "REQUEST_ID_NOT_FOUND",
+    409: "CONFLICT",
+    413: "FILE_TOO_LARGE",
+    422: "VALIDATION_ERROR",
+    500: "INTERNAL_SERVER_ERROR",
+    503: "DOWNSTREAM_UNAVAILABLE",
+    504: "DOWNSTREAM_TIMEOUT",
+}
+
+# The codes of the document checks (400, 413).
+EMPTY_FILE = "EMPTY_FILE"
+UNSUPPORTED_FILE_TYPE = "UNSUPPORTED_FILE_TYPE"
+UNREADABLE_FILE = "UNREADABLE_FILE"
+TOO_MANY_PAGES = "TOO_MANY_PAGES"
+INVALID_FILE_SOURCE = "INVALID_FILE_SOURCE"
+FILE_URL_REJECTED = "FILE_URL_REJECTED"
+FILE_TOO_LARGE = "FILE_TOO_LARGE"
+
+
+def error_code(status_code: int, code: str | None = None) -> str:
+    """`code`, else the default code of `status_code` (`ERROR` for a status without one)."""
+    return code or DEFAULT_CODES.get(status_code, "ERROR")
 
 
 class ServiceError(Exception):
-    """A failure with a known HTTP status. `message` is safe to show to the caller."""
+    """A failure with a known HTTP status. `message` is safe to show to the caller; `code` is the stable
+    `errors` value (None: the default code of the status)."""
 
     status_code: int = 500
 
-    def __init__(self, status_code: int, message: str):
+    def __init__(self, status_code: int, message: str, code: str | None = None):
         self.status_code = status_code
         self.message = message
+        self.code = code
         super().__init__(message)
 
     @property
@@ -23,8 +57,8 @@ class ServiceError(Exception):
 
 
 class _StatusError(ServiceError):
-    def __init__(self, message: str):
-        super().__init__(type(self).status_code, message)
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(type(self).status_code, message, code)
 
 
 class BadRequest(_StatusError):

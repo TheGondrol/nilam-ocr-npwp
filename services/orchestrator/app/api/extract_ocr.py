@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
+from ocr_common.errors import UNREADABLE_FILE
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
 from ocr_common.npwp import COLUMN_THRESHOLD_DESCRIPTION, DOCUMENT_TYPE, column_thresholds_from_json
 from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
@@ -157,6 +158,15 @@ def _parse_guardrails_threshold(value: str | None, tendency: str | None) -> Guar
     return GuardrailsThreshold(threshold, TENDENCIES[tendency])
 
 
+# `errors` when calling a pipeline service failed, by the status it failed with.
+STAGE_ERROR_CODES = {
+    400: UNREADABLE_FILE,  # guardrails could not read the file (the type and size were checked here)
+    500: "DOWNSTREAM_SERVER_ERROR",
+    503: "DOWNSTREAM_UNAVAILABLE",
+    504: "DOWNSTREAM_TIMEOUT",
+}
+
+
 def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, params: Any) -> dict[str, Any]:
     """The answer when calling a pipeline service failed (unreachable, timed out, refused the file, answered
     wrongly): the error envelope's status and message, in the extract-ocr shape, naming that service."""
@@ -165,7 +175,7 @@ def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, p
     return extract_body(
         exc.status_code,
         exc.message,
-        errors=exc.message,
+        errors=STAGE_ERROR_CODES.get(exc.status_code, "DOWNSTREAM_BAD_REQUEST"),
         request_id=request_id,
         document_type=document_type,
         params=params,
@@ -175,7 +185,7 @@ def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, p
 
 def _stage_error_response(code: int, description: str, service: str, message: str) -> dict[str, Any]:
     example = extract_body(
-        code, message, errors=message, request_id=RID, document_type="npwp", pipeline_last_stage=service
+        code, message, errors=STAGE_ERROR_CODES[code], request_id=RID, document_type="npwp", pipeline_last_stage=service
     )
     return {
         "model": ExtractOcrResponse,

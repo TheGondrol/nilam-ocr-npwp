@@ -1,7 +1,7 @@
 """The checks every uploaded document goes through before a model sees it."""
 
 from ocr_common.config import BaseServiceSettings
-from ocr_common.errors import BadRequest, PayloadTooLarge
+from ocr_common.errors import EMPTY_FILE, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, BadRequest, PayloadTooLarge
 
 # Asked for by the ML team: an NPWP document is typically 1-2 MB, a few reach 2.1 MB, so anything
 # larger than the limit is refused before any model runs, with a message the client can show as is.
@@ -21,8 +21,10 @@ def validate_image(content_type: str | None, content: bytes, settings: BaseServi
     """
     content_type = (content_type or "").lower()
     if content_type not in settings.allowed_content_types:
-        raise BadRequest(f"Unsupported content type: {content_type or 'unknown'}")
+        raise BadRequest(f"Unsupported content type: {content_type or 'unknown'}", UNSUPPORTED_FILE_TYPE)
     if not content:
-        raise BadRequest("Uploaded file is empty")
+        raise BadRequest("Uploaded file is empty", EMPTY_FILE)
     if len(content) > settings.max_upload_bytes:
-        raise PayloadTooLarge(PAYLOAD_TOO_LARGE_MESSAGE.format(limit=upload_limit_label(settings.max_upload_bytes)))
+        raise PayloadTooLarge(
+            PAYLOAD_TOO_LARGE_MESSAGE.format(limit=upload_limit_label(settings.max_upload_bytes)), FILE_TOO_LARGE
+        )

@@ -1,9 +1,10 @@
 """Receiving a document: as an uploaded `file`, or as a `file_url` this service downloads."""
 
-from fastapi import File, Form, HTTPException, Request, UploadFile
+from fastapi import File, Form, Request, UploadFile
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ocr_common.clients.fetch_url import FetchUrlError, fetch
+from ocr_common.errors import FILE_URL_REJECTED, INVALID_FILE_SOURCE, BadRequest
 
 FileField = File(None, description="Document image (JPEG/PNG/PDF). Omit when sending file_url.")
 FileUrlField = Form(
@@ -23,7 +24,7 @@ def resolve_intake(
     file_url = file_url or None
     upload = file if isinstance(file, StarletteUploadFile) and file.filename else None
     if (upload is None) == (file_url is None):
-        raise HTTPException(status_code=400, detail="Send exactly one of file or file_url")
+        raise BadRequest("Send exactly one of file or file_url", INVALID_FILE_SOURCE)
     return upload, file_url
 
 
@@ -38,6 +39,6 @@ async def read_image(
             settings = request.app.state.settings
             return await fetch(file_url, limit=settings.max_upload_bytes, policy=settings.file_url_policy)
         except FetchUrlError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise BadRequest(str(exc), FILE_URL_REJECTED) from exc
     assert upload is not None
     return await upload.read(), upload.filename or "", upload.content_type

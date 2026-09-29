@@ -295,18 +295,25 @@ callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
      "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
 
-Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lain):
+Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks yang bisa berubah:
 
 | Kode | `errors` | Arti | Pipeline jalan? |
 |---|---|---|---|
 | 400 | `UNSUPPORTED_DOCUMENT_TYPE` | `document_type` bukan `npwp` | tidak |
-| 400 | = `message` | file kosong, format salah, PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`), `file`/`file_url` dua-duanya / tidak ada, atau host `file_url` tidak diizinkan / tidak bisa diunduh | tidak |
-| 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
-| 401 | = `message` | `X-API-Key` salah | tidak |
+| 400 | `EMPTY_FILE` | file kosong | tidak |
+| 400 | `UNSUPPORTED_FILE_TYPE` | tipe file bukan JPEG / PNG / PDF | tidak |
+| 400 | `UNREADABLE_FILE` | file tidak bisa dibaca (PDF rusak / tanpa halaman, atau gambar yang tidak terbaca model guardrails; `pipeline_last_stage: guardrails`) | tidak |
+| 400 | `TOO_MANY_PAGES` | PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`) | tidak |
+| 400 | `INVALID_FILE_SOURCE` | `file` dan `file_url` dua-duanya, atau tidak ada | tidak |
+| 400 | `FILE_URL_REJECTED` | host `file_url` tidak diizinkan, atau tidak bisa diunduh | tidak |
+| 413 | `FILE_TOO_LARGE` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
+| 401 | `UNAUTHORIZED` | `X-API-Key` salah atau tidak ada | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `guardrails_tendency` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
-| 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
+| 500 | `DOWNSTREAM_SERVER_ERROR` | service internal (guardrails / extraction) menjawab tidak sesuai kontrak | tidak; kirim ulang aman |
+| 500 | `INTERNAL_SERVER_ERROR` | kesalahan tak terduga di orchestrator | tidak; kirim ulang aman |
+| 503 / 504 | `DOWNSTREAM_UNAVAILABLE` / `DOWNSTREAM_TIMEOUT` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 
 **Idempoten.** `request_id` yang sama dikirim ulang: guardrails dicek lagi, tetapi pipeline
 tidak menjalankan apa pun dua kali, kecuali percobaan sebelumnya berstatus `FAILED`, atau sudah
@@ -332,7 +339,7 @@ tidak datang.
 | ditolak model guardrails | 400 | `failed`, `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
 | `[guardrails]` saja, lolos | 200 | `completed` + laporan guardrails sebagai `data` | null |
 | satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
-| tidak dikenal | 404 | – | = `message` |
+| tidak dikenal | 404 | – | `REQUEST_ID_NOT_FOUND` |
 
 - `params` selalu `null` di sini (tidak disimpan); `document_type` selalu `npwp`.
 - Request yang tidak punya job di tahap mana pun dijawab dari putusan guardrails terakhirnya

@@ -30,24 +30,25 @@ info:
     \ or wrong key answers `401`. The services are reachable only from inside the cluster.\n\n**Envelope.**\
     \ Every JSON response, success or error, has the same shape:\n`{status_code, status_desc, message,\
     \ data, errors, request_id}`. `status_code` always equals the HTTP\nstatus. On success `errors` is\
-    \ null; on error `data` is null.\n\n**Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for\
-    \ `422`, otherwise the same text as\n`message`. `400` = the request or the document is unusable (do\
-    \ not retry unchanged). `401` = API key.\n`404` = unknown request_id. `409` = request_id already processed\
-    \ (legacy contract only). `422` = a\nfield is missing or has the wrong type. `500` = this service\
-    \ or its model failed. `503` = a\ndependency is unreachable, `504` = it did not answer in time (both\
-    \ are safe to retry).\n\n**request_id.** Minted by the central orchestrator and carried through every\
-    \ stage. Where an endpoint has\nno request_id of its own, the `X-Request-ID` request header is used\
-    \ (and echoed in the response header);\nwithout it the service generates one.\n\n**Asynchronous stages**\
-    \ (internal: only the orchestrator NPWP and the previous stage call them). `POST\n.../jobs` answers\
-    \ `202` immediately and does the work in the background. The outcome is reported by a\ncallback to\
-    \ the central orchestrator (see *Webhooks*), and can be read at any time with\n`GET .../jobs/{request_id}`,\
-    \ which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}` combines\nover the three stages.\
-    \ Submitting the same request_id again is idempotent:\n`202` with `duplicate: true`, the work is not\
-    \ repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING` for longer than the job\
-    \ lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess running it died). A job\
-    \ still running when the service shuts down is reported `FAILED`. Because\nthe request was already\
-    \ answered `202`, a problem with the document itself (unreadable file, no text,\nunsupported document\
-    \ type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
+    \ null; on error `data` is null.\n\n**Errors.** `errors` is a stable, machine-readable code; branch\
+    \ on it, not on the wording of `message`.\nThe document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`,\
+    \ `UNREADABLE_FILE`, `TOO_MANY_PAGES`,\n`INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE`\
+    \ (413). Otherwise the code of the status:\n`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR`\
+    \ (422), `INTERNAL_SERVER_ERROR` (500),\n`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504),\
+    \ unless an endpoint documents a more precise one.\n`400` = the request or the document is unusable\
+    \ (do not retry unchanged). `503` / `504` are safe to retry.\n\n**request_id.** Minted by the central\
+    \ orchestrator and carried through every stage. Where an endpoint has\nno request_id of its own, the\
+    \ `X-Request-ID` request header is used (and echoed in the response header);\nwithout it the service\
+    \ generates one.\n\n**Asynchronous stages** (internal: only the orchestrator NPWP and the previous\
+    \ stage call them). `POST\n.../jobs` answers `202` immediately and does the work in the background.\
+    \ The outcome is reported by a\ncallback to the central orchestrator (see *Webhooks*), and can be\
+    \ read at any time with\n`GET .../jobs/{request_id}`, which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}`\
+    \ combines\nover the three stages. Submitting the same request_id again is idempotent:\n`202` with\
+    \ `duplicate: true`, the work is not repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING`\
+    \ for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess\
+    \ running it died). A job still running when the service shuts down is reported `FAILED`. Because\n\
+    the request was already answered `202`, a problem with the document itself (unreadable file, no text,\n\
+    unsupported document type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
 tags:
 - name: 1. Start the pipeline
   description: 'The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for
@@ -267,7 +268,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
           content:
@@ -278,7 +279,7 @@ paths:
                 status_code: 413
                 status_desc: Payload Too Large
                 message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
-                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: FILE_TOO_LARGE
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
             `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence`
@@ -311,7 +312,7 @@ paths:
                 status_code: 500
                 status_desc: Internal Server Error
                 message: guardrails service returned an unexpected response
-                errors: guardrails service returned an unexpected response
+                errors: DOWNSTREAM_SERVER_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: guardrails
@@ -326,7 +327,7 @@ paths:
                 status_code: 503
                 status_desc: Service Unavailable
                 message: extraction service is unavailable
-                errors: extraction service is unavailable
+                errors: DOWNSTREAM_UNAVAILABLE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: extraction
@@ -341,7 +342,7 @@ paths:
                 status_code: 504
                 status_desc: Gateway Timeout
                 message: extraction service timed out after 10.0s
-                errors: extraction service timed out after 10.0s
+                errors: DOWNSTREAM_TIMEOUT
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: extraction
@@ -518,7 +519,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
@@ -529,7 +530,7 @@ paths:
                 status_code: 404
                 status_desc: Not Found
                 message: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                errors: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                errors: REQUEST_ID_NOT_FOUND
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -556,7 +557,7 @@ paths:
                 status_code: 500
                 status_desc: Internal Server Error
                 message: 'structuring service error (401): Invalid or missing API key'
-                errors: 'structuring service error (401): Invalid or missing API key'
+                errors: DOWNSTREAM_SERVER_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: structuring
@@ -570,7 +571,7 @@ paths:
                 status_code: 503
                 status_desc: Service Unavailable
                 message: structuring service is unavailable
-                errors: structuring service is unavailable
+                errors: DOWNSTREAM_UNAVAILABLE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: structuring
@@ -584,7 +585,7 @@ paths:
                 status_code: 504
                 status_desc: Gateway Timeout
                 message: structuring service timed out after 10.0s
-                errors: structuring service timed out after 10.0s
+                errors: DOWNSTREAM_TIMEOUT
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 document_type: npwp
                 pipeline_last_stage: structuring

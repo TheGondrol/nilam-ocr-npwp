@@ -134,7 +134,7 @@ def test_more_than_two_pages_is_400_before_guardrails(client, auth, stub_guardra
 
     assert response.status_code == 400
     body = response.json()
-    assert (body["message"], body["errors"]) == (TOO_MANY_PAGES, TOO_MANY_PAGES)
+    assert (body["message"], body["errors"]) == (TOO_MANY_PAGES, "TOO_MANY_PAGES")
     assert "job_status" not in body
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
@@ -327,7 +327,7 @@ def test_without_guardrails_the_file_checks_still_run(client, auth, settings_ove
 def test_missing_api_key_returns_401_envelope(client):
     response = client.post("/v1/extract-ocr", data={"request_id": "OCR_7"}, files=image_upload())
     assert response.status_code == 401
-    assert response.json()["errors"] == "Invalid or missing API key"
+    assert (response.json()["message"], response.json()["errors"]) == ("Invalid or missing API key", "UNAUTHORIZED")
 
 
 @pytest.mark.parametrize(
@@ -374,7 +374,7 @@ def test_an_unreachable_service_is_named_in_the_error(client, auth, stub_guardra
     assert (body["pipeline_last_stage"], body["message"], body["errors"]) == (
         stage,
         f"{failing} service is unavailable",
-        f"{failing} service is unavailable",
+        "DOWNSTREAM_UNAVAILABLE",
     )
     assert (body["request_id"], body["params"]) == ("OCR_1", {"refno": "X1"})
 

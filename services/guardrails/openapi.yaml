@@ -23,15 +23,21 @@ info:
     status. On success `errors` is null; on error `data` is null.
 
 
-    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+    **Errors.** `errors` is a stable, machine-readable code; branch on it, not on the wording of `message`.
 
-    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+    The document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`, `UNREADABLE_FILE`, `TOO_MANY_PAGES`,
 
-    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+    `INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the
+    status:
 
-    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+    `UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR`
+    (500),
 
-    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+    `DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents a more precise
+    one.
+
+    `400` = the request or the document is unusable (do not retry unchanged). `503` / `504` are safe to
+    retry.
 
 
     **request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint
@@ -254,7 +260,7 @@ paths:
                 status_code: 400
                 status_desc: Bad Request
                 message: Uploaded file is not a readable image
-                errors: Uploaded file is not a readable image
+                errors: BAD_REQUEST
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -265,7 +271,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
         '422':
           description: Validation Error
           content:
@@ -287,7 +293,7 @@ paths:
                 status_code: 500
                 status_desc: Internal Server Error
                 message: guardrails model returned an unexpected response
-                errors: guardrails model returned an unexpected response
+                errors: INTERNAL_SERVER_ERROR
         '503':
           description: The guardrails model service (`remote`) is unreachable
           content:
@@ -298,7 +304,7 @@ paths:
                 status_code: 503
                 status_desc: Service Unavailable
                 message: guardrails model is unavailable
-                errors: guardrails model is unavailable
+                errors: DOWNSTREAM_UNAVAILABLE
         '504':
           description: The guardrails model service (`remote`) did not answer in time
           content:
@@ -309,7 +315,7 @@ paths:
                 status_code: 504
                 status_desc: Gateway Timeout
                 message: guardrails model timed out after 30.0s
-                errors: guardrails model timed out after 30.0s
+                errors: DOWNSTREAM_TIMEOUT
       security:
       - APIKeyHeader: []
 components:

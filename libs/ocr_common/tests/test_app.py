@@ -47,7 +47,7 @@ def test_missing_api_key_is_401_envelope():
     assert response.status_code == 401
     body = response.json()
     assert body["status_desc"] == "Unauthorized"
-    assert body["errors"] == "Invalid or missing API key"
+    assert (body["message"], body["errors"]) == ("Invalid or missing API key", "UNAUTHORIZED")
 
 
 @pytest.mark.parametrize("key", ["salah", "kk", "ké"])
@@ -225,3 +225,39 @@ def test_a_check_that_hangs_counts_as_failed(monkeypatch):
         await asyncio.sleep(5)
 
     assert _app_with_health({"database": hang}).get("/health").status_code == 503
+
+
+def test_every_error_carries_a_stable_code():
+    from ocr_common.errors import BadRequest, NotFound, PayloadTooLarge, UpstreamTimeout
+
+    errors = {
+        "empty": BadRequest("Uploaded file is empty", "EMPTY_FILE"),
+        "missing": NotFound("No request found for request_id X"),
+        "big": PayloadTooLarge("Ukuran dokumen melebihi batas 2,5 MB"),
+        "slow": UpstreamTimeout("model timed out"),
+    }
+    router = APIRouter()
+
+    @router.get("/boom/{name}")
+    async def boom(name: str):
+        if name == "bug":
+            raise RuntimeError("secret internals")
+        raise errors[name]
+
+    probe = TestClient(
+        create_app(settings=settings, title="Demo", description="demo", routers=[router]),
+        raise_server_exceptions=False,
+    )
+
+    codes = {name: probe.get(f"/boom/{name}").json()["errors"] for name in [*errors, "bug"]}
+
+    assert codes == {
+        "empty": "EMPTY_FILE",
+        "missing": "REQUEST_ID_NOT_FOUND",
+        "big": "FILE_TOO_LARGE",
+        "slow": "DOWNSTREAM_TIMEOUT",
+        "bug": "INTERNAL_SERVER_ERROR",
+    }
+    crash = probe.get("/boom/bug")
+    assert crash.status_code == 500 and crash.json()["status_desc"] == "Internal Server Error"
+    assert "secret" not in crash.text

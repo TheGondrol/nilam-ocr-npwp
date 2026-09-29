@@ -189,7 +189,7 @@ def test_check_unreadable_image_returns_400(client, auth):
 def test_missing_api_key_returns_401_envelope(client):
     response = client.post("/v1/guardrails/check", data={"request_id": "OCR_7"}, files=image_upload())
     assert response.status_code == 401
-    assert response.json()["errors"] == "Invalid or missing API key"
+    assert (response.json()["message"], response.json()["errors"]) == ("Invalid or missing API key", "UNAUTHORIZED")
 
 
 def test_the_entry_point_is_gone(client, auth):

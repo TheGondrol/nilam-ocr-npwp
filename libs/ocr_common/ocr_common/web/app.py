@@ -15,7 +15,7 @@ from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from ocr_common.config import BaseServiceSettings
-from ocr_common.errors import ServiceError
+from ocr_common.errors import ServiceError, error_code
 from ocr_common.web.envelope import envelope
 from ocr_common.web.logging import configure_logging
 from ocr_common.web.metrics import MetricsMiddleware, metrics_response
@@ -69,11 +69,12 @@ A missing or wrong key answers `401`. The services are reachable only from insid
 `{status_code, status_desc, message, data, errors, request_id}`. `status_code` always equals the HTTP
 status. On success `errors` is null; on error `data` is null.
 
-**Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
-`message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
-`404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
-field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
-dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+**Errors.** `errors` is a stable, machine-readable code; branch on it, not on the wording of `message`.
+The document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`, `UNREADABLE_FILE`, `TOO_MANY_PAGES`,
+`INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the status:
+`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),
+`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents a more precise one.
+`400` = the request or the document is unusable (do not retry unchanged). `503` / `504` are safe to retry.
 
 **request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint has
 no request_id of its own, the `X-Request-ID` request header is used (and echoed in the response header);
@@ -357,7 +358,9 @@ def _register_exception_handlers(app: FastAPI) -> None:
             logger.error("%s %s -> %d: %s", request.method, request.url.path, exc.status_code, exc.message)
         return JSONResponse(
             status_code=exc.status_code,
-            content=envelope(exc.status_code, exc.message, None, request_id, errors=exc.message),
+            content=envelope(
+                exc.status_code, exc.message, None, request_id, errors=error_code(exc.status_code, exc.code)
+            ),
         )
 
     @app.exception_handler(HTTPException)
@@ -365,7 +368,17 @@ def _register_exception_handlers(app: FastAPI) -> None:
         request_id = get_request_id(request)
         return JSONResponse(
             status_code=exc.status_code,
-            content=envelope(exc.status_code, str(exc.detail), None, request_id, errors=str(exc.detail)),
+            content=envelope(exc.status_code, str(exc.detail), None, request_id, errors=error_code(exc.status_code)),
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(request: Request, exc: Exception):
+        """A bug or an error nobody translated: logged with its traceback, answered in the envelope without
+        its details."""
+        logger.exception("%s %s crashed", request.method, request.url.path, exc_info=exc)
+        return JSONResponse(
+            status_code=500,
+            content=envelope(500, "Internal server error", None, get_request_id(request), errors=error_code(500)),
         )
 
     @app.exception_handler(RequestValidationError)

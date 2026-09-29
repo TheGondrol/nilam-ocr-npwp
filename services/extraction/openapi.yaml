@@ -23,15 +23,21 @@ info:
     status. On success `errors` is null; on error `data` is null.
 
 
-    **Errors.** `errors` is machine-readable: `VALIDATION_ERROR` for `422`, otherwise the same text as
+    **Errors.** `errors` is a stable, machine-readable code; branch on it, not on the wording of `message`.
 
-    `message`. `400` = the request or the document is unusable (do not retry unchanged). `401` = API key.
+    The document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`, `UNREADABLE_FILE`, `TOO_MANY_PAGES`,
 
-    `404` = unknown request_id. `409` = request_id already processed (legacy contract only). `422` = a
+    `INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the
+    status:
 
-    field is missing or has the wrong type. `500` = this service or its model failed. `503` = a
+    `UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR`
+    (500),
 
-    dependency is unreachable, `504` = it did not answer in time (both are safe to retry).
+    `DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents a more precise
+    one.
+
+    `400` = the request or the document is unusable (do not retry unchanged). `503` / `504` are safe to
+    retry.
 
 
     **request_id.** Minted by the central orchestrator and carried through every stage. Where an endpoint
@@ -258,7 +264,7 @@ paths:
                 status_code: 400
                 status_desc: Bad Request
                 message: Send exactly one of file or file_url
-                errors: Send exactly one of file or file_url
+                errors: BAD_REQUEST
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -269,7 +275,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
         '422':
           description: Validation Error
           content:
@@ -393,7 +399,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
@@ -404,7 +410,7 @@ paths:
                 status_code: 404
                 status_desc: Not Found
                 message: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
-                errors: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
+                errors: REQUEST_ID_NOT_FOUND
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
@@ -489,7 +495,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
       security:
       - APIKeyHeader: []
   /v1/extraction/outbox/release:
@@ -551,7 +557,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
@@ -562,7 +568,7 @@ paths:
                 status_code: 409
                 status_desc: Conflict
                 message: 'PIPELINE_OUTBOX is off: there is no outbox to release'
-                errors: 'PIPELINE_OUTBOX is off: there is no outbox to release'
+                errors: CONFLICT
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -648,7 +654,7 @@ paths:
                 status_code: 400
                 status_desc: Bad Request
                 message: Uploaded file is empty
-                errors: Uploaded file is empty
+                errors: BAD_REQUEST
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default)
           content:
@@ -659,7 +665,7 @@ paths:
                 status_code: 413
                 status_desc: Payload Too Large
                 message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
-                errors: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                errors: FILE_TOO_LARGE
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -670,7 +676,7 @@ paths:
                 status_code: 401
                 status_desc: Unauthorized
                 message: Invalid or missing API key
-                errors: Invalid or missing API key
+                errors: UNAUTHORIZED
         '500':
           description: OCR engine failed
           content:
@@ -681,7 +687,7 @@ paths:
                 status_code: 500
                 status_desc: Internal Server Error
                 message: 'extraction OCR model error (500): error: OpenCV ...'
-                errors: 'extraction OCR model error (500): error: OpenCV ...'
+                errors: INTERNAL_SERVER_ERROR
         '503':
           description: OCR model unreachable
           content:
@@ -692,7 +698,7 @@ paths:
                 status_code: 503
                 status_desc: Service Unavailable
                 message: extraction OCR model is unavailable
-                errors: extraction OCR model is unavailable
+                errors: DOWNSTREAM_UNAVAILABLE
         '504':
           description: OCR model did not answer in time
           content:
@@ -703,7 +709,7 @@ paths:
                 status_code: 504
                 status_desc: Gateway Timeout
                 message: extraction OCR model timed out after 30.0s
-                errors: extraction OCR model timed out after 30.0s
+                errors: DOWNSTREAM_TIMEOUT
         '422':
           description: Validation Error
           content:
