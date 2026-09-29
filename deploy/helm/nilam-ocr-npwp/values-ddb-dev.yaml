@@ -38,3 +38,10 @@ services:
   extraction:
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070
+  guardrails:
+    # Cluster dev penuh (node pool di ukuran maksimum, 29 Sep 2026): pod guardrails kedua (1 CPU, 1 Gi) saat
+    # surge tidak pernah dapat node, jadi helm --wait menunggu sampai timeout. Pod lama dimatikan dulu dan
+    # penggantinya memakai slotnya; guardrails tidak tersedia selama pod baru menyala (~30-60 dtk).
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1

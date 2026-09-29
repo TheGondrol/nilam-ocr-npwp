@@ -68,6 +68,8 @@ commonEnv:
 #                orchestrator; yang lain internal.
 #   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
 #   database   : butuh DATABASE_URL tanpa konfigurasi Orkestrasi (orchestrator: tabel guardrails_results).
+#   rollingUpdate: {maxSurge, maxUnavailable} saat rollout; default 1 / 0 (pod baru siap dulu, tanpa jeda).
+#                Cluster yang tidak punya ruang untuk pod tambahan: 0 / 1 (pod lama dimatikan dulu).
 #   upstreams  : service lain yang dipanggil; chart mengisi <NAMA>_SERVICE_URL dan NetworkPolicy dari sini.
 # Nama service dipakai sebagai nama port Kubernetes: maksimal 15 karakter, huruf kecil/angka, tanpa `-`.
 services:
