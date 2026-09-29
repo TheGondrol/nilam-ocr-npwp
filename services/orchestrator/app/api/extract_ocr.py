@@ -1,12 +1,12 @@
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
-from ocr_common.npwp import DOCUMENT_TYPE
+from ocr_common.npwp import COLUMN_THRESHOLD_DESCRIPTION, DOCUMENT_TYPE, column_thresholds_from_json
 from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
@@ -21,6 +21,7 @@ from app.api.extract_contract import (
     extract_response,
 )
 from app.api.schemas import ExtractOcrResponse
+from app.clients.guardrails import GuardrailsThreshold
 from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
 from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
@@ -34,6 +35,14 @@ router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
 INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
+INVALID_THRESHOLD_CODE = "INVALID_THRESHOLD"
+# guardrails_tendency as the central orchestrator writes it (accepted / rejected), to the side it names.
+TENDENCIES: dict[str, Literal["accept", "reject"]] = {
+    "accepted": "accept",
+    "accept": "accept",
+    "rejected": "reject",
+    "reject": "reject",
+}
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -124,6 +133,30 @@ class _InvalidParams(Exception):
     pass
 
 
+class _InvalidThreshold(Exception):
+    pass
+
+
+def _parse_guardrails_threshold(value: str | None, tendency: str | None) -> GuardrailsThreshold | None:
+    """`guardrails_confidence_threshold` + `guardrails_tendency`, both or neither; None (neither) leaves the
+    guardrails service's own threshold in force. Raises `_InvalidThreshold`."""
+    value = (value or "").strip()
+    tendency = (tendency or "").strip().lower()
+    if not value and not tendency:
+        return None
+    if not value or not tendency:
+        raise _InvalidThreshold("send guardrails_confidence_threshold and guardrails_tendency together, or neither")
+    try:
+        threshold = float(value)
+    except ValueError:
+        threshold = float("nan")
+    if not 0 < threshold < 1:
+        raise _InvalidThreshold(f"guardrails_confidence_threshold must be a number between 0 and 1, got {value!r}")
+    if tendency not in TENDENCIES:
+        raise _InvalidThreshold(f"guardrails_tendency must be accepted or rejected, got {tendency!r}")
+    return GuardrailsThreshold(threshold, TENDENCIES[tendency])
+
+
 def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, params: Any) -> dict[str, Any]:
     """The answer when calling a pipeline service failed (unreachable, timed out, refused the file, answered
     wrongly): the error envelope's status and message, in the extract-ocr shape, naming that service."""
@@ -195,6 +228,15 @@ def _parse_params(raw: str | None) -> Any:
         "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
         "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`. "
         "`params` is returned as sent.\n\n"
+        "**Thresholds from the central orchestrator, per request, all optional.** "
+        "`guardrails_confidence_threshold` with `guardrails_tendency` (`accepted`: a page passes when the model's "
+        "accept probability reaches it; `rejected`: a page is rejected when its reject probability reaches it) "
+        "replaces the guardrails threshold for this document; left out, the guardrails service's own is used "
+        "(`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_REJECT_THRESHOLD`, else the model's 0.5 on the reject side). "
+        '`column_confidence_threshold` (`{"nomor_npwp": 0.9, "nama": 0.5}`) sets, per field, the trust '
+        "probability for `confidence: 1`, always on the accept side; a field it leaves out, or the whole field "
+        "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read answers `422` "
+        f"`{INVALID_THRESHOLD_CODE}` and nothing runs.\n\n"
         "**Rejected by the structuring rules**: the ML team's rules reject a document that is blurred or blank, "
         "not in the standard NPWP format, another document or bundled with one, a screenshot of the online NPWP "
         "lookup, longer than the page limit, or whose number carries an invalid birthdate, province, kecamatan "
@@ -264,7 +306,8 @@ def _parse_params(raw: str | None) -> Any:
             "description": (
                 "A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`; "
                 "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence` breaks "
-                f"the order rules (`{INVALID_SEQUENCE_CODE}`), or a required field is missing (`VALIDATION_ERROR`)"
+                f"the order rules (`{INVALID_SEQUENCE_CODE}`), a threshold cannot be read "
+                f"(`{INVALID_THRESHOLD_CODE}`), or a required field is missing (`VALIDATION_ERROR`)"
             ),
             "content": {"application/json": {"example": _FAILED}},
         },
@@ -316,6 +359,27 @@ async def extract_ocr(
         ),
         examples=[["guardrails", "extraction", "structuring", "scoring"]],
     ),
+    guardrails_confidence_threshold: str | None = Form(
+        None,
+        description=(
+            "Guardrails threshold for this document, between 0 and 1 (exclusive), with `guardrails_tendency`. "
+            "Omitted: the guardrails service's own threshold"
+        ),
+        examples=["0.3"],
+    ),
+    guardrails_tendency: str | None = Form(
+        None,
+        description=(
+            "The side `guardrails_confidence_threshold` applies to: `accepted` (a page passes when its accept "
+            "probability reaches it) or `rejected` (a page is rejected when its reject probability reaches it)"
+        ),
+        examples=["accepted"],
+    ),
+    column_confidence_threshold: str | None = Form(
+        None,
+        description=f"{COLUMN_THRESHOLD_DESCRIPTION}. A JSON object string",
+        examples=['{"nomor_npwp": 0.9, "nama": 0.5}'],
+    ),
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
 ):
@@ -351,6 +415,21 @@ async def extract_ocr(
             request_id=request_id,
             document_type=document_type,
         )
+    try:
+        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold, guardrails_tendency)
+        try:
+            column_thresholds = column_thresholds_from_json(column_confidence_threshold)
+        except ValueError as exc:
+            raise _InvalidThreshold(str(exc)) from exc
+    except _InvalidThreshold as exc:
+        response.status_code = 422
+        return extract_body(
+            422,
+            str(exc),
+            errors=INVALID_THRESHOLD_CODE,
+            request_id=request_id,
+            document_type=document_type,
+        )
 
     # The central orchestrator's request_id becomes the id of this request: in the envelope of an error raised
     # below (413, a bad file, an unreachable stage), in the X-Request-ID response header and outbound calls, and
@@ -367,6 +446,8 @@ async def extract_ocr(
             received_at=received_at,
             file_url=file_url,
             sequence=sequence,
+            guardrails_threshold=guardrails_threshold,
+            column_thresholds=column_thresholds,
         )
     except StageError as exc:
         response.status_code = exc.status_code
@@ -379,6 +460,7 @@ async def extract_ocr(
         document_type=document_type,
         params=parsed_params,
         threshold=settings.field_confidence_threshold,
+        column_thresholds=column_thresholds,
     )
     response.status_code = status_code
     return body
@@ -481,6 +563,7 @@ async def get_extract_ocr(
         document_type=DOCUMENT_TYPE,
         params=None,
         threshold=settings.field_confidence_threshold,
+        column_thresholds=outcome.get("column_thresholds"),
     )
     response.status_code = status_code
     return body

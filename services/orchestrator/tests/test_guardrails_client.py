@@ -4,7 +4,12 @@ import pytest
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
 
-from app.clients.guardrails import PASSTHROUGH_STATUSES, GuardrailsClient, build_guardrails_client
+from app.clients.guardrails import (
+    PASSTHROUGH_STATUSES,
+    GuardrailsClient,
+    GuardrailsThreshold,
+    build_guardrails_client,
+)
 from app.config import get_settings
 from tests.conftest import ACCEPTED_REPORT, JPEG
 from tests.test_handoff import _form
@@ -116,3 +121,12 @@ async def test_the_client_is_built_from_the_settings():
         assert remote._passthrough_statuses == frozenset(PASSTHROUGH_STATUSES)
     finally:
         await client.aclose()
+
+
+async def test_a_threshold_from_the_central_orchestrator_is_sent_with_the_document():
+    client, handler = _client(httpx.Response(200, json={"data": ACCEPTED_REPORT}))
+
+    await client.check(RID, "npwp.jpg", "image/jpeg", JPEG, GuardrailsThreshold(0.3, "accept"))
+
+    fields, _ = _form(handler.requests[0])
+    assert fields == {"request_id": RID, "threshold": "0.3", "threshold_target": "accept"}

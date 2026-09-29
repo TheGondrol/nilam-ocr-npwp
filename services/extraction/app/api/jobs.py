@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 
+from ocr_common.npwp import COLUMN_THRESHOLD_DESCRIPTION, column_thresholds_from_json
 from ocr_common.pipeline import EXTRACTION, InvalidSequence, StagePipeline, checked_sequence
 from ocr_common.pipeline.outbox_status import (
     OUTBOX_RELEASE_DESCRIPTION,
@@ -49,6 +50,13 @@ def _parse_guardrails(raw: str | None) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         raise HTTPException(status_code=400, detail="guardrails must be a JSON object")
     return value
+
+
+def _parse_column_thresholds(raw: str | None) -> dict[str, float] | None:
+    try:
+        return column_thresholds_from_json(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _parse_sequence(raw: str | None) -> list[str] | None:
@@ -150,6 +158,11 @@ async def submit_job(
         description=f"{PIPELINE_SEQUENCE_DESCRIPTION}. Serialised as a JSON array string",
         examples=['["guardrails", "extraction", "structuring", "scoring"]'],
     ),
+    column_confidence_threshold: str | None = Form(
+        None,
+        description=f"{COLUMN_THRESHOLD_DESCRIPTION}. Serialised as a JSON object string; carried on to scoring",
+        examples=['{"nomor_npwp": 0.9, "nama": 0.5}'],
+    ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
     service: ExtractionJobService = Depends(get_job_service),
@@ -162,7 +175,8 @@ async def submit_job(
         assert url is not None
         source = url
     sequence = _parse_sequence(pipeline_name_sequence)
-    data = await service.submit(request_id, document_type, _parse_guardrails(guardrails), source, sequence)
+    columns = _parse_column_thresholds(column_confidence_threshold)
+    data = await service.submit(request_id, document_type, _parse_guardrails(guardrails), source, sequence, columns)
     return envelope(202, "Accepted", data, request_id)
 
 

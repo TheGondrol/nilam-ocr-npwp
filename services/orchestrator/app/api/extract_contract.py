@@ -47,8 +47,16 @@ def last_stage(outcome: dict[str, Any]) -> str | None:
 
 
 def extract_response(
-    outcome: dict[str, Any], *, request_id: str, document_type: str, params: Any, threshold: float
+    outcome: dict[str, Any],
+    *,
+    request_id: str,
+    document_type: str,
+    params: Any,
+    threshold: float,
+    column_thresholds: Mapping[str, float] | None = None,
 ) -> tuple[int, dict[str, Any]]:
+    """`threshold` is FIELD_CONFIDENCE_THRESHOLD, used for a field `column_thresholds` (the central
+    orchestrator's column_confidence_threshold) leaves out."""
     stage_name = last_stage(outcome)
     if not outcome["passed"]:
         body = extract_body(
@@ -82,7 +90,9 @@ def extract_response(
         # Scoring ended the request: the contract's fields. An earlier last service of the
         # pipeline_name_sequence: its result as it is.
         result = outcome["result"]
-        data = contract_fields(result, threshold) if pipeline.get("stage") == STAGE_SCORING else result
+        data = (
+            contract_fields(result, threshold, column_thresholds) if pipeline.get("stage") == STAGE_SCORING else result
+        )
         return 200, extract_body(
             200,
             COMPLETED_MESSAGE,

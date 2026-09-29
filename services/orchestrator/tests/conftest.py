@@ -55,8 +55,11 @@ class StubGuardrails:
         self.checked: list[dict] = []
         self.error: Exception | None = None
 
-    async def check(self, request_id, filename, content_type, content) -> dict:
-        self.checked.append({"request_id": request_id, "filename": filename, "content_type": content_type})
+    async def check(self, request_id, filename, content_type, content, threshold=None) -> dict:
+        call = {"request_id": request_id, "filename": filename, "content_type": content_type}
+        if threshold is not None:
+            call["threshold"] = threshold
+        self.checked.append(call)
         if self.error is not None:
             raise self.error
         rejected = any(word in filename for word in ("blur", "invalid", "notnpwp"))
@@ -72,7 +75,17 @@ class StubExtraction:
         self.error: Exception | None = None
 
     async def submit(
-        self, request_id, document_type, guardrails, filename, content_type, content, *, file_url=None, sequence=None
+        self,
+        request_id,
+        document_type,
+        guardrails,
+        filename,
+        content_type,
+        content,
+        *,
+        file_url=None,
+        sequence=None,
+        column_thresholds=None,
     ) -> dict:
         if self.error is not None:
             raise self.error
@@ -83,6 +96,7 @@ class StubExtraction:
                 "guardrails": guardrails,
                 "file_url": file_url,
                 "sequence": list(sequence) if sequence else None,
+                "column_thresholds": column_thresholds,
             }
         )
         return {"request_id": request_id, "stage": "OCR", "status": "PROCESSING", "duplicate": False}

@@ -29,12 +29,16 @@ class GuardrailsService:
             None, "", default_threshold(settings.guardrails_reject_threshold, classifier), cache_seconds=0
         )
 
-    async def check(self, filename: str, content_type: str | None, content: bytes) -> dict[str, Any]:
+    async def check(
+        self, filename: str, content_type: str | None, content: bytes, threshold: Threshold | None = None
+    ) -> dict[str, Any]:
+        """`threshold`: the one the central orchestrator sent with this request. Without it, the one in force
+        (GUARDRAILS_THRESHOLD_URL, else GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's)."""
         if hasattr(self._classifier, "check_document"):
-            # The model service renders the PDF and applies its own threshold.
+            # The model service renders the PDF and applies its own threshold; a per-request one cannot reach it.
             report = await self._classifier.check_document(filename, content, content_type)
         else:
-            threshold = await self._threshold.get()
+            threshold = threshold or await self._threshold.get()
             report = await run_in_threadpool(self._check_locally, filename, content_type, content, threshold)
 
         passed = report["document"]["verdict"] == VERDICT_ACCEPTED

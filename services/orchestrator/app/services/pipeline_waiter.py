@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
@@ -45,6 +45,9 @@ class WaitOutcome:
     status: str
     error_message: str | None = None
     results: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # column_confidence_threshold stored with the first stage's job (the GET answers with the same
+    # confidences as the POST); None: FIELD_CONFIDENCE_THRESHOLD for every field.
+    column_thresholds: dict[str, float] | None = None
 
 
 class PipelineWait(Protocol):
@@ -92,11 +95,17 @@ class PipelineWaiter:
 
         The stage that ends the request comes from the pipeline_name_sequence stored with the first stage's
         job (this service keeps nothing itself)."""
-        results: dict[str, dict[str, Any]] = {}
         record = await _read(self._stages[0], request_id)
         if record is None:
             return None
-        stages = self._through(_last_stage(record.get("pipeline_name_sequence")))
+        columns = record.get("column_confidence_threshold")
+        outcome = await self._snapshot(request_id, record)
+        return replace(outcome, column_thresholds=columns if isinstance(columns, dict) and columns else None)
+
+    async def _snapshot(self, request_id: str, first: dict[str, Any]) -> WaitOutcome:
+        results: dict[str, dict[str, Any]] = {}
+        record: dict[str, Any] | None = first
+        stages = self._through(_last_stage(first.get("pipeline_name_sequence")))
         for index, stage in enumerate(stages):
             if index > 0:
                 record = await _read(stage, request_id)

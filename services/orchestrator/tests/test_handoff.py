@@ -200,3 +200,28 @@ def test_a_document_sent_as_file_url_is_judged_here_and_handed_over_as_the_same_
     assert "guardrails" in form
     assert form["file_url"] == url
     assert stub_guardrails.checked == [{"request_id": RID, "filename": "npwp.jpg", "content_type": "image/jpeg"}]
+
+
+def test_column_confidence_threshold_is_handed_to_the_ocr_stage_as_json(client, auth, extraction):
+    handler = extraction(_accepted)
+    thresholds = {"nomor_npwp": 0.9, "nama": 0.5}
+
+    response = client.post(
+        "/v1/extract-ocr",
+        headers=auth,
+        data={"request_id": RID, "column_confidence_threshold": json.dumps(thresholds)},
+        files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    fields, _ = _form(handler.requests[0])
+    assert json.loads(fields["column_confidence_threshold"]) == thresholds
+
+
+def test_without_column_confidence_threshold_the_field_is_left_out(client, auth, extraction):
+    handler = extraction(_accepted)
+
+    _submit(client, auth)
+
+    fields, _ = _form(handler.requests[0])
+    assert "column_confidence_threshold" not in fields

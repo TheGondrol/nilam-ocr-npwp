@@ -1,6 +1,8 @@
 """What the NPWP pipeline produces for the orchestrator: the field names, the final result carried by
 the SCORING callback, and its mapping to the orchestrator's `extract-ocr` contract."""
 
+import json
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -14,6 +16,46 @@ NPWP_FIELDS = ("nomor_npwp", "nama", "nama_badan")
 TRUST_SCORES = ("npwp_confidence", "name_confidence")
 # The fields of the `extract-ocr` contract's `data`, the keys of a per-field threshold.
 CONTRACT_FIELDS = ("nomor_npwp", "nama")
+COLUMN_THRESHOLD_DESCRIPTION = (
+    "Per field, from the central orchestrator: the trust model's probability that the field's value is correct "
+    "must reach it for the field's `confidence` to be `1` (else `0`), always on the accept side. Keys: "
+    "`nomor_npwp`, `nama`; a field left out (or the whole map omitted) uses `FIELD_CONFIDENCE_THRESHOLD`"
+)
+
+
+def parse_column_thresholds(value: Any) -> dict[str, float] | None:
+    """`column_confidence_threshold` checked: None, or an object whose keys are `CONTRACT_FIELDS` and whose
+    values are numbers from 0 to 1. Raises ValueError with the reason otherwise."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('column_confidence_threshold must be a JSON object, e.g. {"nomor_npwp": 0.9, "nama": 0.5}')
+    unknown = sorted(set(value) - set(CONTRACT_FIELDS))
+    if unknown:
+        raise ValueError(
+            f"column_confidence_threshold has unknown field(s) {', '.join(unknown)}; "
+            f"expected {', '.join(CONTRACT_FIELDS)}"
+        )
+    thresholds = {}
+    for name, threshold in value.items():
+        if isinstance(threshold, bool) or not isinstance(threshold, int | float) or not math.isfinite(threshold):
+            raise ValueError(f"column_confidence_threshold.{name} must be a number, got {threshold!r}")
+        if not 0 <= threshold <= 1:
+            raise ValueError(f"column_confidence_threshold.{name} must be between 0 and 1, got {threshold}")
+        thresholds[name] = float(threshold)
+    return thresholds or None
+
+
+def column_thresholds_from_json(raw: str | None) -> dict[str, float] | None:
+    """`column_confidence_threshold` as a form field carries it (a JSON object string); None when empty.
+    Raises ValueError."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError("column_confidence_threshold must be valid JSON: an object of field -> threshold") from exc
+    return parse_column_thresholds(value)
 
 
 def contract_fields(

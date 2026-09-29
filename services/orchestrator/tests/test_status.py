@@ -295,3 +295,21 @@ async def test_snapshot_names_the_stage_it_could_not_read():
     with pytest.raises(StageError) as exc:
         await PipelineWaiter(stages, poll_interval=0.01).snapshot(RID)
     assert (exc.value.service, exc.value.status_code) == ("structuring", 503)
+
+
+async def test_the_snapshot_carries_the_thresholds_stored_with_the_first_job():
+    done = {**_job("DONE", {"blocks": []}), "column_confidence_threshold": {"nomor_npwp": 0.9}}
+    waiter = PipelineWaiter(_stages(done, _job("DONE", {"fields": {}}), _job("PROCESSING")), poll_interval=0)
+
+    outcome = await waiter.snapshot(RID)
+
+    assert outcome is not None
+    assert (outcome.stage, outcome.status, outcome.column_thresholds) == ("SCORING", "PROCESSING", {"nomor_npwp": 0.9})
+
+
+async def test_a_job_without_thresholds_gives_none():
+    waiter = PipelineWaiter(_stages(_job("PROCESSING")), poll_interval=0)
+
+    outcome = await waiter.snapshot(RID)
+
+    assert outcome is not None and outcome.column_thresholds is None

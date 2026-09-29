@@ -1,6 +1,6 @@
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from prometheus_client import Counter
@@ -18,7 +18,7 @@ from ocr_common.pipeline import (
 )
 
 from app.clients.extraction import ExtractionJobClient
-from app.clients.guardrails import GuardrailsClient
+from app.clients.guardrails import GuardrailsClient, GuardrailsThreshold
 from app.config import Settings
 from app.services.document_checks import check_document
 from app.services.pipeline_waiter import PipelineWait, StageError, WaitOutcome
@@ -54,6 +54,8 @@ class ExtractOcrService:
         received_at: float | None = None,
         file_url: str | None = None,
         sequence: Sequence[str] = DEFAULT_SEQUENCE,
+        guardrails_threshold: GuardrailsThreshold | None = None,
+        column_thresholds: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         """Check the file (type, empty, `MAX_UPLOAD_BYTES`, `MAX_DOCUMENT_PAGES`) before anyone else sees it,
         judge it with the guardrails model, hand it to the OCR stage when it passes, and wait for the
@@ -63,12 +65,15 @@ class ExtractOcrService:
         `guardrails` the model is left out (the file checks still run): the stages get no guardrails report,
         so scoring imputes its guardrail probability, and the structuring rules still reject. With only
         `guardrails` the report is the answer and nothing enters the pipeline. Otherwise the stages hand
-        the job on up to the last service of `sequence`, and that one's result is the answer."""
+        the job on up to the last service of `sequence`, and that one's result is the answer.
+
+        `guardrails_threshold` and `column_thresholds` come from the central orchestrator for this request;
+        None falls back to the guardrails service's own threshold and to FIELD_CONFIDENCE_THRESHOLD."""
         started = time.monotonic() if received_at is None else received_at
         check_document(content_type, content, self._settings)
         if GUARDRAILS in sequence:
             try:
-                report = await self._guardrails.check(request_id, filename, content_type, content)
+                report = await self._guardrails.check(request_id, filename, content_type, content, guardrails_threshold)
             except ServiceError as exc:
                 raise StageError(GUARDRAILS, exc) from exc
             if not report["passed"]:
@@ -85,7 +90,15 @@ class ExtractOcrService:
 
         try:
             job = await self._extraction.submit(
-                request_id, document_type, report, filename, content_type, content, file_url=file_url, sequence=sequence
+                request_id,
+                document_type,
+                report,
+                filename,
+                content_type,
+                content,
+                file_url=file_url,
+                sequence=sequence,
+                column_thresholds=column_thresholds,
             )
         except ServiceError as exc:
             raise StageError(EXTRACTION, exc) from exc
@@ -104,7 +117,12 @@ class ExtractOcrService:
         outcome = await self._waiter.snapshot(request_id)
         if outcome is None:
             raise NotFound(f"No request found for request_id {request_id}")
-        return {"passed": True, "reason": None, **_pipeline(DOCUMENT_TYPE, None, outcome)}
+        return {
+            "passed": True,
+            "reason": None,
+            **_pipeline(DOCUMENT_TYPE, None, outcome),
+            "column_thresholds": outcome.column_thresholds,
+        }
 
 
 def _pipeline(document_type: str, report: dict[str, Any] | None, outcome: WaitOutcome) -> dict[str, Any]:

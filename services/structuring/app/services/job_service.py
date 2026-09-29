@@ -40,6 +40,7 @@ class StructuringJobService:
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         sequence: Sequence[str] | None = None,
+        column_thresholds: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         """`sequence` (pipeline_name_sequence, None = the full pipeline) decides whether the job is handed to
         scoring or ends here with the structuring result as the answer. A rejection stops it either way."""
@@ -48,7 +49,7 @@ class StructuringJobService:
                 "ocr is missing: the request refers to the OCR result by request_id, but this service has no "
                 "DATABASE_URL to read ocr_results from",
             )
-        work, handoff = self._spec(request_id, document_type, guardrails, ocr, sequence)
+        work, handoff = self._spec(request_id, document_type, guardrails, ocr, sequence, column_thresholds)
         return await self._pipeline.submit(
             request_id,
             work,
@@ -58,6 +59,7 @@ class StructuringJobService:
                 "document_type": document_type,
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
+                "column_confidence_threshold": dict(column_thresholds) if column_thresholds else None,
             },
         )
 
@@ -67,7 +69,12 @@ class StructuringJobService:
         input = input or {}
         sequence = input.get("pipeline_name_sequence")
         work, handoff = self._spec(
-            request_id, input.get("document_type") or DOCUMENT_TYPE, input.get("guardrails"), None, sequence
+            request_id,
+            input.get("document_type") or DOCUMENT_TYPE,
+            input.get("guardrails"),
+            None,
+            sequence,
+            input.get("column_confidence_threshold"),
         )
         await self._pipeline.resume(request_id, work, **chain(sequence, STRUCTURING, handoff), rejection=_rejection)
 
@@ -81,6 +88,7 @@ class StructuringJobService:
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         sequence: Sequence[str] | None = None,
+        column_thresholds: Mapping[str, float] | None = None,
     ) -> tuple[Work, Handoff]:
         upstream: dict[str, Any] = {}
 
@@ -101,6 +109,8 @@ class StructuringJobService:
             body: dict[str, Any] = {"request_id": request_id, "document_type": document_type, "guardrails": guardrails}
             if sequence:
                 body["pipeline_name_sequence"] = stored(sequence)
+            if column_thresholds:
+                body["column_confidence_threshold"] = dict(column_thresholds)
             if not self._handoff_by_reference:
                 body.update(ocr=upstream["ocr"], structuring=dict(structuring))
             return body

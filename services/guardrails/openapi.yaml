@@ -308,6 +308,30 @@ components:
           description: Echoed in the response; optional
           examples:
           - OCR_9cb01af2-493d-446d-b191-af120333f6d0
+        threshold:
+          anyOf:
+          - type: number
+            exclusiveMaximum: 1.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Threshold
+          description: 'The threshold for this document only, from the central orchestrator (forwarded
+            by the orchestrator NPWP); send it with `threshold_target`. Omitted: the one in force (`GUARDRAILS_THRESHOLD_URL`,
+            else `GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s). Not applied by the `remote` backend'
+          examples:
+          - 0.3
+        threshold_target:
+          anyOf:
+          - type: string
+            enum:
+            - accept
+            - reject
+          - type: 'null'
+          title: Threshold Target
+          description: 'The side `threshold` applies to: `accept` = a page passes when `proba_approve
+            >= threshold`; `reject` = a page is rejected when `proba_reject >= threshold`'
+          examples:
+          - accept
         file:
           anyOf:
           - type: string

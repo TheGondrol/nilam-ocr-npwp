@@ -1,8 +1,8 @@
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ocr_common.npwp import CONTRACT_FIELDS
+from ocr_common.npwp import COLUMN_THRESHOLD_DESCRIPTION, parse_column_thresholds
 from ocr_common.pipeline import SCORING, checked_sequence
 from ocr_common.pipeline.schemas import FieldConfidences, GuardrailsResult, OcrPayload, StructuringPayload
 from ocr_common.web.schemas import PIPELINE_SEQUENCE_DESCRIPTION, REQUEST_ID_EXAMPLE, JobStatusBase, SuccessEnvelope
@@ -85,13 +85,10 @@ class ScoringJobRequest(BaseModel):
         examples=[["guardrails", "extraction", "structuring", "scoring"]],
     )
 
-    column_confidence_threshold: dict[str, Annotated[float, Field(ge=0, le=1)]] | None = Field(
+    column_confidence_threshold: dict[str, float] | None = Field(
         None,
         description=(
-            "Per field, from the central orchestrator: the trust model's probability that field's value is correct "
-            f"must reach for its `confidence` to be `1` (else `0`), always on the accept side. Keys: "
-            f"{', '.join(f'`{name}`' for name in CONTRACT_FIELDS)}; a field left out (or the whole map omitted) "
-            "uses `FIELD_CONFIDENCE_THRESHOLD`. Applied to the outcome row (`ORCHESTRATION_OUTCOME_TABLE`); the "
+            f"{COLUMN_THRESHOLD_DESCRIPTION}. Applied to the outcome row (`ORCHESTRATION_OUTCOME_TABLE`); the "
             "callback keeps the raw probabilities"
         ),
         examples=[{"nomor_npwp": 0.9, "nama": 0.5}],
@@ -105,10 +102,7 @@ class ScoringJobRequest(BaseModel):
     @field_validator("column_confidence_threshold")
     @classmethod
     def _known_fields(cls, value: dict[str, float] | None) -> dict[str, float] | None:
-        unknown = sorted(set(value or {}) - set(CONTRACT_FIELDS))
-        if unknown:
-            raise ValueError(f"unknown field(s) {', '.join(unknown)}; expected {', '.join(CONTRACT_FIELDS)}")
-        return value
+        return parse_column_thresholds(value)
 
 
 class ScoringJobResult(FieldConfidences):

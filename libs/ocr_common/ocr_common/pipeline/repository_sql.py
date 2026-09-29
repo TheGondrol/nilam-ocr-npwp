@@ -15,7 +15,7 @@ from ocr_common.pipeline import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, J
 from ocr_common.pipeline.database import get_engine
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage
 from ocr_common.pipeline.outcomes import StageOutcome
-from ocr_common.pipeline.repository import stored_sequence
+from ocr_common.pipeline.repository import stored_column_thresholds, stored_sequence
 from ocr_common.pipeline.tables import pipeline_tables
 
 
@@ -217,4 +217,5 @@ class SqlJobRepository:
             "created_at": _iso(row.created_at),
             "updated_at": _iso(row.updated_at),
             "pipeline_name_sequence": stored_sequence(row.input),
+            "column_confidence_threshold": stored_column_thresholds(row.input),
         }

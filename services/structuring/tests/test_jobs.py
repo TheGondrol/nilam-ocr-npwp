@@ -251,3 +251,54 @@ def test_a_sequence_without_this_stage_or_out_of_order_is_422(harness, auth, seq
     )
 
     assert response.status_code == 422
+
+
+COLUMNS = {"nomor_npwp": 0.9, "nama": 0.5}
+
+
+def test_column_confidence_threshold_is_kept_with_the_job_and_handed_on_to_scoring(harness, auth):
+    client, _, next_stage = harness
+
+    client.post(
+        "/v1/structuring/jobs", headers=auth, json={**_payload("REQ_col"), "column_confidence_threshold": COLUMNS}
+    )
+
+    job = wait_for_job(client, "/v1/structuring/jobs/REQ_col")
+    assert job["column_confidence_threshold"] == COLUMNS
+    [payload] = next_stage.payloads
+    assert payload["column_confidence_threshold"] == COLUMNS
+
+
+def test_without_column_confidence_threshold_nothing_is_handed_on(harness, auth):
+    client, _, next_stage = harness
+
+    client.post("/v1/structuring/jobs", headers=auth, json=_payload("REQ_nocol"))
+
+    wait_for_job(client, "/v1/structuring/jobs/REQ_nocol")
+    assert "column_confidence_threshold" not in next_stage.payloads[0]
+
+
+@pytest.mark.parametrize("columns", [{"npwp": 0.9}, {"nama": 1.5}, {"nama": "tinggi"}, [0.9]])
+def test_an_invalid_column_confidence_threshold_is_422(harness, auth, columns):
+    client, _, _ = harness
+
+    response = client.post(
+        "/v1/structuring/jobs", headers=auth, json={**_payload("REQ_col_bad"), "column_confidence_threshold": columns}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_a_stale_job_hands_on_its_stored_column_thresholds():
+    callback, next_stage = RecordingCallback(), RecordingNextStage()
+    pipeline = StagePipeline(
+        stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
+    )
+    service = StructuringJobService(pipeline, get_structuring_service(), results=FakeResults(ocr={"REQ_sc": OCR}))
+    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS, "column_confidence_threshold": COLUMNS}
+    await pipeline.repository.claim("REQ_sc", input=stored_input)
+
+    await service.resume("REQ_sc", stored_input)
+    await pipeline.runner.drain(5)
+
+    assert next_stage.payloads[0]["column_confidence_threshold"] == COLUMNS

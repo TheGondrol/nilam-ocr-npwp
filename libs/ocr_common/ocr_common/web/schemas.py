@@ -110,6 +110,14 @@ class JobStatusBase(BaseModel):
         ),
         examples=[["guardrails", "extraction", "structuring", "scoring"]],
     )
+    column_confidence_threshold: dict[str, float] | None = Field(
+        None,
+        description=(
+            "The central orchestrator's per-field thresholds the job was submitted with (`nomor_npwp`, `nama`); "
+            "null when none were given: `FIELD_CONFIDENCE_THRESHOLD` for every field"
+        ),
+        examples=[{"nomor_npwp": 0.9, "nama": 0.5}],
+    )
 
 
 PIPELINE_SEQUENCE_DESCRIPTION = (

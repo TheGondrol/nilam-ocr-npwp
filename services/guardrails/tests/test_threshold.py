@@ -216,3 +216,64 @@ def test_threshold_url_on_localhost_is_refused_outside_local():
             guardrails_backend="efficientnet",
             guardrails_threshold_url="http://localhost:8090",
         )
+
+
+# --- a threshold sent with the request (the central orchestrator, through the orchestrator NPWP) ----
+
+
+async def test_a_threshold_given_with_the_request_wins_over_the_one_in_force():
+    settings = Settings(api_key="x", _env_file=None)
+    in_force = _threshold(StubOrchestrator(_reject(0.6)))  # would accept proba_reject 0.3
+    service = GuardrailsService(StubClassifier(0.7), settings, in_force)
+
+    report = await service.check("a.jpg", "image/jpeg", _jpeg(), Threshold(0.8, "accept"))
+
+    assert report["passed"] is False  # proba_approve 0.7 < 0.8
+    assert (report["document"]["threshold"], report["document"]["threshold_target"]) == (0.8, "accept")
+
+
+def _check(client, auth, **form):
+    return client.post(
+        "/v1/guardrails/check",
+        data={"request_id": "OCR_t", **form},
+        files={"file": ("npwp.jpg", _jpeg(), "image/jpeg")},
+        headers=auth,
+    )
+
+
+def test_the_endpoint_judges_with_the_threshold_it_is_sent(client, auth, use_classifier):
+    use_classifier(StubClassifier(0.7))
+
+    strict = _check(client, auth, threshold="0.8", threshold_target="accept").json()["data"]
+    lenient = _check(client, auth, threshold="0.3", threshold_target="accept").json()["data"]
+
+    assert (strict["passed"], strict["document"]["threshold"], strict["document"]["threshold_target"]) == (
+        False,
+        0.8,
+        "accept",
+    )
+    assert (lenient["passed"], lenient["document"]["threshold"]) == (True, 0.3)
+
+
+def test_without_a_threshold_the_endpoint_falls_back_to_the_default(client, auth, use_classifier):
+    use_classifier(StubClassifier(0.7))
+
+    document = _check(client, auth).json()["data"]["document"]
+
+    assert (document["threshold"], document["threshold_target"]) == (0.5, "reject")
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        {"threshold": "0.3"},
+        {"threshold_target": "accept"},
+        {"threshold": "0", "threshold_target": "accept"},
+        {"threshold": "1", "threshold_target": "reject"},
+        {"threshold": "0.3", "threshold_target": "accepted"},
+    ],
+)
+def test_a_threshold_without_its_side_or_out_of_range_is_422(client, auth, use_classifier, form):
+    use_classifier(StubClassifier(0.7))
+
+    assert _check(client, auth, **form).status_code == 422

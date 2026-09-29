@@ -162,6 +162,24 @@ di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET 
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
+| `guardrails_confidence_threshold` | tidak, berpasangan dengan `guardrails_tendency` | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja. Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_REJECT_THRESHOLD`, lalu 0.5 sisi reject dari model) |
+| `guardrails_tendency` | tidak, berpasangan | `accepted`: halaman lolos kalau probabilitas accept ≥ threshold; `rejected`: halaman ditolak kalau probabilitas reject ≥ threshold |
+| `column_confidence_threshold` | tidak | JSON object per field, mis. `{"nomor_npwp": 0.9, "nama": 0.5}`, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
+
+Threshold yang tidak bisa dibaca (hanya salah satu dari pasangan guardrails, angka di luar 0–1, `guardrails_tendency`
+selain `accepted` / `rejected`, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
+`INVALID_THRESHOLD`** dan tidak ada yang dijalankan. Contoh lengkap:
+
+    request_id                       = OCR_361701a7-ad0f-46f7-9922-8eae7c99015e
+    file_url                         = https://minio.example/ocr/abc.jpg
+    pipeline_name_sequence           = ["guardrails","extraction","structuring","scoring"]
+    guardrails_confidence_threshold  = 0.3
+    guardrails_tendency              = accepted
+    column_confidence_threshold      = {"nomor_npwp":0.9,"nama":0.5}
+
+Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`, `document.threshold_target`).
+`column_confidence_threshold` ikut disimpan bersama job, jadi `GET /v1/extract-ocr/{request_id}` menjawab dengan
+`confidence` yang sama dengan jawaban `POST`-nya.
 
 **Memilih service: `pipeline_name_sequence`.** Isinya nama service yang dijalankan, berurutan:
 `guardrails`, `extraction`, `structuring`, `scoring`. Kirim sebagai field form berulang
@@ -228,8 +246,9 @@ Selesai dalam waktu tunggu, **200**:
     }
 
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
-- `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal
-  `FIELD_CONFIDENCE_THRESHOLD` (default 0.5), `0` kalau di bawahnya atau field tidak ditemukan.
+- `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal threshold field itu
+  (`column_confidence_threshold`, kalau tidak dikirim `FIELD_CONFIDENCE_THRESHOLD`, default 0.5), `0` kalau
+  di bawahnya atau field tidak ditemukan.
 - Flag dari aturan extraction ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
   input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
   nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
@@ -284,6 +303,7 @@ Error lain (envelope standar; `errors` sama dengan `message` kecuali disebut lai
 | 413 | = `message` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | = `message` | `X-API-Key` salah | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
+| 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `guardrails_tendency` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 503 / 504 | = `message` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
 

@@ -260,3 +260,62 @@ def test_an_invalid_sequence_is_400(harness, auth, raw):
 
     assert response.status_code == 400
     assert "pipeline_name_sequence" in response.json()["message"]
+
+
+COLUMNS = {"nomor_npwp": 0.9, "nama": 0.5}
+
+
+def test_column_confidence_threshold_is_kept_with_the_job_and_handed_on(harness, auth):
+    client, _, next_stage = harness
+    data = {"request_id": "REQ_col", "document_type": "npwp", "column_confidence_threshold": json.dumps(COLUMNS)}
+
+    assert (
+        client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg")).status_code == 202
+    )
+
+    job = wait_for_job(client, "/v1/extraction/jobs/REQ_col")
+    assert job["column_confidence_threshold"] == COLUMNS
+    [payload] = next_stage.payloads
+    assert payload["column_confidence_threshold"] == COLUMNS
+
+
+def test_without_column_confidence_threshold_nothing_is_handed_on(harness, auth):
+    client, _, next_stage = harness
+    data = {"request_id": "REQ_nocol", "document_type": "npwp"}
+
+    client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
+
+    job = wait_for_job(client, "/v1/extraction/jobs/REQ_nocol")
+    assert job["column_confidence_threshold"] is None
+    assert "column_confidence_threshold" not in next_stage.payloads[0]
+
+
+@pytest.mark.parametrize("raw", ["not json", "[0.9]", '{"npwp": 0.9}', '{"nama": 1.5}'])
+def test_an_invalid_column_confidence_threshold_is_400(harness, auth, raw):
+    client, _, _ = harness
+    data = {"request_id": "REQ_col_bad", "document_type": "npwp", "column_confidence_threshold": raw}
+
+    response = client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
+
+    assert response.status_code == 400
+    assert "column_confidence_threshold" in response.json()["message"]
+
+
+async def test_a_stale_job_hands_on_its_stored_column_thresholds(monkeypatch):
+    service, pipeline, _, next_stage = _stale_service()
+    stored_input = {
+        "document_type": "npwp",
+        "guardrails": GUARDRAILS,
+        "file_url": "http://minio:9000/b/npwp.jpg",
+        "column_confidence_threshold": COLUMNS,
+    }
+    await pipeline.repository.claim("REQ_stale_col", input=stored_input)
+
+    async def fake_fetch(url, *, limit, timeout=10.0, policy):
+        return b"\xff\xd8fake-jpeg-bytes", "npwp.jpg", "image/jpeg"
+
+    monkeypatch.setattr("app.services.job_service.fetch", fake_fetch)
+    await service.resume("REQ_stale_col", stored_input)
+    await pipeline.runner.drain(5)
+
+    assert next_stage.payloads[0]["column_confidence_threshold"] == COLUMNS

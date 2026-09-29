@@ -383,3 +383,13 @@ async def test_the_record_carries_the_sequence_stored_in_the_input(repository):
 
     assert record is not None and record["pipeline_name_sequence"] == ["guardrails", "extraction"]
     assert plain is not None and plain["pipeline_name_sequence"] is None
+
+
+async def test_the_record_carries_the_column_thresholds_stored_in_the_input(repository):
+    await repository.claim("REQ_col", input={"column_confidence_threshold": {"nomor_npwp": 0.9, "nama": 0.5}})
+    await repository.claim("REQ_nocol", input={"document_type": "npwp"})
+
+    record, plain = await repository.get("REQ_col"), await repository.get("REQ_nocol")
+
+    assert record is not None and record["column_confidence_threshold"] == {"nomor_npwp": 0.9, "nama": 0.5}
+    assert plain is not None and plain["column_confidence_threshold"] is None
