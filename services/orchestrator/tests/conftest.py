@@ -117,10 +117,19 @@ class RecordingGuardrailsLog:
     def __init__(self) -> None:
         self.records: list[dict] = []
 
-    async def record(self, request_id, report, *, threshold_from_request) -> None:
+    async def record(self, request_id, report, *, threshold_from_request, sequence=None) -> None:
         self.records.append(
-            {"request_id": request_id, "report": report, "threshold_from_request": threshold_from_request}
+            {
+                "request_id": request_id,
+                "report": report,
+                "threshold_from_request": threshold_from_request,
+                "sequence": list(sequence) if sequence else None,
+            }
         )
+
+    async def latest(self, request_id):
+        mine = [record for record in self.records if record["request_id"] == request_id]
+        return {"report": mine[-1]["report"], "sequence": mine[-1]["sequence"]} if mine else None
 
 
 class StubWaiter:

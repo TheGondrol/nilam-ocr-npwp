@@ -83,7 +83,9 @@ class ExtractOcrService:
                 report = await self._guardrails.check(request_id, filename, content_type, content, guardrails_threshold)
             except ServiceError as exc:
                 raise StageError(GUARDRAILS, exc) from exc
-            await self._log.record(request_id, report, threshold_from_request=guardrails_threshold is not None)
+            await self._log.record(
+                request_id, report, threshold_from_request=guardrails_threshold is not None, sequence=sequence
+            )
             if not report["passed"]:
                 return {**report, "job": None, "pipeline": None, "result": None}
             verdict: dict[str, Any] = report
@@ -124,13 +126,31 @@ class ExtractOcrService:
         that passed guardrails has stage jobs at all."""
         outcome = await self._waiter.snapshot(request_id)
         if outcome is None:
-            raise NotFound(f"No request found for request_id {request_id}")
+            judged = await self._judged_only(request_id)
+            if judged is None:
+                raise NotFound(f"No request found for request_id {request_id}")
+            return judged
         return {
             "passed": True,
             "reason": None,
             **_pipeline(DOCUMENT_TYPE, None, outcome),
             "column_thresholds": outcome.column_thresholds,
         }
+
+    async def _judged_only(self, request_id: str) -> dict[str, Any] | None:
+        """A request no stage has a job for, answered from its last guardrails verdict, as its POST was: rejected
+        (the 400), or guardrails was its only service (the report as `data`). None otherwise: never judged, the
+        verdict was not kept, or it passed and its hand-off to extraction failed (nothing ran)."""
+        verdict = await self._log.latest(request_id)
+        if verdict is None:
+            return None
+        report = verdict["report"]
+        if not report.get("passed"):
+            return {**report, "job": None, "pipeline": None, "result": None}
+        if verdict["sequence"] == [GUARDRAILS]:
+            done = {"stage": STAGE_OF[GUARDRAILS], "status": STATUS_DONE, "error_message": None}
+            return {**report, "job": None, "pipeline": done, "result": report}
+        return None
 
 
 def _pipeline(document_type: str, report: dict[str, Any] | None, outcome: WaitOutcome) -> dict[str, Any]:

@@ -114,3 +114,89 @@ async def test_a_write_that_fails_is_logged_and_does_not_raise(tmp_path, caplog)
 
 def test_the_testing_endpoints_write_their_own_table():
     assert SqlGuardrailsLog("sqlite+aiosqlite://", table_prefix="testing_")._table.name == "testing_guardrails_results"
+
+
+def test_the_sequence_is_recorded_with_the_verdict(client, auth, guardrails_log):
+    _submit(client, auth, pipeline_name_sequence='["guardrails"]')
+    _submit(client, auth)
+
+    assert [r["sequence"] for r in guardrails_log.records] == [
+        ["guardrails"],
+        ["guardrails", "extraction", "structuring", "scoring"],
+    ]
+
+
+async def test_the_sequence_is_written_and_the_last_verdict_read_back(database):
+    url, table = database
+    log = SqlGuardrailsLog(url)
+
+    await log.record(RID, REJECTED_REPORT, threshold_from_request=False, sequence=["guardrails", "extraction"])
+    await log.record(RID, ACCEPTED_REPORT, threshold_from_request=False, sequence=["guardrails"])
+
+    first, _ = await _rows(url, table)
+    assert first["pipeline_name_sequence"] == ["guardrails", "extraction"]
+    assert await log.latest(RID) == {"report": ACCEPTED_REPORT, "sequence": ["guardrails"]}
+    assert await log.latest("OCR_never_judged") is None
+
+
+async def test_a_verdict_that_cannot_be_read_is_none_and_logged(tmp_path, caplog):
+    url = f"sqlite+aiosqlite:///{tmp_path / 'empty.db'}"  # no table: the select fails
+
+    assert await SqlGuardrailsLog(url).latest(RID) is None
+    assert "guardrails verdict of OCR_guardrails_log not readable" in caplog.text
+    await dispose_engines()
+
+
+# --- the GET of a request no stage has a job for -------------------------------------------------------
+
+
+def _get(client, auth):
+    return client.get(f"/v1/extract-ocr/{RID}", headers=auth)
+
+
+def test_the_get_of_a_document_rejected_by_guardrails_answers_like_its_post(client, auth, stub_waiter):
+    posted = _submit(client, auth, filename="blur.jpg")
+    stub_waiter.snapshot_outcome = None  # no stage has a job
+
+    response = _get(client, auth)
+
+    assert response.status_code == 400
+    body = response.json()
+    assert (body["errors"], body["guardrails"], body["job_status"], body["pipeline_last_stage"]) == (
+        "DOWNSTREAM_VALIDATION_ERROR",
+        1,
+        "failed",
+        "guardrails",
+    )
+    assert body["message"] == posted.json()["message"]
+
+
+def test_the_get_of_a_guardrails_only_request_answers_with_the_report(client, auth, stub_waiter):
+    posted = _submit(client, auth, pipeline_name_sequence='["guardrails"]')
+    stub_waiter.snapshot_outcome = None
+
+    response = _get(client, auth)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["job_status"], body["guardrails"], body["pipeline_last_stage"]) == ("completed", 0, "guardrails")
+    assert body["data"] == posted.json()["data"] == ACCEPTED_REPORT
+
+
+def test_a_request_that_passed_but_never_reached_a_stage_is_404(client, auth, stub_waiter):
+    _submit(client, auth)  # passed guardrails; say its hand-off to extraction failed
+    stub_waiter.snapshot_outcome = None
+
+    assert _get(client, auth).status_code == 404
+
+
+def test_a_request_never_judged_is_404(client, auth, stub_waiter):
+    stub_waiter.snapshot_outcome = None
+
+    assert _get(client, auth).status_code == 404
+
+
+def test_a_stage_job_wins_over_the_verdict(client, auth, stub_waiter):
+    _submit(client, auth, filename="blur.jpg")  # an earlier attempt was rejected; the stub still has a DONE job
+
+    assert _get(client, auth).status_code == 200

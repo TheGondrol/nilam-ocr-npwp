@@ -206,7 +206,8 @@ Selain `data`, bentuk jawabannya tetap sama (`status_code`, `job_status`, `guard
 dan seterusnya), begitu juga kode 200 / 202 / 400 / 422-nya. Service terakhir di urutan mengakhiri
 request: hasilnya jadi `data`, dan tidak ada yang diteruskan ke service berikutnya. Aturan structuring
 tetap bisa menolak (400) selama `structuring` ada di urutan. Request `[guardrails]` saja tidak
-menyimpan apa pun: jawaban POST-nya final, dan `GET /v1/extract-ocr/{request_id}` untuknya dijawab 404.
+menjalankan tahap mana pun; putusannya disimpan, dan `GET /v1/extract-ocr/{request_id}` menjawabnya sama
+dengan jawaban POST-nya (200 dengan laporan guardrails sebagai `data`).
 
 **Melewati guardrails.** Urutan tanpa `guardrails` membuat dokumen tidak dinilai model guardrails dan
 langsung masuk pipeline. Keputusannya sepenuhnya di kalian: kami tidak punya pengaturan yang
@@ -328,13 +329,19 @@ tidak datang.
 | selesai | 200 | `completed` + `data` | null |
 | masih berjalan | 202 | `processing` | null |
 | ditolak aturan structuring | 400 | `failed`, `guardrails: 1` | `DOWNSTREAM_VALIDATION_ERROR` |
+| ditolak model guardrails | 400 | `failed`, `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
+| `[guardrails]` saja, lolos | 200 | `completed` + laporan guardrails sebagai `data` | null |
 | satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
 | tidak dikenal | 404 | – | = `message` |
 
 - `params` selalu `null` di sini (tidak disimpan); `document_type` selalu `npwp`.
-- **404** berarti tidak ada tahap yang punya job untuk `request_id` itu: dokumennya ditolak model
-  guardrails (jawaban 400 di `POST` adalah jawaban finalnya), ditolak sebelum dinilai, atau
-  `POST`-nya masih berjalan di tahap penilaian guardrails.
+- Request yang tidak punya job di tahap mana pun dijawab dari putusan guardrails terakhirnya
+  (`guardrails_results`), sama seperti jawaban `POST`-nya: 400 kalau ditolak model guardrails, 200 dengan
+  laporan guardrails kalau `[guardrails]` satu-satunya service-nya.
+- **404** berarti tidak ada job dan tidak ada putusan guardrails yang tersimpan: ditolak sebelum dinilai
+  (file, `pipeline_name_sequence`, threshold), lolos guardrails tapi serah terima ke extraction gagal
+  (`POST`-nya dijawab 5xx), `POST`-nya masih dinilai guardrails, atau putusannya tidak sempat disimpan
+  (database mati; penyimpanannya best-effort).
 - **503 / 504** berarti salah satu tahap tidak bisa dibaca saat itu; coba lagi.
 - **Batasan:** serah terima antar tahap yang gagal permanen (setelah semua retry, atau menjadi dead
   letter di outbox kami) hanya tercatat di callback `FAILED` dan di tabel kalian; endpoint ini tetap

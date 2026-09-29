@@ -95,7 +95,9 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
     """`guardrails_results`: one row per guardrails verdict, written by the orchestrator NPWP, the rejected
     documents included (they never reach a stage table). Append-only: the same request_id sent again is
     judged again. `threshold_source` says whose threshold decided: `request` (the central orchestrator's,
-    sent with the request) or `service` (the guardrails service's own)."""
+    sent with the request) or `service` (the guardrails service's own). `pipeline_name_sequence` is the
+    request's (null: the full pipeline), so the orchestrator's GET can answer a request that never reached a
+    stage: guardrails only, or rejected here."""
     name = f"{table_prefix}guardrails_results"
     return Table(
         name,
@@ -110,6 +112,7 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
         Column("threshold_source", Text, nullable=False),
         Column("n_pages", Integer, nullable=True),
         Column("reason", Text, nullable=True),
+        Column("pipeline_name_sequence", JSON_TYPE, nullable=True),
         Column("report", JSON_TYPE, nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),

@@ -255,8 +255,8 @@ def _parse_params(raw: str | None) -> Any:
         "(`{fields, flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. "
         "The rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving "
         "`guardrails` out is the central orchestrator's call: the file checks above always run, and the trust "
-        "model then works without a guardrails probability. A `guardrails`-only request stores nothing: its "
-        "POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.\n\n"
+        "model then works without a guardrails probability. A `guardrails`-only request runs no stage: its "
+        "verdict is kept in `guardrails_results`, and `GET /v1/extract-ocr/{request_id}` answers from it.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
         "(e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -477,9 +477,14 @@ async def extract_ocr(
         + _CONTRACT_TABLE
         + "Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is always "
         "null here (it is not stored) and `document_type` is `npwp`.\n\n"
-        "**404** means no stage has a job for this request_id: it was refused or rejected by the guardrails model "
-        "(the `400` of the POST is its final answer), refused before the check, or its POST is still being "
-        "judged by guardrails.\n\n"
+        "A request no stage has a job for is answered from its last guardrails verdict "
+        "(`guardrails_results`), as its POST was: `400` `DOWNSTREAM_VALIDATION_ERROR` with `guardrails: 1` when "
+        "the guardrails model rejected it, `200` with the guardrails report as `data` when `guardrails` was its "
+        "only service.\n\n"
+        "**404** means neither: no stage has a job and no guardrails verdict is kept for this request_id. It was "
+        "refused before the check (file, `pipeline_name_sequence`, thresholds), it passed guardrails but its "
+        "hand-off to extraction failed (that POST answered 5xx), its POST is still being judged, or the verdict "
+        "could not be written (the database was down; writing it is best-effort).\n\n"
         "**Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it became a "
         "dead letter in the outbox) leaves the next stage without a job, so this endpoint keeps answering `202` "
         "for it. The `FAILED` callback and the central orchestrator's own tables carry that final state; this "
@@ -489,6 +494,10 @@ async def extract_ocr(
         200: success_examples(
             "Finished",
             completed=("The OCR result", {**_COMPLETED, "params": None}),
+            guardrails_only=(
+                '`pipeline_name_sequence: ["guardrails"]`: the kept guardrails report',
+                {**_GUARDRAILS_ONLY, "params": None},
+            ),
         ),
         202: {
             **success_examples(
@@ -499,12 +508,16 @@ async def extract_ocr(
         },
         400: {
             "model": ExtractOcrResponse,
-            "description": f"Rejected by the structuring rules (`{REJECTED_CODE}`, `guardrails: 1`)",
+            "description": (
+                f"Rejected by the structuring rules, or by the guardrails model (`{REJECTED_CODE}`, `guardrails: 1`; "
+                "`pipeline_last_stage` says which)"
+            ),
             "content": {
                 "application/json": {
                     "example": {
                         **_REJECTED,
                         "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+                        "pipeline_last_stage": "structuring",
                         "params": None,
                     }
                 }
@@ -513,7 +526,7 @@ async def extract_ocr(
         401: UNAUTHORIZED,
         404: error(
             404,
-            "No stage has a job for this request_id (rejected by the guardrails model, or not submitted yet)",
+            "No stage has a job and no guardrails verdict is kept for this request_id",
             f"No request found for request_id {RID}",
         ),
         422: {

@@ -6,9 +6,11 @@ Create Date: 2026-09-29
 
 The orchestrator NPWP writes one row per guardrails check: passed or not, the document confidence, the
 threshold that decided and whose it was (the central orchestrator's, sent with the request, or the
-guardrails service's own), and the full report with the per-page probabilities. Before this, a document
-rejected by guardrails left no trace in this database. Append-only: sending the same request_id again
-judges it again. `testing_guardrails_results` is the same table for the `-test` endpoints.
+guardrails service's own), the request's pipeline_name_sequence, and the full report with the per-page
+probabilities. Before this, a document rejected by guardrails left no trace in this database, and
+`GET /v1/extract-ocr/{request_id}` answered 404 for it and for a guardrails-only request; the sequence lets
+the GET answer both. Append-only: sending the same request_id again judges it again.
+`testing_guardrails_results` is the same table for the `-test` endpoints.
 """
 
 from collections.abc import Sequence
@@ -39,6 +41,7 @@ def upgrade() -> None:
             sa.Column("threshold_source", sa.Text(), nullable=False),
             sa.Column("n_pages", sa.Integer(), nullable=True),
             sa.Column("reason", sa.Text(), nullable=True),
+            sa.Column("pipeline_name_sequence", postgresql.JSONB(none_as_null=True), nullable=True),
             sa.Column("report", postgresql.JSONB(none_as_null=True), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("ds", sa.Text(), nullable=False),

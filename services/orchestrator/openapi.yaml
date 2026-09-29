@@ -238,8 +238,9 @@ paths:
         flag, reject_reason, ...}`) after `structuring`, and the fields above only after `scoring`. The
         rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving
         `guardrails` out is the central orchestrator''s call: the file checks above always run, and the
-        trust model then works without a guardrails probability. A `guardrails`-only request stores nothing:
-        its POST answer is final, and `GET /v1/extract-ocr/{request_id}` answers 404 for it.
+        trust model then works without a guardrails probability. A `guardrails`-only request runs no stage:
+        its verdict is kept in `guardrails_results`, and `GET /v1/extract-ocr/{request_id}` answers from
+        it.
 
 
         On 202 the result arrives by callback (sent by the pipeline stages), and can be read with `GET
@@ -488,9 +489,15 @@ paths:
         always null here (it is not stored) and `document_type` is `npwp`.
 
 
-        **404** means no stage has a job for this request_id: it was refused or rejected by the guardrails
-        model (the `400` of the POST is its final answer), refused before the check, or its POST is still
-        being judged by guardrails.
+        A request no stage has a job for is answered from its last guardrails verdict (`guardrails_results`),
+        as its POST was: `400` `DOWNSTREAM_VALIDATION_ERROR` with `guardrails: 1` when the guardrails
+        model rejected it, `200` with the guardrails report as `data` when `guardrails` was its only service.
+
+
+        **404** means neither: no stage has a job and no guardrails verdict is kept for this request_id.
+        It was refused before the check (file, `pipeline_name_sequence`, thresholds), it passed guardrails
+        but its hand-off to extraction failed (that POST answered 5xx), its POST is still being judged,
+        or the verdict could not be written (the database was down; writing it is best-effort).
 
 
         **Limitation.** A hand-off between two stages that failed for good (its retries ran out, or it
@@ -532,6 +539,31 @@ paths:
                     document_type: npwp
                     job_status: completed
                     guardrails: 0
+                guardrails_only:
+                  summary: '`pipeline_name_sequence: ["guardrails"]`: the kept guardrails report'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: OCR extraction completed successfully
+                    data:
+                      passed: true
+                      document:
+                        verdict: accepted
+                        confidence: 0.9821
+                        n_pages: 1
+                        n_approve: 1
+                        n_reject: 0
+                        threshold: 0.5
+                        threshold_target: reject
+                      pages:
+                      - page_index: 0
+                        proba_approve: 0.9821
+                        proba_reject: 0.0179
+                        verdict: accepted
+                    request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
+                    document_type: npwp
+                    job_status: completed
+                    guardrails: 0
         '202':
           description: Still running
           content:
@@ -549,8 +581,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '400':
-          description: 'Rejected by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`, `guardrails:
-            1`)'
+          description: 'Rejected by the structuring rules, or by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`,
+            `guardrails: 1`; `pipeline_last_stage` says which)'
           content:
             application/json:
               example:
@@ -562,6 +594,7 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 1
+                pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
@@ -576,8 +609,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: No stage has a job for this request_id (rejected by the guardrails model, or not
-            submitted yet)
+          description: No stage has a job and no guardrails verdict is kept for this request_id
           content:
             application/json:
               example:
