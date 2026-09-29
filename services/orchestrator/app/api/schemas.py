@@ -49,14 +49,15 @@ class ExtractOcrResponse(BaseModel):
         None, description="Failure code when the request failed or was refused; null otherwise", examples=[None]
     )
     request_id: str | None = Field(None, description="The request_id this response belongs to")
-    pipeline_last_stage: Literal["guardrails", "extraction", "structuring", "scoring"] | None = Field(
+    pipeline_last_stage: Literal["orchestrator", "guardrails", "extraction", "structuring", "scoring"] | None = Field(
         None,
         description=(
-            "The pipeline service this answer comes from, named as in `pipeline_name_sequence`: the last service "
-            "of the sequence when `completed`; the one that rejected (`guardrails`, `structuring`) or failed; the "
-            "one still running on 202; the one that could not be reached or answered an error. Null when this "
-            "service refused the request before any pipeline service was called (file checks, "
-            "`pipeline_name_sequence`, `params`, `document_type`)"
+            "The service this answer comes from, on every answer, errors included. A pipeline service named as in "
+            "`pipeline_name_sequence`: the last service of the sequence when `completed`; the one that rejected "
+            "(`guardrails`, `structuring`) or failed; the one still running on 202; the one that could not be "
+            "reached or answered an error. `orchestrator` when this service refused the request itself before any "
+            "pipeline service was called (API key, file checks, `pipeline_name_sequence`, thresholds, `params`, "
+            "`document_type`, an unknown request_id)"
         ),
         examples=["scoring"],
     )

@@ -261,3 +261,29 @@ def test_every_error_carries_a_stable_code():
     crash = probe.get("/boom/bug")
     assert crash.status_code == 500 and crash.json()["status_desc"] == "Internal Server Error"
     assert "secret" not in crash.text
+
+
+def test_an_error_names_the_service_it_comes_from():
+    from ocr_common.errors import UpstreamUnavailable
+
+    class CalledServiceDown(UpstreamUnavailable):
+        service = "extraction"
+
+    router = APIRouter()
+
+    @router.get("/own")
+    async def own():
+        raise BadRequest("Uploaded file is empty", "EMPTY_FILE")
+
+    @router.get("/called")
+    async def called():
+        raise CalledServiceDown("extraction service is unavailable")
+
+    probe = TestClient(
+        create_app(settings=settings, title="Demo", description="demo", service_name="scoring", routers=[router]),
+        raise_server_exceptions=False,
+    )
+
+    assert probe.get("/own").json()["pipeline_last_stage"] == "scoring"
+    assert probe.get("/called").json()["pipeline_last_stage"] == "extraction"
+    assert probe.get("/v1/unknown-route").json()["pipeline_last_stage"] == "scoring"

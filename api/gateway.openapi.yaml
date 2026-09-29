@@ -91,10 +91,11 @@ paths:
         | the service that failed |
 
 
-        `pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence`
-        names it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504
-        from calling one of them. It is null when this service refused the request before calling any
-        (file checks, `pipeline_name_sequence`, `params`, `document_type`).
+        `pipeline_last_stage` names the service an answer comes from, on every answer, errors included:
+        a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
+        `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
+        service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
+        thresholds, `params`, `document_type`, an unknown request_id).
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
@@ -255,6 +256,7 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 1
+                pipeline_last_stage: guardrails
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -269,6 +271,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: orchestrator
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
           content:
@@ -280,6 +283,7 @@ paths:
                 status_desc: Payload Too Large
                 message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
                 errors: FILE_TOO_LARGE
+                pipeline_last_stage: orchestrator
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
             `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence`
@@ -298,6 +302,7 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 0
+                pipeline_last_stage: structuring
                 params:
                   nik: '3123456711950001'
                   refno: PK19039Y8U
@@ -393,10 +398,11 @@ paths:
         | the service that failed |
 
 
-        `pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence`
-        names it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504
-        from calling one of them. It is null when this service refused the request before calling any
-        (file checks, `pipeline_name_sequence`, `params`, `document_type`).
+        `pipeline_last_stage` names the service an answer comes from, on every answer, errors included:
+        a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
+        `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
+        service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
+        thresholds, `params`, `document_type`, an unknown request_id).
 
 
         Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
@@ -520,6 +526,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: orchestrator
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
@@ -531,6 +538,7 @@ paths:
                 status_desc: Not Found
                 message: No request found for request_id OCR_9cb01af2-493d-446d-b191-af120333f6d0
                 errors: REQUEST_ID_NOT_FOUND
+                pipeline_last_stage: orchestrator
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -546,6 +554,7 @@ paths:
                 document_type: npwp
                 job_status: failed
                 guardrails: 0
+                pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
@@ -815,8 +824,8 @@ components:
         errors:
           type: string
           title: Errors
-          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
-            names a different field every time); for every other status it repeats `message`
+          description: 'Stable, machine-readable cause (e.g. `EMPTY_FILE`, `UNAUTHORIZED`, `VALIDATION_ERROR`):
+            branch on this, never on the wording of `message`'
           examples:
           - Uploaded file is empty
         request_id:
@@ -827,6 +836,15 @@ components:
           description: Present when the error is tied to a known request_id
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        pipeline_last_stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipeline Last Stage
+          description: 'The service the error comes from: this one (`orchestrator`, `guardrails`, `extraction`,
+            `structuring`, `scoring`), or the pipeline service it called when that one failed'
+          examples:
+          - orchestrator
       type: object
       required:
       - status_code
@@ -884,17 +902,19 @@ components:
           anyOf:
           - type: string
             enum:
+            - orchestrator
             - guardrails
             - extraction
             - structuring
             - scoring
           - type: 'null'
           title: Pipeline Last Stage
-          description: 'The pipeline service this answer comes from, named as in `pipeline_name_sequence`:
-            the last service of the sequence when `completed`; the one that rejected (`guardrails`, `structuring`)
-            or failed; the one still running on 202; the one that could not be reached or answered an
-            error. Null when this service refused the request before any pipeline service was called (file
-            checks, `pipeline_name_sequence`, `params`, `document_type`)'
+          description: 'The service this answer comes from, on every answer, errors included. A pipeline
+            service named as in `pipeline_name_sequence`: the last service of the sequence when `completed`;
+            the one that rejected (`guardrails`, `structuring`) or failed; the one still running on 202;
+            the one that could not be reached or answered an error. `orchestrator` when this service refused
+            the request itself before any pipeline service was called (API key, file checks, `pipeline_name_sequence`,
+            thresholds, `params`, `document_type`, an unknown request_id)'
           examples:
           - scoring
         document_type:

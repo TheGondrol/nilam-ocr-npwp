@@ -40,13 +40,21 @@ class ErrorResponse(BaseModel):
     errors: str = Field(
         ...,
         description=(
-            "Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message names a different "
-            "field every time); for every other status it repeats `message`"
+            "Stable, machine-readable cause (e.g. `EMPTY_FILE`, `UNAUTHORIZED`, `VALIDATION_ERROR`): branch on "
+            "this, never on the wording of `message`"
         ),
         examples=["Uploaded file is empty"],
     )
     request_id: str | None = Field(
         None, description="Present when the error is tied to a known request_id", examples=[REQUEST_ID_EXAMPLE]
+    )
+    pipeline_last_stage: str | None = Field(
+        None,
+        description=(
+            "The service the error comes from: this one (`orchestrator`, `guardrails`, `extraction`, `structuring`, "
+            "`scoring`), or the pipeline service it called when that one failed"
+        ),
+        examples=["orchestrator"],
     )
 
 

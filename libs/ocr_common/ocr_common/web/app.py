@@ -11,8 +11,9 @@ from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Header, Request
-from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.exceptions import HTTPException
 
 from ocr_common.config import BaseServiceSettings
 from ocr_common.errors import ServiceError, error_code
@@ -138,6 +139,8 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = settings
+    # Named in every error answer (`pipeline_last_stage`), so a caller knows which service the error comes from.
+    app.state.service_name = service_name
     if settings.auth_disabled:
         logging.getLogger(__name__).warning(
             "AUTH_DISABLED=true: X-API-Key is NOT checked on this service; only for local development"
@@ -153,6 +156,8 @@ def create_app(
     )
     for router in routers:
         app.include_router(router)
+    if service_name:
+        _name_the_service_in_error_examples(app, service_name)
     return app
 
 
@@ -348,27 +353,61 @@ def _health_router(
     return router
 
 
+def _error_body(
+    request: Request, status_code: int, message: str, code: str, exc: Exception | None = None
+) -> dict[str, Any]:
+    """The error envelope, plus `pipeline_last_stage`: the service the error comes from. That is the service
+    named by the exception (an error of another service this one called), else this service."""
+    return {
+        **envelope(status_code, message, None, get_request_id(request), errors=code),
+        "pipeline_last_stage": getattr(exc, "service", None) or getattr(request.app.state, "service_name", None),
+    }
+
+
+def _name_the_service_in_error_examples(app: FastAPI, service_name: str) -> None:
+    """The OpenAPI error examples as the handlers answer: with `pipeline_last_stage`, this service's name when
+    the example does not name another one."""
+    generate = app.openapi
+
+    def label(example: Any) -> None:
+        if isinstance(example, dict) and "status_code" in example and example.get("pipeline_last_stage") is None:
+            example["pipeline_last_stage"] = service_name
+
+    def openapi() -> dict[str, Any]:
+        fresh = app.openapi_schema is None
+        schema = generate()
+        if fresh:
+            for methods in schema.get("paths", {}).values():
+                for operation in methods.values():
+                    for code, response in operation.get("responses", {}).items():
+                        if not code.startswith(("4", "5")):
+                            continue
+                        for media in response.get("content", {}).values():
+                            label(media.get("example"))
+                            for named in media.get("examples", {}).values():
+                                label(named.get("value"))
+        return schema
+
+    app.openapi = openapi  # ty: ignore[invalid-assignment]
+
+
 def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError):
         """Every domain error carries its HTTP status; this is the one place it becomes a response, so
         routes raise and never translate."""
-        request_id = get_request_id(request)
         if exc.status_code >= 500:
             logger.error("%s %s -> %d: %s", request.method, request.url.path, exc.status_code, exc.message)
         return JSONResponse(
             status_code=exc.status_code,
-            content=envelope(
-                exc.status_code, exc.message, None, request_id, errors=error_code(exc.status_code, exc.code)
-            ),
+            content=_error_body(request, exc.status_code, exc.message, error_code(exc.status_code, exc.code), exc),
         )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        request_id = get_request_id(request)
         return JSONResponse(
             status_code=exc.status_code,
-            content=envelope(exc.status_code, str(exc.detail), None, request_id, errors=error_code(exc.status_code)),
+            content=_error_body(request, exc.status_code, str(exc.detail), error_code(exc.status_code)),
         )
 
     @app.exception_handler(Exception)
@@ -377,15 +416,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
         its details."""
         logger.exception("%s %s crashed", request.method, request.url.path, exc_info=exc)
         return JSONResponse(
-            status_code=500,
-            content=envelope(500, "Internal server error", None, get_request_id(request), errors=error_code(500)),
+            status_code=500, content=_error_body(request, 500, "Internal server error", error_code(500))
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        request_id = get_request_id(request)
         message = "; ".join(f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors())
-        return JSONResponse(
-            status_code=422,
-            content=envelope(422, message, None, request_id, errors="VALIDATION_ERROR"),
-        )
+        return JSONResponse(status_code=422, content=_error_body(request, 422, message, "VALIDATION_ERROR"))

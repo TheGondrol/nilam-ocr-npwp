@@ -251,6 +251,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
         '422':
           description: Validation Error
           content:
@@ -262,6 +263,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: scoring
       security:
       - APIKeyHeader: []
   /v1/scoring/jobs/{request_id}:
@@ -349,6 +351,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
@@ -361,6 +364,7 @@ paths:
                 message: 'No SCORING job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
                 errors: REQUEST_ID_NOT_FOUND
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -373,6 +377,7 @@ paths:
                 message: 'path.request_id: Field required'
                 errors: VALIDATION_ERROR
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/scoring/outbox:
@@ -445,6 +450,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
       security:
       - APIKeyHeader: []
   /v1/scoring/outbox/release:
@@ -507,6 +513,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
@@ -518,6 +525,7 @@ paths:
                 status_desc: Conflict
                 message: 'PIPELINE_OUTBOX is off: there is no outbox to release'
                 errors: CONFLICT
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -529,6 +537,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'query.request_id: Input should be a valid string'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/scoring/confidence:
@@ -599,6 +608,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
         '422':
           description: Validation Error
           content:
@@ -610,6 +620,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.npwp_score: Input should be a valid number'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: scoring
       security:
       - APIKeyHeader: []
 webhooks:
@@ -867,8 +878,8 @@ components:
         errors:
           type: string
           title: Errors
-          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
-            names a different field every time); for every other status it repeats `message`
+          description: 'Stable, machine-readable cause (e.g. `EMPTY_FILE`, `UNAUTHORIZED`, `VALIDATION_ERROR`):
+            branch on this, never on the wording of `message`'
           examples:
           - Uploaded file is empty
         request_id:
@@ -879,6 +890,15 @@ components:
           description: Present when the error is tied to a known request_id
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        pipeline_last_stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipeline Last Stage
+          description: 'The service the error comes from: this one (`orchestrator`, `guardrails`, `extraction`,
+            `structuring`, `scoring`), or the pipeline service it called when that one failed'
+          examples:
+          - orchestrator
       type: object
       required:
       - status_code

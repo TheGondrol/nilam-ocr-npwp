@@ -379,7 +379,7 @@ def test_an_unreachable_service_is_named_in_the_error(client, auth, stub_guardra
     assert (body["request_id"], body["params"]) == ("OCR_1", {"refno": "X1"})
 
 
-def test_a_refusal_before_any_pipeline_service_names_none(client, auth):
+def test_a_refusal_before_any_pipeline_service_names_the_orchestrator(client, auth):
     response = _submit(client, auth, pipeline_name_sequence=["extraction", "scoring"])
 
-    assert (response.status_code, response.json()["pipeline_last_stage"]) == (422, None)
+    assert (response.status_code, response.json()["pipeline_last_stage"]) == (422, "orchestrator")

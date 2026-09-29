@@ -265,6 +265,7 @@ paths:
                 status_desc: Bad Request
                 message: Send exactly one of file or file_url
                 errors: BAD_REQUEST
+                pipeline_last_stage: extraction
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -276,6 +277,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: extraction
         '422':
           description: Validation Error
           content:
@@ -287,6 +289,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.request_id: Field required'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: extraction
       security:
       - APIKeyHeader: []
   /v1/extraction/jobs/{request_id}:
@@ -400,6 +403,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
@@ -412,6 +416,7 @@ paths:
                 message: 'No OCR job found for request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0'
                 errors: REQUEST_ID_NOT_FOUND
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -424,6 +429,7 @@ paths:
                 message: 'path.request_id: Field required'
                 errors: VALIDATION_ERROR
                 request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/extraction/outbox:
@@ -496,6 +502,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: extraction
       security:
       - APIKeyHeader: []
   /v1/extraction/outbox/release:
@@ -558,6 +565,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
@@ -569,6 +577,7 @@ paths:
                 status_desc: Conflict
                 message: 'PIPELINE_OUTBOX is off: there is no outbox to release'
                 errors: CONFLICT
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
@@ -580,6 +589,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'query.request_id: Input should be a valid string'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: extraction
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/extraction/extract:
@@ -655,6 +665,7 @@ paths:
                 status_desc: Bad Request
                 message: Uploaded file is empty
                 errors: BAD_REQUEST
+                pipeline_last_stage: extraction
         '413':
           description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default)
           content:
@@ -666,6 +677,7 @@ paths:
                 status_desc: Payload Too Large
                 message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
                 errors: FILE_TOO_LARGE
+                pipeline_last_stage: extraction
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -677,6 +689,7 @@ paths:
                 status_desc: Unauthorized
                 message: Invalid or missing API key
                 errors: UNAUTHORIZED
+                pipeline_last_stage: extraction
         '500':
           description: OCR engine failed
           content:
@@ -688,6 +701,7 @@ paths:
                 status_desc: Internal Server Error
                 message: 'extraction OCR model error (500): error: OpenCV ...'
                 errors: INTERNAL_SERVER_ERROR
+                pipeline_last_stage: extraction
         '503':
           description: OCR model unreachable
           content:
@@ -699,6 +713,7 @@ paths:
                 status_desc: Service Unavailable
                 message: extraction OCR model is unavailable
                 errors: DOWNSTREAM_UNAVAILABLE
+                pipeline_last_stage: extraction
         '504':
           description: OCR model did not answer in time
           content:
@@ -710,6 +725,7 @@ paths:
                 status_desc: Gateway Timeout
                 message: extraction OCR model timed out after 30.0s
                 errors: DOWNSTREAM_TIMEOUT
+                pipeline_last_stage: extraction
         '422':
           description: Validation Error
           content:
@@ -721,6 +737,7 @@ paths:
                 status_desc: Unprocessable Entity
                 message: 'body.file: Expected UploadFile, received: str'
                 errors: VALIDATION_ERROR
+                pipeline_last_stage: extraction
       security:
       - APIKeyHeader: []
 webhooks:
@@ -937,8 +954,8 @@ components:
         errors:
           type: string
           title: Errors
-          description: Machine-readable cause. `VALIDATION_ERROR` for 422 (branch on this, the message
-            names a different field every time); for every other status it repeats `message`
+          description: 'Stable, machine-readable cause (e.g. `EMPTY_FILE`, `UNAUTHORIZED`, `VALIDATION_ERROR`):
+            branch on this, never on the wording of `message`'
           examples:
           - Uploaded file is empty
         request_id:
@@ -949,6 +966,15 @@ components:
           description: Present when the error is tied to a known request_id
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        pipeline_last_stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipeline Last Stage
+          description: 'The service the error comes from: this one (`orchestrator`, `guardrails`, `extraction`,
+            `structuring`, `scoring`), or the pipeline service it called when that one failed'
+          examples:
+          - orchestrator
       type: object
       required:
       - status_code

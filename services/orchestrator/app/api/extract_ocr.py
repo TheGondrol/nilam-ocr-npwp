@@ -37,6 +37,8 @@ RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
 INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
 INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 INVALID_THRESHOLD_CODE = "INVALID_THRESHOLD"
+# `pipeline_last_stage` of a request this service refuses itself, before calling any pipeline service.
+ENTRY = "orchestrator"
 # guardrails_tendency as the central orchestrator writes it (accepted / rejected), to the side it names.
 TENDENCIES: dict[str, Literal["accept", "reject"]] = {
     "accepted": "accept",
@@ -78,6 +80,7 @@ _REJECTED = extract_body(
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
+    pipeline_last_stage="guardrails",
 )
 _FAILED = extract_body(
     422,
@@ -88,6 +91,7 @@ _FAILED = extract_body(
     request_id=RID,
     document_type="npwp",
     params=_PARAMS,
+    pipeline_last_stage="structuring",
 )
 _GUARDRAILS_REPORT = {
     "passed": True,
@@ -123,10 +127,11 @@ _CONTRACT_TABLE = (
     f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
     "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` | the service that failed |\n\n"
-    "`pipeline_last_stage` names the pipeline service an answer comes from, as `pipeline_name_sequence` names "
-    "it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a 400 / 500 / 503 / 504 from calling "
-    "one of them. It is null when this service refused the request before calling any (file checks, "
-    "`pipeline_name_sequence`, `params`, `document_type`).\n\n"
+    "`pipeline_last_stage` names the service an answer comes from, on every answer, errors included: a "
+    "pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`, "
+    "`scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this service "
+    "refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`, thresholds, "
+    "`params`, `document_type`, an unknown request_id).\n\n"
 )
 
 
@@ -404,6 +409,7 @@ async def extract_ocr(
             errors="INVALID_PARAMS",
             request_id=request_id,
             document_type=document_type,
+            pipeline_last_stage=ENTRY,
         )
     if document_type != DOCUMENT_TYPE:
         response.status_code = 400
@@ -413,6 +419,7 @@ async def extract_ocr(
             errors="UNSUPPORTED_DOCUMENT_TYPE",
             request_id=request_id,
             document_type=document_type,
+            pipeline_last_stage=ENTRY,
         )
     try:
         sequence = _parse_sequence(pipeline_name_sequence)
@@ -424,6 +431,7 @@ async def extract_ocr(
             errors=INVALID_SEQUENCE_CODE,
             request_id=request_id,
             document_type=document_type,
+            pipeline_last_stage=ENTRY,
         )
     try:
         guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold, guardrails_tendency)
@@ -439,6 +447,7 @@ async def extract_ocr(
             errors=INVALID_THRESHOLD_CODE,
             request_id=request_id,
             document_type=document_type,
+            pipeline_last_stage=ENTRY,
         )
 
     # The central orchestrator's request_id becomes the id of this request: in the envelope of an error raised

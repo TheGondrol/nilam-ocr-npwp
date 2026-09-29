@@ -92,7 +92,11 @@ def test_a_threshold_that_cannot_be_read_is_422_and_nothing_runs(client, auth, s
 
     assert response.status_code == 422
     body = response.json()
-    assert (body["errors"], body["request_id"], body["pipeline_last_stage"]) == ("INVALID_THRESHOLD", RID, None)
+    assert (body["errors"], body["request_id"], body["pipeline_last_stage"]) == (
+        "INVALID_THRESHOLD",
+        RID,
+        "orchestrator",
+    )
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 

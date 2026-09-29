@@ -153,7 +153,7 @@ di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET 
 | 400 ditolak aturan structuring | `structuring` |
 | 422 `<TAHAP>_FAILED` | service yang gagal (`OCR_FAILED` = `extraction`) |
 | 400 / 500 / 503 / 504 saat memanggil sebuah service (tidak terjangkau, timeout, file tidak terbaca model) | service itu |
-| ditolak sebelum service pipeline mana pun dipanggil (file, `pipeline_name_sequence`, `params`, `document_type`) | `null` |
+| ditolak orchestrator sendiri sebelum service pipeline mana pun dipanggil (API key, file, `pipeline_name_sequence`, threshold, `params`, `document_type`, request_id tidak dikenal pada `GET`) | `orchestrator` |
 
 | Field | Wajib | Keterangan |
 |---|---|---|

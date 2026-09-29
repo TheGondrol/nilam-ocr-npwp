@@ -76,3 +76,35 @@ def test_an_unknown_request_id_is_404_request_id_not_found(client, auth, stub_wa
     response = client.get(f"/v1/extract-ocr/{RID}", headers=auth)
 
     assert (response.status_code, response.json()["errors"]) == (404, "REQUEST_ID_NOT_FOUND")
+
+
+@pytest.mark.parametrize(
+    ("files", "form", "headers_ok"),
+    [
+        ({"file": ("npwp.jpg", b"", "image/jpeg")}, {}, True),  # a file check (plain envelope)
+        (None, {"document_type": "ktp"}, True),  # a refusal in the extract-ocr shape
+        (None, {}, False),  # no API key
+    ],
+)
+def test_every_refusal_of_the_entry_point_names_the_orchestrator(client, auth, files, form, headers_ok):
+    response = _submit(client, auth if headers_ok else {}, files=files, **form)
+
+    assert response.status_code >= 400
+    assert response.json()["pipeline_last_stage"] == "orchestrator"
+
+
+def test_a_missing_required_field_names_the_orchestrator(client, auth):
+    response = client.post("/v1/extract-ocr", headers=auth, files={"file": ("npwp.jpg", JPEG, "image/jpeg")})
+
+    body = response.json()
+    assert (response.status_code, body["errors"], body["pipeline_last_stage"]) == (
+        422,
+        "VALIDATION_ERROR",
+        "orchestrator",
+    )
+
+
+def test_an_unknown_request_id_names_the_orchestrator(client, auth, stub_waiter):
+    stub_waiter.snapshot_outcome = None
+
+    assert client.get(f"/v1/extract-ocr/{RID}", headers=auth).json()["pipeline_last_stage"] == "orchestrator"
