@@ -105,7 +105,42 @@ class ScoringJobRequest(BaseModel):
         return parse_column_thresholds(value)
 
 
+class ScoredField(BaseModel):
+    value: str | None = Field(
+        ..., description="The field's value; null when not found", examples=["12.345.678.9-012.345"]
+    )
+    confidence: Literal[0, 1] = Field(
+        ...,
+        description="1 when the trust model's probability reached `threshold`, else 0 (also 0 when not found)",
+        examples=[1],
+    )
+    threshold: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description=(
+            "The threshold this field was decided with: its `column_confidence_threshold` from the central "
+            "orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`"
+        ),
+        examples=[0.5],
+    )
+
+
 class ScoringJobResult(FieldConfidences):
+    fields: dict[str, ScoredField] | None = Field(
+        None,
+        description=(
+            "The `extract-ocr` fields as scoring decided them (`nomor_npwp`, `nama`: the person's name, or the "
+            "company's registered name): value, 0/1 confidence, and the threshold used. The outcome row "
+            "(`ORCHESTRATION_OUTCOME_TABLE`) carries the same values. Null for a result stored before it existed"
+        ),
+        examples=[
+            {
+                "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1, "threshold": 0.5},
+                "nama": {"value": "BUDI SANTOSO", "confidence": 1, "threshold": 0.5},
+            }
+        ],
+    )
     payload: ConfidenceRequest = Field(
         ..., description="Exactly what was scored, built from the chained results: an audit trail for the two numbers"
     )

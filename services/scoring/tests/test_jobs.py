@@ -61,7 +61,15 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
     job = wait_for_job(client, "/v1/scoring/jobs/REQ_1")
     assert job["status"] == "DONE"
     result = job["result"]
-    assert set(result) == {"npwp_confidence", "name_confidence", "payload"}
+    assert set(result) == {"npwp_confidence", "name_confidence", "fields", "payload"}
+    assert result["fields"] == {
+        "nomor_npwp": {
+            "value": "12.345.678.9-012.345",
+            "confidence": int(result["npwp_confidence"] >= 0.5),
+            "threshold": 0.5,
+        },
+        "nama": {"value": "BUDI SANTOSO", "confidence": int(result["name_confidence"] >= 0.5), "threshold": 0.5},
+    }
     assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
     assert result["payload"]["npwp"] == "123456789012345"
     assert result["payload"]["name_base"] == "BUDI SANTOSO"
@@ -281,3 +289,21 @@ def test_an_invalid_column_confidence_threshold_is_422(harness, auth, thresholds
     )
 
     assert response.status_code == 422
+
+
+def test_the_0_1_decision_is_stored_with_the_result_and_matches_the_outcome_row(outcome_harness, auth):
+    client, repository, _ = outcome_harness
+    body = {**_payload("REQ_store"), "column_confidence_threshold": {"nomor_npwp": 0.9}}
+
+    client.post("/v1/scoring/jobs", headers=auth, json=body)
+    job = wait_for_job(client, "/v1/scoring/jobs/REQ_store")
+
+    # FixedConfidence: npwp 0.8 (< 0.9 given), name 0.6 (>= FIELD_CONFIDENCE_THRESHOLD 0.5)
+    assert job["result"]["fields"] == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0, "threshold": 0.9},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1, "threshold": 0.5},
+    }
+    assert repository.outcomes["REQ_store"] == {
+        name: {"value": field["value"], "confidence": field["confidence"]}
+        for name, field in job["result"]["fields"].items()
+    }

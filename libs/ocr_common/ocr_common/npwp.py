@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.types import ContractData, ContractField, FinalField, FinalResult
+from ocr_common.types import ContractData, ContractField, FinalField, FinalResult, ScoredField
 
 DOCUMENT_TYPE = "npwp"
 # `errors` of a 400 for a document that is not accepted: by the guardrails model, or by a rejecting
@@ -67,15 +67,33 @@ def contract_fields(
     (the central orchestrator's `column_confidence_threshold`), else `threshold`. The structuring
     rules' flag stays internal: it is already in the trust model's probability, and a document with a
     rejecting flag never gets this far."""
+    return contract_data(scored_fields(result, threshold, column_thresholds))
+
+
+def scored_fields(
+    result: FinalResult, threshold: float, column_thresholds: Mapping[str, float] | None = None
+) -> dict[str, ScoredField]:
+    """`contract_fields` plus the threshold each field was decided with: what the scoring stage stores."""
     fields = result["fields"]
     scoring = result["scoring"]
     columns = column_thresholds or {}
     name = fields.get("nama") if _has_value(fields.get("nama")) else fields.get("nama_badan")
+    nomor_threshold = columns.get("nomor_npwp", threshold)
+    nama_threshold = columns.get("nama", threshold)
     return {
-        "nomor_npwp": _field(
-            fields.get("nomor_npwp"), scoring.get("npwp_confidence"), columns.get("nomor_npwp", threshold)
-        ),
-        "nama": _field(name, scoring.get("name_confidence"), columns.get("nama", threshold)),
+        "nomor_npwp": {
+            **_field(fields.get("nomor_npwp"), scoring.get("npwp_confidence"), nomor_threshold),
+            "threshold": nomor_threshold,
+        },
+        "nama": {**_field(name, scoring.get("name_confidence"), nama_threshold), "threshold": nama_threshold},
+    }
+
+
+def contract_data(fields: Mapping[str, ScoredField]) -> ContractData:
+    """The `extract-ocr` `data` of stored scored fields: value and 0/1 confidence, without the threshold."""
+    return {
+        "nomor_npwp": {"value": fields["nomor_npwp"]["value"], "confidence": fields["nomor_npwp"]["confidence"]},
+        "nama": {"value": fields["nama"]["value"], "confidence": fields["nama"]["confidence"]},
     }
 
 

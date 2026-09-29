@@ -42,8 +42,9 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "created_at": "202
         "runs the trust model, stores the result (`scoring_results`), and POSTs the `SCORING` callback, which "
         "carries the **final result** of the request.\n\n"
         "The outcome is two per-field confidences. There is no document-level score and no approve / reject "
-        "decision. The outcome row (`ORCHESTRATION_OUTCOME_TABLE`) turns each confidence into `0`/`1` with the "
-        "field's `column_confidence_threshold` from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`."
+        "decision. Each confidence is also turned into `0`/`1` with the field's `column_confidence_threshold` "
+        "from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`, and stored with the result (`fields`, "
+        "with the threshold used); the outcome row (`ORCHESTRATION_OUTCOME_TABLE`) carries the same values."
     ),
     responses={
         202: success_examples(
@@ -93,7 +94,8 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
     operation_id="getScoringJob",
     summary="Status and result of the scoring stage",
     description=(
-        "Status of this stage only and, once `DONE`, the two confidences plus the exact payload that was scored. "
+        "Status of this stage only and, once `DONE`, the two confidences, the 0/1 decision per field with the "
+        "threshold used (`fields`), and the exact payload that was scored. "
         "Internal: the orchestrator NPWP reads it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`); "
         "the central orchestrator receives the final result in the callback. Also useful to audit a score."
     ),
@@ -112,6 +114,10 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
                         "result": {
                             "npwp_confidence": 0.9806,
                             "name_confidence": 0.9948,
+                            "fields": {
+                                "nomor_npwp": {"value": "12.345.678.9-012.000", "confidence": 1, "threshold": 0.9},
+                                "nama": {"value": "PT CONTOH INDONESIA", "confidence": 1, "threshold": 0.5},
+                            },
                             "payload": CONFIDENCE_PAYLOAD_EXAMPLE,
                         },
                         "updated_at": "2026-09-18T04:00:01+00:00",

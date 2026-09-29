@@ -175,8 +175,9 @@ paths:
 
 
         The outcome is two per-field confidences. There is no document-level score and no approve / reject
-        decision. The outcome row (`ORCHESTRATION_OUTCOME_TABLE`) turns each confidence into `0`/`1` with
-        the field''s `column_confidence_threshold` from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`.'
+        decision. Each confidence is also turned into `0`/`1` with the field''s `column_confidence_threshold`
+        from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`, and stored with the result (`fields`,
+        with the threshold used); the outcome row (`ORCHESTRATION_OUTCOME_TABLE`) carries the same values.'
       operationId: submitScoringJob
       requestBody:
         content:
@@ -245,8 +246,9 @@ paths:
       tags:
       - Pipeline
       summary: Status and result of the scoring stage
-      description: 'Status of this stage only and, once `DONE`, the two confidences plus the exact payload
-        that was scored. Internal: the orchestrator NPWP reads it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`);
+      description: 'Status of this stage only and, once `DONE`, the two confidences, the 0/1 decision
+        per field with the threshold used (`fields`), and the exact payload that was scored. Internal:
+        the orchestrator NPWP reads it (while it waits, and for its `GET /v1/extract-ocr/{request_id}`);
         the central orchestrator receives the final result in the callback. Also useful to audit a score.'
       operationId: getScoringJob
       security:
@@ -280,6 +282,15 @@ paths:
                       result:
                         npwp_confidence: 0.9806
                         name_confidence: 0.9948
+                        fields:
+                          nomor_npwp:
+                            value: 12.345.678.9-012.000
+                            confidence: 1
+                            threshold: 0.9
+                          nama:
+                            value: PT CONTOH INDONESIA
+                            confidence: 1
+                            threshold: 0.5
                         payload:
                           npwp: 12.345.678.9-012.000
                           npwp_score: 0.98
@@ -1505,6 +1516,41 @@ components:
       - checks
       title: ReadyResponse
       description: '`GET /ready`.'
+    ScoredField:
+      properties:
+        value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value
+          description: The field's value; null when not found
+          examples:
+          - 12.345.678.9-012.345
+        confidence:
+          type: integer
+          enum:
+          - 0
+          - 1
+          title: Confidence
+          description: 1 when the trust model's probability reached `threshold`, else 0 (also 0 when not
+            found)
+          examples:
+          - 1
+        threshold:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Threshold
+          description: 'The threshold this field was decided with: its `column_confidence_threshold` from
+            the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`'
+          examples:
+          - 0.5
+      type: object
+      required:
+      - value
+      - confidence
+      - threshold
+      title: ScoredField
     ScoringJobRequest:
       properties:
         request_id:
@@ -1596,6 +1642,26 @@ components:
           description: P(the name is correct); null when no name was found
           examples:
           - 0.9471
+        fields:
+          anyOf:
+          - additionalProperties:
+              $ref: '#/components/schemas/ScoredField'
+            type: object
+          - type: 'null'
+          title: Fields
+          description: 'The `extract-ocr` fields as scoring decided them (`nomor_npwp`, `nama`: the person''s
+            name, or the company''s registered name): value, 0/1 confidence, and the threshold used. The
+            outcome row (`ORCHESTRATION_OUTCOME_TABLE`) carries the same values. Null for a result stored
+            before it existed'
+          examples:
+          - nama:
+              confidence: 1
+              threshold: 0.5
+              value: BUDI SANTOSO
+            nomor_npwp:
+              confidence: 1
+              threshold: 0.5
+              value: 12.345.678.9-012.345
         payload:
           $ref: '#/components/schemas/ConfidenceRequest'
           description: 'Exactly what was scored, built from the chained results: an audit trail for the

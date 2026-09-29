@@ -4,7 +4,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import BadRequest, UnprocessableEntity
-from ocr_common.npwp import DOCUMENT_TYPE, contract_fields, final_result
+from ocr_common.npwp import DOCUMENT_TYPE, contract_data, contract_fields, final_result, scored_fields
 from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import ContractData, FinalResult, ScoringResult
@@ -47,7 +47,7 @@ class ScoringJobService:
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
                 "service has no DATABASE_URL to read structuring_results from",
             )
-        work, final = self._spec(request_id, document_type, guardrails, ocr, structuring)
+        work, final = self._spec(request_id, document_type, guardrails, ocr, structuring, column_thresholds)
         return await self._pipeline.submit(
             request_id,
             work,
@@ -66,7 +66,12 @@ class ScoringJobService:
         database, the rest comes from the `input` stored when the job was claimed."""
         input = input or {}
         work, final = self._spec(
-            request_id, input.get("document_type") or DOCUMENT_TYPE, input.get("guardrails"), None, None
+            request_id,
+            input.get("document_type") or DOCUMENT_TYPE,
+            input.get("guardrails"),
+            None,
+            None,
+            input.get("column_confidence_threshold"),
         )
         await self._pipeline.resume(
             request_id,
@@ -81,7 +86,15 @@ class ScoringJobService:
     def _outcome_data(
         self, final: Final, column_thresholds: Mapping[str, float] | None
     ) -> Callable[[Mapping[str, Any]], ContractData]:
-        return lambda scoring: contract_fields(final(scoring), self._confidence_threshold, column_thresholds)
+        """The outcome row's `data`: the 0/1 confidences stored in the result, so the row and the stored
+        result can never disagree."""
+
+        def data(scoring: Mapping[str, Any]) -> ContractData:
+            if "fields" in scoring:
+                return contract_data(scoring["fields"])
+            return contract_fields(final(scoring), self._confidence_threshold, column_thresholds)
+
+        return data
 
     def _spec(
         self,
@@ -90,6 +103,7 @@ class ScoringJobService:
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any] | None,
+        column_thresholds: Mapping[str, float] | None = None,
     ) -> tuple[Work, Final]:
         chain: dict[str, Any] = {}
 
@@ -106,9 +120,18 @@ class ScoringJobService:
                 ocr_result = await self._results.get("ocr", request_id)
             payload = self._confidence.payload_from_chain(guardrails, ocr_result, chain["structuring"])
             result = await run_in_threadpool(self._confidence.predict, payload)
+            npwp, name = result["npwp_confidence"], result["name_confidence"]
+            # The 0/1 decision is stored with the probabilities: which field passed, with which threshold.
+            decided = final_result(
+                document_type,
+                guardrails,
+                chain["structuring"],
+                {"npwp_confidence": npwp, "name_confidence": name},
+            )
             return {
-                "npwp_confidence": result["npwp_confidence"],
-                "name_confidence": result["name_confidence"],
+                "npwp_confidence": npwp,
+                "name_confidence": name,
+                "fields": scored_fields(decided, self._confidence_threshold, column_thresholds),
                 "payload": payload,
             }
 
