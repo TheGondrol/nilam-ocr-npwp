@@ -90,15 +90,15 @@ spec:
             {{- end }}
             - name: HOME
               value: /tmp
+          # Liveness and startup check the port only: /health reports on the database, and a database blip
+          # must not restart the pods.
           startupProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: {{ $name }}
             periodSeconds: 2
             failureThreshold: {{ $svc.startupFailureThreshold }}
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: {{ $name }}
             periodSeconds: 10
             timeoutSeconds: 3

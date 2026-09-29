@@ -131,8 +131,17 @@ PIPELINE_SEQUENCE_DESCRIPTION = (
 class HealthResponse(BaseModel):
     """`GET /health`."""
 
-    status: str = Field(..., description="Always `healthy` while the process is alive", examples=["healthy"])
+    status: Literal["healthy", "unhealthy"] = Field(
+        ...,
+        description="`healthy` (HTTP 200) when every dependency this service checks answers, else `unhealthy` (503)",
+        examples=["healthy"],
+    )
     version: str = Field(..., description="Service version", examples=["1.0.0"])
+    detail: str | None = Field(
+        None,
+        description="What does not answer when `unhealthy` (e.g. `database unreachable`); null when healthy",
+        examples=[None],
+    )
     device: str = Field(..., description="Where this service computes", examples=["cpu"])
     backends: dict[str, str] = Field(
         ...,

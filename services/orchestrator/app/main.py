@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from ocr_common.pipeline.database import dispose_engines
-from ocr_common.web.app import create_app
+from ocr_common.web.app import create_app, database_readiness
 
 from app.api import extract_ocr, testing
 from app.config import get_settings
@@ -52,7 +52,9 @@ app = create_app(
         {"name": "Extract OCR", "description": "Start the pipeline for a document, and read where a request is"},
     ],
     routers=[extract_ocr.router, *(testing.routers if settings.testing_endpoints else [])],
+    # Not a readiness dependency: guardrails_results is best-effort, the entry point must keep serving without it.
     readiness={},
+    health=database_readiness(settings.database_url),
     lifespan=lifespan,
     entrypoint=True,
 )

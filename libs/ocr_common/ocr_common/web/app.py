@@ -3,6 +3,7 @@ envelope for every error, the health, readiness and metrics routes, and the call
 documentation.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -25,6 +26,23 @@ logger = logging.getLogger(__name__)
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 ReadinessCheck = Callable[[], Awaitable[None]]
+
+
+# A dependency check that does not answer in this time counts as failed (a database behind a dead route can
+# otherwise hold the connection attempt for minutes).
+CHECK_TIMEOUT_SECONDS = 3.0
+
+
+async def _run_checks(checks: Mapping[str, ReadinessCheck], kind: str) -> dict[str, str]:
+    results: dict[str, str] = {}
+    for name, check in checks.items():
+        try:
+            await asyncio.wait_for(check(), CHECK_TIMEOUT_SECONDS)
+            results[name] = "ok"
+        except Exception as exc:
+            logger.warning("%s check %r failed: %s", kind, name, type(exc).__name__)
+            results[name] = "failed"
+    return results
 
 
 def database_readiness(database_url: str | None) -> dict[str, ReadinessCheck]:
@@ -85,6 +103,7 @@ def create_app(
     routers: Iterable[APIRouter] = (),
     backends: dict[str, str] | None = None,
     readiness: Mapping[str, ReadinessCheck] | None = None,
+    health: Mapping[str, ReadinessCheck] | None = None,
     backends_example: dict[str, str] | None = None,
     readiness_example: dict[str, str] | None = None,
     lifespan: Lifespan | None = None,
@@ -94,7 +113,10 @@ def create_app(
 
     `entrypoint=True` marks the one service reachable from other namespaces (the orchestrator NPWP): its
     OpenAPI `servers` then start with the release's entry Service, the address the central orchestrator
-    uses."""
+    uses.
+
+    `readiness` are the dependencies this pod cannot work without (`/ready`, the readiness probe); `health`
+    the ones `/health` reports on, e.g. a database this service only writes to on a best-effort basis."""
     configure_logging(fmt=settings.effective_log_format, level=settings.log_level, service=service_name)
 
     servers: list[dict[str, Any]] = [{"url": "/", "description": "This host (where this page is served)"}]
@@ -110,7 +132,7 @@ def create_app(
         title=title,
         version=version,
         description=description.rstrip() + API_CONVENTIONS,
-        openapi_tags=[*tags, {"name": "Health", "description": "Liveness and readiness probes; no API key"}],
+        openapi_tags=[*tags, {"name": "Health", "description": "Health and readiness checks; no API key"}],
         servers=servers,
         lifespan=lifespan,
     )
@@ -124,7 +146,9 @@ def create_app(
     app.add_middleware(RequestIdMiddleware)
     _register_exception_handlers(app)
     app.include_router(
-        _health_router(version, backends or {}, readiness or {}, backends_example or {}, readiness_example or {})
+        _health_router(
+            version, backends or {}, readiness or {}, health or {}, backends_example or {}, readiness_example or {}
+        )
     )
     for router in routers:
         app.include_router(router)
@@ -216,32 +240,55 @@ def _health_router(
     version: str,
     backends: dict[str, str],
     readiness: Mapping[str, ReadinessCheck],
+    health_checks: Mapping[str, ReadinessCheck],
     backends_example: dict[str, str],
     readiness_example: dict[str, str],
 ) -> APIRouter:
     router = APIRouter(tags=["Health"])
+    healthy = {"status": "healthy", "version": version, "detail": None, "device": "cpu"}
 
     @router.get(
         "/health",
         response_model=HealthResponse,
         operation_id="getHealth",
-        summary="Liveness probe",
+        summary="Health check, including the database",
         description=(
-            "Says the process is alive and which implementations are active. Never touches a dependency. "
-            "Does not require an API key."
+            "Says whether the service can reach what it depends on: 200 `healthy` when every dependency it checks "
+            "answers (the database, for a service that has one), 503 `unhealthy` with the cause in `detail` "
+            "otherwise. Each check gives up after 3 s. Also lists the active implementations (`backends`). Not "
+            "used by the Kubernetes probes: liveness and startup check the port, readiness is `/ready`. Does not "
+            "require an API key."
         ),
         responses={
             200: success_examples(
-                "The process is alive",
-                healthy=(
-                    "Healthy",
-                    {"status": "healthy", "version": version, "device": "cpu", "backends": backends_example},
-                ),
-            )
+                "Every dependency answers",
+                healthy=("Healthy", {**healthy, "backends": backends_example}),
+            ),
+            503: {
+                "model": HealthResponse,
+                "description": "A dependency does not answer",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            **healthy,
+                            "status": "unhealthy",
+                            "detail": "database unreachable",
+                            "backends": backends_example,
+                        }
+                    }
+                },
+            },
         },
     )
     async def health():
-        return {"status": "healthy", "version": version, "device": "cpu", "backends": backends}
+        results = await _run_checks(health_checks, "health")
+        failed = [name for name, state in results.items() if state != "ok"]
+        if not failed:
+            return {**healthy, "backends": backends}
+        detail = ", ".join(f"{name} unreachable" for name in failed)
+        return JSONResponse(
+            status_code=503, content={**healthy, "status": "unhealthy", "detail": detail, "backends": backends}
+        )
 
     @router.get(
         "/ready",
@@ -249,8 +296,8 @@ def _health_router(
         operation_id="getReadiness",
         summary="Readiness probe",
         description=(
-            "Liveness vs readiness: /health only says the process is alive and never touches a dependency "
-            "(a database blip must not make Kubernetes restart every pod). /ready says whether this pod can "
+            "The readiness probe. Liveness is checked on the port, never on a dependency (a database blip "
+            "must not make Kubernetes restart every pod). /ready says whether this pod can "
             "do its job right now: 200 when every REQUIRED dependency of this service answers, 503 otherwise, "
             "so the pod is taken out of the Service until it recovers. Downstream stages and model services "
             "are deliberately not checked: their outage is reported per job, not by refusing traffic. "
@@ -273,14 +320,7 @@ def _health_router(
         },
     )
     async def ready():
-        checks: dict[str, str] = {}
-        for name, check in readiness.items():
-            try:
-                await check()
-                checks[name] = "ok"
-            except Exception as exc:
-                logger.warning("readiness check %r failed: %s", name, type(exc).__name__)
-                checks[name] = "failed"
+        checks = await _run_checks(readiness, "readiness")
         ok = all(state == "ok" for state in checks.values())
         return JSONResponse(
             status_code=200 if ok else 503, content={"status": "ready" if ok else "not_ready", "checks": checks}

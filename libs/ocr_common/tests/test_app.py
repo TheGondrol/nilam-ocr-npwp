@@ -177,3 +177,51 @@ def test_an_adopted_request_id_is_in_the_error_envelope_and_the_response_header(
     assert response.status_code == 400
     assert response.json()["request_id"] == "OCR_from_form"
     assert response.headers[REQUEST_ID_HEADER] == "OCR_from_form"
+
+
+def _app_with_health(health):
+    return TestClient(
+        create_app(settings=settings, title="Demo", description="demo", health=health, backends={"demo": "mock"}),
+        raise_server_exceptions=False,
+    )
+
+
+def test_health_is_healthy_when_the_database_answers():
+    async def ok():
+        return None
+
+    response = _app_with_health({"database": ok}).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "healthy",
+        "version": "1.0.0",
+        "detail": None,
+        "device": "cpu",
+        "backends": {"demo": "mock"},
+    }
+
+
+def test_health_is_503_unhealthy_when_the_database_does_not_answer():
+    async def down():
+        raise ConnectionError("postgresql://user:secret@db:5432 unreachable")
+
+    response = _app_with_health({"database": down}).get("/health")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert (body["status"], body["detail"]) == ("unhealthy", "database unreachable")
+    assert "secret" not in response.text
+
+
+def test_a_check_that_hangs_counts_as_failed(monkeypatch):
+    import asyncio
+
+    from ocr_common.web import app as web_app
+
+    monkeypatch.setattr(web_app, "CHECK_TIMEOUT_SECONDS", 0.05)
+
+    async def hang():
+        await asyncio.sleep(5)
+
+    assert _app_with_health({"database": hang}).get("/health").status_code == 503

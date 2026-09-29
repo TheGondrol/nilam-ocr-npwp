@@ -84,13 +84,16 @@ paths:
     get:
       tags:
       - Health
-      summary: Liveness probe
-      description: Says the process is alive and which implementations are active. Never touches a dependency.
-        Does not require an API key.
+      summary: Health check, including the database
+      description: 'Says whether the service can reach what it depends on: 200 `healthy` when every dependency
+        it checks answers (the database, for a service that has one), 503 `unhealthy` with the cause in
+        `detail` otherwise. Each check gives up after 3 s. Also lists the active implementations (`backends`).
+        Not used by the Kubernetes probes: liveness and startup check the port, readiness is `/ready`.
+        Does not require an API key.'
       operationId: getHealth
       responses:
         '200':
-          description: The process is alive
+          description: Every dependency answers
           content:
             application/json:
               schema:
@@ -105,17 +108,31 @@ paths:
                     backends:
                       extraction: paddle
                       storage: postgres
+        '503':
+          description: A dependency does not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: unhealthy
+                version: 1.0.0
+                detail: database unreachable
+                device: cpu
+                backends:
+                  extraction: paddle
+                  storage: postgres
   /ready:
     get:
       tags:
       - Health
       summary: Readiness probe
-      description: 'Liveness vs readiness: /health only says the process is alive and never touches a
-        dependency (a database blip must not make Kubernetes restart every pod). /ready says whether this
-        pod can do its job right now: 200 when every REQUIRED dependency of this service answers, 503
-        otherwise, so the pod is taken out of the Service until it recovers. Downstream stages and model
-        services are deliberately not checked: their outage is reported per job, not by refusing traffic.
-        Does not require an API key.'
+      description: 'The readiness probe. Liveness is checked on the port, never on a dependency (a database
+        blip must not make Kubernetes restart every pod). /ready says whether this pod can do its job
+        right now: 200 when every REQUIRED dependency of this service answers, 503 otherwise, so the pod
+        is taken out of the Service until it recovers. Downstream stages and model services are deliberately
+        not checked: their outage is reported per job, not by refusing traffic. Does not require an API
+        key.'
       operationId: getReadiness
       responses:
         '200':
@@ -980,8 +997,12 @@ components:
       properties:
         status:
           type: string
+          enum:
+          - healthy
+          - unhealthy
           title: Status
-          description: Always `healthy` while the process is alive
+          description: '`healthy` (HTTP 200) when every dependency this service checks answers, else `unhealthy`
+            (503)'
           examples:
           - healthy
         version:
@@ -990,6 +1011,15 @@ components:
           description: Service version
           examples:
           - 1.0.0
+        detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Detail
+          description: What does not answer when `unhealthy` (e.g. `database unreachable`); null when
+            healthy
+          examples:
+          - null
         device:
           type: string
           title: Device
@@ -1584,4 +1614,4 @@ tags:
 - name: Extraction
   description: Raw OCR text, synchronous
 - name: Health
-  description: Liveness and readiness probes; no API key
+  description: Health and readiness checks; no API key

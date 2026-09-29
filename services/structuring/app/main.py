@@ -82,6 +82,7 @@ app = create_app(
         "storage": "postgres" if settings.database_url else "memory",
     },
     readiness=database_readiness(settings.database_url),
+    health=database_readiness(settings.database_url),
     backends_example={"structuring": "npwp_rules", "storage": "postgres"},
     readiness_example={"database": "ok"},
     lifespan=lifespan,
