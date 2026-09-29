@@ -45,3 +45,17 @@ services:
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
+
+# Node l5uf di cluster dev rusak tetapi tetap Ready dan menerima pod (29 Sep 2026): sandbox pod baru tidak
+# pernah dibuat (FailedCreatePodSandBox DeadlineExceeded) dan pod tim lain macet Terminating di sana. Pod
+# scoring dan structuring yang dijadwalkan ke node itu tidak pernah menyala, jadi helm --wait menunggu sampai
+# dibatalkan. Node itu milik cluster bersama, jadi pod kita saja yang menghindarinya. Hapus blok ini setelah
+# node diganti.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: NotIn
+              values: [gke-gc-ddb-dev-gke-c-gc-dgv-dev-ndp-c-42b3b8a0-l5uf]
