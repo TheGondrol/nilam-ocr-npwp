@@ -6,15 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 JSON_TYPE = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
+# The PostgreSQL schema every table of this repository lives in (migration 0010 moved them out of `public`).
+PIPELINE_SCHEMA = "ocr_pipeline"
+
 
 _engines: dict[str, AsyncEngine] = {}
 _factories: dict[str, async_sessionmaker] = {}
 
 
 def get_engine(url: str) -> AsyncEngine:
-    """The engine for `url`, created on first use with pool pre-ping."""
+    """The engine for `url`, created on first use with pool pre-ping. SQLite (the tests) has no schemas, so
+    there the tables of `PIPELINE_SCHEMA` are used without one."""
     if url not in _engines:
-        _engines[url] = create_async_engine(url, pool_pre_ping=True, hide_parameters=True)
+        options = {"schema_translate_map": {PIPELINE_SCHEMA: None}} if url.startswith("sqlite") else {}
+        _engines[url] = create_async_engine(url, pool_pre_ping=True, hide_parameters=True, execution_options=options)
     return _engines[url]
 
 

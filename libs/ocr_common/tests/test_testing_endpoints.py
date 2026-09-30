@@ -60,7 +60,9 @@ def test_testing_path():
 
 
 def test_testing_tables_are_migrated_with_the_live_ones():
-    names = set(repo_metadata().tables)
+    tables = repo_metadata().tables.values()
+    assert {table.schema for table in tables} == {"ocr_pipeline"}
+    names = {table.name for table in tables}
     for stage in ("ocr", "structuring", "scoring"):
         assert {f"testing_{stage}_jobs", f"testing_{stage}_results"} <= names
     assert {"pipeline_outbox", "testing_pipeline_outbox"} <= names

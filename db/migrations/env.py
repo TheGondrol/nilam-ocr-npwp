@@ -3,8 +3,10 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from ocr_common.pipeline.database import PIPELINE_SCHEMA
 from ocr_common.pipeline.tables import repo_metadata
 
 VERSION_TABLE = "ocr_npwp_alembic_version"
@@ -23,6 +25,11 @@ def database_url() -> str:
     return url
 
 
+def include_name(name, type_, parent_names) -> bool:
+    # Only our schema is compared; `public` and the orchestrator's `ocr` are other teams' business.
+    return name == PIPELINE_SCHEMA if type_ == "schema" else True
+
+
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
     return not (type_ == "table" and reflected and compare_to is None)
 
@@ -31,10 +38,24 @@ def configure(**kwargs) -> None:
     context.configure(
         target_metadata=target_metadata,
         version_table=VERSION_TABLE,
+        version_table_schema=PIPELINE_SCHEMA,
+        include_schemas=True,
+        include_name=include_name,
         include_object=include_object,
         compare_type=True,
         **kwargs,
     )
+
+
+def move_version_table(connection) -> None:
+    """Up to revision 0009 the version table lived in `public`; Alembic now reads it from `PIPELINE_SCHEMA`
+    and would otherwise take such a database for an empty one. Idempotent, committed on its own."""
+    connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PIPELINE_SCHEMA}"'))
+    old = connection.execute(text(f"SELECT to_regclass('public.{VERSION_TABLE}')")).scalar()
+    new = connection.execute(text(f"SELECT to_regclass('{PIPELINE_SCHEMA}.{VERSION_TABLE}')")).scalar()
+    if old and not new:
+        connection.execute(text(f'ALTER TABLE public.{VERSION_TABLE} SET SCHEMA "{PIPELINE_SCHEMA}"'))
+    connection.commit()
 
 
 def run_migrations_offline() -> None:
@@ -44,6 +65,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations(connection) -> None:
+    move_version_table(connection)
     configure(connection=connection)
     with context.begin_transaction():
         context.run_migrations()

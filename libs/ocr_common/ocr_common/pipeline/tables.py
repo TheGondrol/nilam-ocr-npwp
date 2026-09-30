@@ -1,6 +1,6 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
-and the tests. `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the
-orchestrator owns.
+and the tests. They all live in the schema `PIPELINE_SCHEMA` (`ocr_pipeline`), not in `public`.
+`orchestration_outcome_table` and `orchestration_api_events_table` describe tables the orchestrator owns.
 """
 
 from sqlalchemy import (
@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ENUM
 
-from ocr_common.pipeline.database import JSON_TYPE
+from ocr_common.pipeline.database import JSON_TYPE, PIPELINE_SCHEMA
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
@@ -41,6 +41,7 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
         Column("ds", Text, nullable=False),
         Index(f"idx_{table_prefix}_jobs_status", "status"),
         Index(f"idx_{table_prefix}_jobs_ds", "ds"),
+        schema=PIPELINE_SCHEMA,
     )
     results = Table(
         f"{table_prefix}_results",
@@ -51,6 +52,7 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
         Index(f"idx_{table_prefix}_results_ds", "ds"),
+        schema=PIPELINE_SCHEMA,
     )
     return jobs, results
 
@@ -88,6 +90,7 @@ def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
             sqlite_where=text("failed_at IS NOT NULL"),
         ),
         Index(f"idx_{name}_request_id", "request_id"),
+        schema=PIPELINE_SCHEMA,
     )
 
 
@@ -118,6 +121,7 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
         Column("ds", Text, nullable=False),
         Index(f"idx_{name}_request_id", "request_id"),
         Index(f"idx_{name}_ds", "ds"),
+        schema=PIPELINE_SCHEMA,
     )
 
 

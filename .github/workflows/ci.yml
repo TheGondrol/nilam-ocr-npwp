@@ -66,7 +66,7 @@ jobs:
         run: python -m alembic -c db/alembic.ini upgrade head
       - name: Table definitions in the code and the migrations agree
         run: python -m alembic -c db/alembic.ini check
-      - name: Adopt a database that already has the tables
+      - name: 0010 moves the tables and their rows from public to ocr_pipeline
         run: |
           python - <<'PY'
           import asyncio
@@ -77,14 +77,13 @@ jobs:
 
           async def main():
               connection = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
-              await connection.execute("DROP TABLE ocr_npwp_alembic_version")
+              await connection.execute("CREATE DATABASE schema_move")
               await connection.close()
 
 
           asyncio.run(main())
           PY
-          python -m alembic -c db/alembic.ini upgrade head
-          python -m alembic -c db/alembic.ini check
+          DATABASE_URL="${DATABASE_URL%/*}/schema_move" python db/check_schema_move.py
       - name: The migration image builds
         run: docker build -f db/Dockerfile -t ci/migrate .
 
