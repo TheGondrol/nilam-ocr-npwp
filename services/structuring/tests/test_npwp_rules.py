@@ -100,9 +100,9 @@ def test_new_card_prefers_the_16_digit_number_over_the_legacy_15_digit_one():
     assert _signals(number)["candidate_count"] == 2
 
 
-def test_old_card_keeps_the_dotted_15_digit_format_and_title_suffix_and_is_not_flagged():
+def test_old_card_strips_the_15_digit_number_to_plain_digits_and_keeps_title_suffix_and_is_not_flagged():
     document = structure(OLD_CARD)
-    assert document["fields"]["nomor_npwp"]["value"] == "48.903.841.4-722.000"
+    assert document["fields"]["nomor_npwp"]["value"] == "489038414722000"
     assert _signals(document["fields"]["nomor_npwp"]) == {"candidate_count": 1, **NO_NUMBER_SIGNAL}
     assert document["fields"]["nama"]["value"] == "TOTOK WIJAYANTO, SSI."
     assert (document["flag"], document["flag_reason"]) == (False, None)
@@ -344,7 +344,7 @@ def test_two_page_upload_takes_number_and_name_from_the_first_page_that_has_them
     result = fields(
         [_line("12.345.678.9-012.345", 120, page=0), _line("BUDI SANTOSO", 200, page=0), _line("djp", 40, page=1)]
     )
-    assert (result["nomor_npwp"]["value"], result["nama"]["value"]) == ("12.345.678.9-012.345", "BUDI SANTOSO")
+    assert (result["nomor_npwp"]["value"], result["nama"]["value"]) == ("123456789012345", "BUDI SANTOSO")
 
 
 def test_the_configured_service_reads_a_real_card():

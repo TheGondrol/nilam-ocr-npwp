@@ -14,7 +14,7 @@ from typing import Any
 from ocr_common.npwp import NPWP_FIELDS
 from ocr_common.types import OcrBlock, StructuredDocument, StructuredField
 
-from app.ml.utils import is_badan, normalize_npwp
+from app.ml.utils import is_badan
 from app.vendor.npwp_rules import npwp as rules
 from app.vendor.npwp_rules.name_extraction import extract_name
 
@@ -45,12 +45,6 @@ NUMBER_SIGNALS = (
     "invalid_birthdate",
     "invalid_kpp_prefix",
 )
-
-
-def _format_npwp(digits: str, raw: str) -> str:
-    """The printed form `XX.XXX.XXX.X-XXX.XXX` only for a number OCR read in that legacy shape with all 15
-    digits; anything else (a 16-digit NIK-based number, or a number that lost a letter) stays plain digits."""
-    return normalize_npwp(digits) if len(digits) == 15 and "." in raw else digits
 
 
 def _lost_a_character(digits: str, raw: str) -> bool:
@@ -226,7 +220,7 @@ class NpwpRulesStructurer:
         fields: dict[str, StructuredField] = {}
         if number is not None:
             fields["nomor_npwp"] = {
-                "value": _format_npwp(number["npwp"], number["npwp_raw"]),
+                "value": number["npwp"],
                 "confidence": round(number["npwp_score"], 4),
                 "source": number["npwp_source"],
                 "signals": {"candidate_count": candidate_count, **number_signals},
