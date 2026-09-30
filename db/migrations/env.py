@@ -10,6 +10,8 @@ from ocr_common.pipeline.database import PIPELINE_SCHEMA
 from ocr_common.pipeline.tables import repo_metadata
 
 VERSION_TABLE = "ocr_npwp_alembic_version"
+# Where earlier revisions kept the version table, newest first.
+OLD_VERSION_SCHEMAS = ("ocr_pipeline", "public")
 
 config = context.config
 if config.config_file_name is not None:
@@ -48,13 +50,15 @@ def configure(**kwargs) -> None:
 
 
 def move_version_table(connection) -> None:
-    """Up to revision 0009 the version table lived in `public`; Alembic now reads it from `PIPELINE_SCHEMA`
-    and would otherwise take such a database for an empty one. Idempotent, committed on its own."""
+    """The version table lived in `public` up to revision 0009 and in `ocr_pipeline` up to 0010; Alembic now
+    reads it from `PIPELINE_SCHEMA` and would otherwise take such a database for an empty one. Idempotent,
+    committed on its own."""
     connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PIPELINE_SCHEMA}"'))
-    old = connection.execute(text(f"SELECT to_regclass('public.{VERSION_TABLE}')")).scalar()
-    new = connection.execute(text(f"SELECT to_regclass('{PIPELINE_SCHEMA}.{VERSION_TABLE}')")).scalar()
-    if old and not new:
-        connection.execute(text(f'ALTER TABLE public.{VERSION_TABLE} SET SCHEMA "{PIPELINE_SCHEMA}"'))
+    if not connection.execute(text(f"SELECT to_regclass('{PIPELINE_SCHEMA}.{VERSION_TABLE}')")).scalar():
+        for old_schema in OLD_VERSION_SCHEMAS:
+            if connection.execute(text(f"SELECT to_regclass('{old_schema}.{VERSION_TABLE}')")).scalar():
+                connection.execute(text(f'ALTER TABLE {old_schema}.{VERSION_TABLE} SET SCHEMA "{PIPELINE_SCHEMA}"'))
+                break
     connection.commit()
 
 

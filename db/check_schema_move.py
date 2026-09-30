@@ -1,6 +1,6 @@
-"""CI check of migration 0010: a database at 0009, with its rows and its version table in `public`, ends up with
-every table and every row in `ocr_pipeline`, keeps counting its ids where it left off, and survives a downgrade
-and upgrade again.
+"""CI check of migrations 0010 and 0011: a database at 0009, with its rows and its version table in `public`, ends
+up with every table and every row in `ocr_pipeline_npwp`, keeps counting its ids where it left off, gets there
+from 0010 too (the version table in `ocr_pipeline`, as on dev), and survives downgrades and upgrades again.
 
     DATABASE_URL=postgresql+asyncpg://... python db/check_schema_move.py   # an EMPTY database: it is rebuilt
 """
@@ -13,7 +13,8 @@ import sys
 import asyncpg
 
 ALEMBIC = [sys.executable, "-m", "alembic", "-c", os.path.join(os.path.dirname(__file__), "alembic.ini")]
-SCHEMA = "ocr_pipeline"
+SCHEMA = "ocr_pipeline_npwp"
+OLD_SCHEMA = "ocr_pipeline"
 VERSION_TABLE = "ocr_npwp_alembic_version"
 TABLES = [
     f"{lane}{name}"
@@ -70,7 +71,7 @@ async def main() -> None:
     conn = await connect()
     try:
         assert set(TABLES) <= await tables_in(conn, "public"), "0009 should leave the tables in public"
-        # Where the migration image up to 0009 kept the version table (dev and the other deployed databases).
+        # Where the migration image up to 0009 kept the version table.
         await conn.execute(f"ALTER TABLE {SCHEMA}.{VERSION_TABLE} SET SCHEMA public")
         await seed(conn)
         before = await counts(conn, "public")
@@ -81,7 +82,9 @@ async def main() -> None:
     alembic("check")
     conn = await connect()
     try:
-        assert not (set(TABLES) | {VERSION_TABLE}) & await tables_in(conn, "public"), "tables left behind in public"
+        for schema in ("public", OLD_SCHEMA):
+            assert not (set(TABLES) | {VERSION_TABLE}) & await tables_in(conn, schema), f"tables left in {schema}"
+        assert not await conn.fetchval("SELECT 1 FROM pg_namespace WHERE nspname = $1", OLD_SCHEMA), "schema left"
         assert set(TABLES) | {VERSION_TABLE} <= await tables_in(conn, SCHEMA)
         assert await counts(conn, SCHEMA) == before, "rows lost in the move"
         # The id sequences moved with their tables and carry on after the rows already there.
@@ -101,7 +104,18 @@ async def main() -> None:
     finally:
         await conn.close()
 
-    alembic("downgrade", "-1")
+    # Back to 0010, with the version table where the 0010 image kept it (the dev database), then up again.
+    alembic("downgrade", "0010_ocr_pipeline_schema")
+    conn = await connect()
+    try:
+        assert await counts(conn, OLD_SCHEMA) == before, f"rows lost moving back to {OLD_SCHEMA}"
+        await conn.execute(f"ALTER TABLE {SCHEMA}.{VERSION_TABLE} SET SCHEMA {OLD_SCHEMA}")
+    finally:
+        await conn.close()
+    alembic("upgrade", "head")
+    alembic("check")
+
+    alembic("downgrade", "0009_guardrails_results_sequence")
     conn = await connect()
     try:
         assert await counts(conn, "public") == before, "rows lost moving back to public"
@@ -109,7 +123,7 @@ async def main() -> None:
         await conn.close()
     alembic("upgrade", "head")
     alembic("check")
-    print("0010 moves every table and row to ocr_pipeline, and back")
+    print(f"0010 + 0011 move every table and row to {SCHEMA}, from public and from {OLD_SCHEMA}, and back")
 
 
 asyncio.run(main())

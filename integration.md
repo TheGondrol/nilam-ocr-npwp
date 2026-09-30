@@ -636,15 +636,15 @@ juga sudah dihapus. Pakai `POST /v1/extract-ocr` di orchestrator (port 8034, bag
 ## 12. Database
 
 Pipeline menyimpan job dan hasil tiap tahap ke PostgreSQL yang sama dengan yang kalian
-pakai, database `bribrain_ocr_nilam`. Semua tabel kami ada di schema `ocr_pipeline` (sejak
-migrasi `0010`; sebelumnya di `public`), supaya terpisah dari tabel tim lain di `public`.
+pakai, database `bribrain_ocr_nilam`. Semua tabel kami ada di schema `ocr_pipeline_npwp` (sejak
+migrasi `0011`; sebelumnya di `public`), supaya terpisah dari tabel tim lain di `public`.
 
 | Tabel | Isi |
 |---|---|
-| `ocr_pipeline.ocr_jobs`, `ocr_pipeline.ocr_results` | status dan hasil OCR mentah |
-| `ocr_pipeline.structuring_jobs`, `ocr_pipeline.structuring_results` | field hasil penataan |
-| `ocr_pipeline.scoring_jobs`, `ocr_pipeline.scoring_results` | confidence akhir |
-| `ocr_pipeline.guardrails_results` | setiap putusan guardrails, termasuk yang ditolak |
+| `ocr_pipeline_npwp.ocr_jobs`, `ocr_pipeline_npwp.ocr_results` | status dan hasil OCR mentah |
+| `ocr_pipeline_npwp.structuring_jobs`, `ocr_pipeline_npwp.structuring_results` | field hasil penataan |
+| `ocr_pipeline_npwp.scoring_jobs`, `ocr_pipeline_npwp.scoring_results` | confidence akhir |
+| `ocr_pipeline_npwp.guardrails_results` | setiap putusan guardrails, termasuk yang ditolak |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
 di callback dan di `GET /v1/extract-ocr/{request_id}`. Kami cantumkan supaya jelas tabel mana milik kami, dan

@@ -1,5 +1,5 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
-and the tests. They all live in the schema `PIPELINE_SCHEMA` (`ocr_pipeline`), not in `public`.
+and the tests. They all live in the schema `PIPELINE_SCHEMA` (`ocr_pipeline_npwp`), not in `public`.
 `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the orchestrator owns.
 """
 

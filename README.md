@@ -504,9 +504,9 @@ SELECT o.request_id,
        c.updated_at - c.created_at AS scoring,
        c.updated_at - o.created_at AS total,
        o.status AS ocr_status, s.status AS structuring_status, c.status AS scoring_status
-FROM ocr_pipeline.testing_ocr_jobs o
-LEFT JOIN ocr_pipeline.testing_structuring_jobs s USING (request_id)
-LEFT JOIN ocr_pipeline.testing_scoring_jobs c USING (request_id)
+FROM ocr_pipeline_npwp.testing_ocr_jobs o
+LEFT JOIN ocr_pipeline_npwp.testing_structuring_jobs s USING (request_id)
+LEFT JOIN ocr_pipeline_npwp.testing_scoring_jobs c USING (request_id)
 WHERE o.request_id LIKE 'TEST_run1_%'
 ORDER BY o.created_at;
 ```
@@ -514,7 +514,7 @@ ORDER BY o.created_at;
 Setelah selesai, kosongkan tabelnya (isinya tidak dipakai apa pun):
 
 ```sql
-SET search_path = ocr_pipeline;
+SET search_path = ocr_pipeline_npwp;
 TRUNCATE testing_ocr_results, testing_ocr_jobs, testing_structuring_results, testing_structuring_jobs,
          testing_scoring_results, testing_scoring_jobs, testing_pipeline_outbox, testing_guardrails_results;
 ```
@@ -539,7 +539,7 @@ Setiap service menghasilkan tiga hal yang bisa dipantau tanpa service tambahan:
 
 ## Database
 
-Satu database PostgreSQL; **semua tabel repo ini di schema `ocr_pipeline`** (dipindah dari `public` oleh migrasi `0010`), termasuk tabel versi Alembic. Query manual: `ocr_pipeline.ocr_jobs`, atau `SET search_path = ocr_pipeline, public`. Database yang sama juga dipakai service orkestrasi untuk tabelnya sendiri (`orchestration_*`, `auth_*`), jadi peta lengkap siapa memiliki tabel apa ada di [db/README.md](db/README.md).
+Satu database PostgreSQL; **semua tabel repo ini di schema `ocr_pipeline_npwp`** (dipindah dari `public` oleh migrasi `0010` ke `ocr_pipeline`, lalu `0011` ke `ocr_pipeline_npwp`), termasuk tabel versi Alembic. Query manual: `ocr_pipeline_npwp.ocr_jobs`, atau `SET search_path = ocr_pipeline_npwp, public`. Database yang sama juga dipakai service orkestrasi untuk tabelnya sendiri (`orchestration_*`, `auth_*`), jadi peta lengkap siapa memiliki tabel apa ada di [db/README.md](db/README.md).
 
 | Tabel | Pemilik | Isi |
 |---|---|---|

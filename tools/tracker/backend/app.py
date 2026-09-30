@@ -244,9 +244,9 @@ async def get_pool():
     try:
         import asyncpg
 
-        # Tabel pipeline ada di schema ocr_pipeline (migrasi 0010); public tetap dicari untuk tabel orkestrasi.
+        # Tabel pipeline ada di schema ocr_pipeline_npwp (migrasi 0011); public tetap dicari untuk tabel orkestrasi.
         pool = await asyncpg.create_pool(
-            DB_URL, min_size=1, max_size=3, timeout=5, server_settings={"search_path": "ocr_pipeline, public"}
+            DB_URL, min_size=1, max_size=3, timeout=5, server_settings={"search_path": "ocr_pipeline_npwp, public"}
         )
         db_error = None
     except Exception as exc:  # noqa: BLE001

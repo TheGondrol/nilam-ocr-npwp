@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 JSON_TYPE = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
-# The PostgreSQL schema every table of this repository lives in (migration 0010 moved them out of `public`).
-PIPELINE_SCHEMA = "ocr_pipeline"
+# The PostgreSQL schema every table of this repository lives in (0010 moved them out of `public`, 0011 renamed it).
+PIPELINE_SCHEMA = "ocr_pipeline_npwp"
 
 
 _engines: dict[str, AsyncEngine] = {}

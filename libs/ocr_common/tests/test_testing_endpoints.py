@@ -61,7 +61,7 @@ def test_testing_path():
 
 def test_testing_tables_are_migrated_with_the_live_ones():
     tables = repo_metadata().tables.values()
-    assert {table.schema for table in tables} == {"ocr_pipeline"}
+    assert {table.schema for table in tables} == {"ocr_pipeline_npwp"}
     names = {table.name for table in tables}
     for stage in ("ocr", "structuring", "scoring"):
         assert {f"testing_{stage}_jobs", f"testing_{stage}_results"} <= names
