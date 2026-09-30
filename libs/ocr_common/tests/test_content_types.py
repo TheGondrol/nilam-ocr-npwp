@@ -19,15 +19,20 @@ PDF = b"%PDF-1.7\n"
         (None, JPEG, "image/jpeg"),
         ("", PNG, "image/png"),
         ("binary/octet-stream", PDF, "application/pdf"),
+        ("jpg", JPEG, "image/jpeg"),
+        ("JPEG", JPEG, "image/jpeg"),
+        ("png", PNG, "image/png"),
+        ("text/plain", JPEG, "image/jpeg"),
     ],
 )
 def test_a_supported_file_gets_its_type_whatever_the_client_declares(declared, content, expected):
     assert upload_content_type(declared, content) == expected
 
 
-def test_a_generic_type_that_no_signature_matches_is_kept_for_the_check_to_refuse():
-    assert upload_content_type("application/octet-stream", b"hello") == "application/octet-stream"
+@pytest.mark.parametrize("declared", ["application/octet-stream", "text/plain", "jpg"])
+def test_a_file_no_signature_matches_keeps_its_declared_type_for_the_check_to_refuse(declared):
+    assert upload_content_type(declared, b"hello") == declared
 
 
-def test_a_declared_type_is_not_second_guessed():
-    assert upload_content_type("text/plain", JPEG) == "text/plain"
+def test_a_supported_declared_type_is_not_second_guessed():
+    assert upload_content_type("image/png", JPEG) == "image/png"

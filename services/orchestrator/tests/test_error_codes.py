@@ -36,7 +36,8 @@ def test_refusals_before_the_pipeline_carry_their_code(client, auth, files, form
 
 
 @pytest.mark.parametrize(
-    "content_type", ["application/octet-stream", "", "image/pjpeg", "image/jpeg; charset=binary", "IMAGE/JPG"]
+    "content_type",
+    ["application/octet-stream", "", "image/pjpeg", "image/jpeg; charset=binary", "IMAGE/JPG", "jpg", "text/plain"],
 )
 def test_a_jpg_is_accepted_whatever_type_the_client_declares(client, auth, content_type):
     signed = b"\xff\xd8\xff\xe0" + JPEG  # a generic type is resolved from the real JPEG signature
