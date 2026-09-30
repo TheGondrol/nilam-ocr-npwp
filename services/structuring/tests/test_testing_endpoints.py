@@ -47,6 +47,6 @@ def test_testing_endpoint_runs_the_same_job(auth):
         job = wait_for_job(client, "/v1/structuring/jobs-test/REQ_T1")
 
     assert job["status"] == "DONE"
-    assert job["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert job["result"]["fields"]["nomor_npwp"]["value"] == "123456789012345"
     assert next_stage.payloads == [{**_payload("REQ_T1"), "structuring": job["result"]}]
     assert callback.calls == []

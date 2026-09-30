@@ -22,7 +22,7 @@ def _values(document):
 def test_rule_based_parses_labeled_lines():
     document = RuleBasedNpwpStructurer().structure(LINES)
     assert _values(document) == {
-        "nomor_npwp": "12.345.678.9-012.345",
+        "nomor_npwp": "123456789012345",
         "nama": "BUDI SANTOSO",
         "nama_badan": "PT CIPTA KARYA MANDIRI",
     }
@@ -34,7 +34,7 @@ def test_rule_based_parses_labeled_lines():
 
 def test_rule_based_handles_paddle_style_lines_without_spaces():
     fields = RuleBasedNpwpStructurer().structure([{"text": "NPWP:12.345.678.9-012.345", "confidence": 0.9}])["fields"]
-    assert fields["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert fields["nomor_npwp"]["value"] == "123456789012345"
 
 
 def test_rule_based_falls_back_to_patterns_for_unlabeled_lines():
@@ -42,7 +42,7 @@ def test_rule_based_falls_back_to_patterns_for_unlabeled_lines():
         [{"text": "123456789012345", "confidence": 0.8}, {"text": "PT SINAR ABADI SEJAHTERA", "confidence": 0.7}]
     )
     assert _values(document) == {
-        "nomor_npwp": "12.345.678.9-012.345",
+        "nomor_npwp": "123456789012345",
         "nama": None,
         "nama_badan": "PT SINAR ABADI SEJAHTERA",
     }
@@ -55,9 +55,9 @@ def test_nama_badan_is_not_mistaken_for_nama():
     assert fields["nama_badan"]["value"] == "PT X Y"
 
 
-def test_normalize_npwp_formats_15_digits():
-    assert normalize_npwp("123456789012345") == "12.345.678.9-012.345"
-    assert normalize_npwp("12.345.678.9-012.345") == "12.345.678.9-012.345"
+def test_normalize_npwp_strips_15_digits_to_plain_digits():
+    assert normalize_npwp("123456789012345") == "123456789012345"
+    assert normalize_npwp("12.345.678.9-012.345") == "123456789012345"
     assert normalize_npwp("garbage") == "garbage"
 
 

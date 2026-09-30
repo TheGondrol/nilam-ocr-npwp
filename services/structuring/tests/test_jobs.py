@@ -53,7 +53,7 @@ def test_submit_returns_202_then_structures_callback_and_handoff(harness, auth):
 
     job = wait_for_job(client, "/v1/structuring/jobs/REQ_1")
     assert job["status"] == "DONE"
-    assert job["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert job["result"]["fields"]["nomor_npwp"]["value"] == "123456789012345"
     assert job["result"]["fields"]["nama"]["value"] == "BUDI SANTOSO"
 
     assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("STRUCTURING", "DONE", None)]
@@ -135,7 +135,7 @@ def test_by_reference_reads_the_ocr_result_from_the_database_and_hands_off_a_ref
     job = wait_for_job(client, "/v1/structuring/jobs/REQ_ref")
 
     assert job["status"] == "DONE"
-    assert job["result"]["fields"]["nomor_npwp"]["value"] == "12.345.678.9-012.345"
+    assert job["result"]["fields"]["nomor_npwp"]["value"] == "123456789012345"
     assert next_stage.payloads == [body], "no ocr and no structuring in the hand-off: scoring reads them itself"
 
 
