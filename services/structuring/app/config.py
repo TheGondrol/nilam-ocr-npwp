@@ -15,7 +15,7 @@ class Settings(PipelineSettings):
     # turns the check it feeds into "no signal" instead of failing the request. The defaults are the
     # same file names under app/vendor/npwp_rules/data/.
     #   kode_wilayah.json  -> invalid_kecamatan_prefix (16-digit NIK-based numbers)
-    #   kpp_codes.json     -> invalid_kpp_prefix (15-digit numbers)
+    #   kpp_codes_v2.json  -> invalid_kpp_prefix (15-digit numbers)
     #   name_lnmast.xlsx   -> "recognised name" tie-break between name candidates (internal data)
     #   list_name_npwp.xlsx-> per-document name correction; unused here (no file_id: the orchestrator
     #                         does the fuzzy name match), kept so the vendored code has its path

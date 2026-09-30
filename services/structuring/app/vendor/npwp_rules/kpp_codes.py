@@ -21,7 +21,9 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def default_data_path() -> Path:
-    return Path(os.environ.get("KPP_CODES_PATH") or str(_DATA_DIR / "kpp_codes.json"))
+    # nilam-ocr-npwp: kpp_codes_v2.json (30 Sep 2026 delivery, 352 offices + 6 historical codes) replaces
+    # kpp_codes.json (173 offices).
+    return Path(os.environ.get("KPP_CODES_PATH") or str(_DATA_DIR / "kpp_codes_v2.json"))
 
 
 def _load_valid_kpp_codes(data_path: Path | None = None) -> frozenset[str] | None:
@@ -29,12 +31,22 @@ def _load_valid_kpp_codes(data_path: Path | None = None) -> frozenset[str] | Non
     file is missing/unreadable/malformed - callers treat None as "no
     signal", the same stance wilayah_codes.py and name_master.py take when
     their own reference file can't be loaded, rather than flagging every
-    number as invalid just because the lookup itself failed."""
+    number as invalid just because the lookup itself failed.
+
+    nilam-ocr-npwp: reads both formats. v2 (`{"kpp": [{"kode": ...}],
+    "kode_historis": [{"kode_lama": ...}]}`): the current offices plus the
+    historical codes, since an NPWP issued before an office was converted
+    (e.g. 122 KPP Medan Kota, now 129) keeps its old code and is still a
+    real number. v1 (`{"101": {...}}`): the keys."""
     data_path = data_path or default_data_path()
     try:
         data = json.loads(data_path.read_text(encoding="utf-8"))
+        if isinstance(data.get("kpp"), list):
+            current = {entry["kode"] for entry in data["kpp"]}
+            historical = {entry["kode_lama"] for entry in data.get("kode_historis") or []}
+            return frozenset(current | historical)
         return frozenset(data.keys())
-    except (FileNotFoundError, OSError, ValueError):
+    except (FileNotFoundError, OSError, ValueError, AttributeError, KeyError, TypeError):
         return None
 
 

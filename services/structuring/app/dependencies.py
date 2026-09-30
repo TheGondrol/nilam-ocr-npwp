@@ -57,7 +57,7 @@ def _build_npwp_rules(settings: Settings) -> NpwpRulesStructurer:
 
     for label, path in (
         ("kode_wilayah.json", wilayah_codes.default_data_path()),
-        ("kpp_codes.json", kpp_codes.default_data_path()),
+        ("kpp_codes_v2.json", kpp_codes.default_data_path()),
         ("name_lnmast.xlsx", name_master.default_master_path()),
     ):
         state = "found" if Path(path).is_file() else "MISSING (the check it feeds gives no signal)"

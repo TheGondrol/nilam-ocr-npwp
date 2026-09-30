@@ -212,12 +212,27 @@ def test_kpp_check_needs_the_kpp_table(tmp_path, monkeypatch):
     assert structure(_card("48.903.841.4-012.000"))["flag"] is False
 
 
+def test_kpp_table_v2_counts_the_historical_codes_as_valid(tmp_path, monkeypatch):
+    table = tmp_path / "kpp_codes_v2.json"
+    table.write_text(
+        json.dumps({"kpp": [{"kode": "129"}], "kode_historis": [{"kode_lama": "122", "dikonversi_menjadi": {}}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KPP_CODES_PATH", str(table))
+    assert structure(_card("48.903.841.4-129.000"))["flag"] is False
+    assert structure(_card("48.903.841.4-122.000"))["flag"] is False, "an NPWP keeps the code of a converted office"
+    assert structure(_card("48.903.841.4-012.000"))["flag_reason"] == npwp_rules.FLAG_INVALID_KPP
+
+
 def test_the_delivered_reference_tables_are_used_by_default():
-    """kode_wilayah.json (7230 kecamatan) and kpp_codes.json (173 offices) of the ML team live in data/."""
+    """kode_wilayah.json (7230 kecamatan) and kpp_codes_v2.json (352 offices + 6 historical codes) of the ML team
+    live in data/."""
     assert structure(_card("3301 0130 1001 0006"))["flag"] is False
     assert structure(_card("3399 9930 1001 0006"))["flag_reason"] == npwp_rules.FLAG_INVALID_KECAMATAN
     assert structure(_card("48.903.841.4-012.000"))["flag"] is False
     assert structure(_card("48.903.841.4-999.000"))["flag_reason"] == npwp_rules.FLAG_INVALID_KPP
+    assert structure(_card("48.903.841.4-097.000"))["flag"] is False, "new in v2: KPP Madya Dua Jakarta Timur"
+    assert structure(_card("48.903.841.4-122.000"))["flag"] is False, "historical: KPP Medan Kota, now 129"
 
 
 def test_recognised_name_from_the_name_master_wins_the_tie_break(tmp_path, monkeypatch):

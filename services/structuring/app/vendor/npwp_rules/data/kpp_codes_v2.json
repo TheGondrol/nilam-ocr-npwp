@@ -1,0 +1,2539 @@
+{
+  "sumber": "KMK 216/KMK.03/2021; indeks kantor pajak Klikpajak; pajak.go.id; KEP-28/PJ/2021; PER-06/PJ/2021",
+  "diperbarui": "2026-09-29",
+  "jumlah": 352,
+  "kpp": [
+    {
+      "kode": "001",
+      "nama": "KPP Pratama Jakarta Matraman",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "002",
+      "nama": "KPP Pratama Jakarta Jatinegara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "003",
+      "nama": "KPP Pratama Jakarta Pulogadung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "004",
+      "nama": "KPP Pratama Jakarta Cakung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "005",
+      "nama": "KPP Pratama Jakarta Kramat Jati",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "007",
+      "nama": "KPP Madya Jakarta Timur",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "008",
+      "nama": "KPP Pratama Jakarta Duren Sawit",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "009",
+      "nama": "KPP Pratama Jakarta Pasar Rebo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "011",
+      "nama": "KPP Pratama Jakarta Setiabudi Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "012",
+      "nama": "KPP Pratama Jakarta Kebayoran Baru Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "013",
+      "nama": "KPP Pratama Jakarta Kebayoran Lama",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "014",
+      "nama": "KPP Pratama Jakarta Mampang Prapatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "015",
+      "nama": "KPP Pratama Jakarta Tebet",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "016",
+      "nama": "KPP Pratama Jakarta Cilandak",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "017",
+      "nama": "KPP Pratama Jakarta Pasar Minggu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "018",
+      "nama": "KPP Pratama Jakarta Setiabudi Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "019",
+      "nama": "KPP Pratama Jakarta Kebayoran Baru Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "021",
+      "nama": "KPP Pratama Jakarta Menteng Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "022",
+      "nama": "KPP Pratama Jakarta Tanah Abang Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "023",
+      "nama": "KPP Pratama Jakarta Senen",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "024",
+      "nama": "KPP Pratama Jakarta Cempaka Putih",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "025",
+      "nama": "KPP Pratama Jakarta Gambir Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "026",
+      "nama": "KPP Pratama Jakarta Sawah Besar Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "027",
+      "nama": "KPP Pratama Jakarta Kemayoran",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "028",
+      "nama": "KPP Pratama Jakarta Gambir Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "029",
+      "nama": "KPP Pratama Jakarta Gambir Tiga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "031",
+      "nama": "KPP Pratama Jakarta Palmerah",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "032",
+      "nama": "KPP Pratama Jakarta Tamansari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "033",
+      "nama": "KPP Pratama Jakarta Tambora",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "034",
+      "nama": "KPP Pratama Jakarta Cengkareng",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "035",
+      "nama": "KPP Pratama Jakarta Kebon Jeruk Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "036",
+      "nama": "KPP Pratama Jakarta Grogol Petamburan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "038",
+      "nama": "KPP Madya Jakarta Barat",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "039",
+      "nama": "KPP Pratama Jakarta Kebon Jeruk Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "041",
+      "nama": "KPP Pratama Jakarta Penjaringan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "042",
+      "nama": "KPP Pratama Jakarta Tanjung Priok",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "043",
+      "nama": "KPP Pratama Jakarta Kelapa Gading",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "044",
+      "nama": "KPP Pratama Jakarta Pademangan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "045",
+      "nama": "KPP Pratama Jakarta Koja",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "046",
+      "nama": "KPP Madya Jakarta Utara",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "047",
+      "nama": "KPP Pratama Jakarta Pluit",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "051",
+      "nama": "KPP Wajib Pajak Besar Tiga",
+      "jenis": "WP Besar",
+      "kanwil": "Kanwil DJP Wajib Pajak Besar",
+      "catatan": null
+    },
+    {
+      "kode": "052",
+      "nama": "KPP Penanaman Modal Asing Satu",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "053",
+      "nama": "KPP Badan dan Orang Asing",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "054",
+      "nama": "KPP Perusahaan Masuk Bursa",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "055",
+      "nama": "KPP Penanaman Modal Asing Dua",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "056",
+      "nama": "KPP Penanaman Modal Asing Tiga",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "057",
+      "nama": "KPP Penanaman Modal Asing Empat",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "058",
+      "nama": "KPP Penanaman Modal Asing Lima",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "059",
+      "nama": "KPP Penanaman Modal Asing Enam",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "061",
+      "nama": "KPP Pratama Jakarta Pancoran",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "062",
+      "nama": "KPP Madya Jakarta Selatan I",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "063",
+      "nama": "KPP Pratama Jakarta Setiabudi Tiga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "066",
+      "nama": "KPP Pratama Jakarta Pesanggrahan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "068",
+      "nama": "KPP Pratama Jakarta Jagakarsa",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "069",
+      "nama": "KPP Madya Dua Jakarta Selatan I",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Selatan I",
+      "catatan": null
+    },
+    {
+      "kode": "071",
+      "nama": "KPP Pratama Jakarta Menteng Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "072",
+      "nama": "KPP Pratama Jakarta Tanah Abang Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "073",
+      "nama": "KPP Madya Jakarta Pusat",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "075",
+      "nama": "KPP Pratama Jakarta Sawah Besar Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "076",
+      "nama": "KPP Pratama Jakarta Menteng Tiga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "077",
+      "nama": "KPP Pratama Jakarta Tanah Abang Tiga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": null
+    },
+    {
+      "kode": "078",
+      "nama": "KPP Madya Dua Jakarta Pusat",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Pusat",
+      "catatan": "Klikpajak menulis 074; dipakai kode dari KMK 216/KMK.03/2021."
+    },
+    {
+      "kode": "081",
+      "nama": "KPP Minyak dan Gas Bumi",
+      "jenis": "Khusus",
+      "kanwil": "Kanwil DJP Jakarta Khusus",
+      "catatan": null
+    },
+    {
+      "kode": "085",
+      "nama": "KPP Pratama Jakarta Kalideres",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "086",
+      "nama": "KPP Pratama Jakarta Kembangan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "087",
+      "nama": "KPP Madya Dua Jakarta Barat",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Barat",
+      "catatan": null
+    },
+    {
+      "kode": "091",
+      "nama": "KPP Wajib Pajak Besar Satu",
+      "jenis": "WP Besar",
+      "kanwil": "Kanwil DJP Wajib Pajak Besar",
+      "catatan": null
+    },
+    {
+      "kode": "092",
+      "nama": "KPP Wajib Pajak Besar Dua",
+      "jenis": "WP Besar",
+      "kanwil": "Kanwil DJP Wajib Pajak Besar",
+      "catatan": null
+    },
+    {
+      "kode": "093",
+      "nama": "KPP Wajib Pajak Besar Empat",
+      "jenis": "WP Besar",
+      "kanwil": "Kanwil DJP Wajib Pajak Besar",
+      "catatan": null
+    },
+    {
+      "kode": "095",
+      "nama": "KPP Madya Jakarta Selatan II",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "096",
+      "nama": "KPP Madya Dua Jakarta Selatan II",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Selatan II",
+      "catatan": null
+    },
+    {
+      "kode": "097",
+      "nama": "KPP Madya Dua Jakarta Timur",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Timur",
+      "catatan": null
+    },
+    {
+      "kode": "098",
+      "nama": "KPP Madya Dua Jakarta Utara",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jakarta Utara",
+      "catatan": null
+    },
+    {
+      "kode": "101",
+      "nama": "KPP Pratama Banda Aceh",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "102",
+      "nama": "KPP Pratama Lhokseumawe",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "103",
+      "nama": "KPP Pratama Meulaboh",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "104",
+      "nama": "KPP Pratama Bireuen",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "105",
+      "nama": "KPP Pratama Langsa",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "106",
+      "nama": "KPP Pratama Tapaktuan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "107",
+      "nama": "KPP Pratama Subulussalam",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "108",
+      "nama": "KPP Pratama Aceh Besar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Aceh",
+      "catatan": null
+    },
+    {
+      "kode": "111",
+      "nama": "KPP Pratama Medan Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "112",
+      "nama": "KPP Pratama Medan Belawan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "113",
+      "nama": "KPP Pratama Medan Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "114",
+      "nama": "KPP Pratama Tebing Tinggi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "115",
+      "nama": "KPP Pratama Kisaran",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "116",
+      "nama": "KPP Pratama Rantau Prapat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "117",
+      "nama": "KPP Pratama Pematang Siantar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "118",
+      "nama": "KPP Pratama Padang Sidempuan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "119",
+      "nama": "KPP Pratama Binjai",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "121",
+      "nama": "KPP Pratama Medan Polonia",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": "Tidak tercantum di indeks Klikpajak; kode dari daftar DJP sebelumnya."
+    },
+    {
+      "kode": "123",
+      "nama": "KPP Madya Medan",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "124",
+      "nama": "KPP Pratama Medan Petisah",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "125",
+      "nama": "KPP Pratama Lubuk Pakam",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "126",
+      "nama": "KPP Pratama Sibolga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "127",
+      "nama": "KPP Pratama Balige",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "128",
+      "nama": "KPP Pratama Kabanjahe",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Utara II",
+      "catatan": null
+    },
+    {
+      "kode": "129",
+      "nama": "KPP Madya Dua Medan",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Sumatera Utara I",
+      "catatan": null
+    },
+    {
+      "kode": "201",
+      "nama": "KPP Pratama Padang Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "202",
+      "nama": "KPP Pratama Bukittinggi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "203",
+      "nama": "KPP Pratama Solok",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "204",
+      "nama": "KPP Pratama Payakumbuh",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "205",
+      "nama": "KPP Pratama Padang Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "211",
+      "nama": "KPP Pratama Pekanbaru Senapelan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "212",
+      "nama": "KPP Pratama Dumai",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "213",
+      "nama": "KPP Pratama Rengat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "214",
+      "nama": "KPP Pratama Tanjung Pinang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "215",
+      "nama": "KPP Pratama Batam Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "216",
+      "nama": "KPP Pratama Pekanbaru Tampan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "217",
+      "nama": "KPP Madya Batam",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "218",
+      "nama": "KPP Madya Pekanbaru",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "219",
+      "nama": "KPP Pratama Bengkalis",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "221",
+      "nama": "KPP Pratama Bangkinang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "222",
+      "nama": "KPP Pratama Pangkalan Kerinci",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Riau",
+      "catatan": null
+    },
+    {
+      "kode": "223",
+      "nama": "KPP Pratama Tanjung Balai Karimun",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "224",
+      "nama": "KPP Pratama Bintan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "225",
+      "nama": "KPP Pratama Batam Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kepulauan Riau",
+      "catatan": null
+    },
+    {
+      "kode": "301",
+      "nama": "KPP Pratama Palembang Ilir Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "302",
+      "nama": "KPP Pratama Baturaja",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "303",
+      "nama": "KPP Pratama Lubuk Linggau",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "304",
+      "nama": "KPP Pratama Pangkal Pinang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "305",
+      "nama": "KPP Pratama Tanjung Pandan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "306",
+      "nama": "KPP Pratama Palembang Seberang Ulu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "307",
+      "nama": "KPP Pratama Palembang Ilir Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "308",
+      "nama": "KPP Madya Palembang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "309",
+      "nama": "KPP Pratama Lahat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "311",
+      "nama": "KPP Pratama Bengkulu Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "312",
+      "nama": "KPP Pratama Kayu Agung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "313",
+      "nama": "KPP Pratama Prabumulih",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "314",
+      "nama": "KPP Pratama Sekayu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "315",
+      "nama": "KPP Pratama Bangka",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Selatan dan Kep. Bangka Belitung",
+      "catatan": null
+    },
+    {
+      "kode": "321",
+      "nama": "KPP Pratama Metro",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "322",
+      "nama": "KPP Pratama Bandar Lampung Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "323",
+      "nama": "KPP Pratama Bandar Lampung Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "325",
+      "nama": "KPP Pratama Natar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "326",
+      "nama": "KPP Pratama Kotabumi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "327",
+      "nama": "KPP Pratama Curup",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "328",
+      "nama": "KPP Pratama Bengkulu Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "329",
+      "nama": "KPP Madya Bandar Lampung",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Bengkulu dan Lampung",
+      "catatan": null
+    },
+    {
+      "kode": "331",
+      "nama": "KPP Pratama Jambi Telanaipura",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "332",
+      "nama": "KPP Pratama Muara Bungo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "333",
+      "nama": "KPP Pratama Bangko",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "334",
+      "nama": "KPP Pratama Kuala Tungkal",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": null
+    },
+    {
+      "kode": "335",
+      "nama": "KPP Pratama Jambi Pelayangan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sumatera Barat dan Jambi",
+      "catatan": "Klikpajak menulis 355; 335 sesuai email resmi kpp.335@pajak.go.id."
+    },
+    {
+      "kode": "401",
+      "nama": "KPP Pratama Serang Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "402",
+      "nama": "KPP Pratama Tangerang Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "403",
+      "nama": "KPP Pratama Cibinong",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "404",
+      "nama": "KPP Pratama Bogor",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "405",
+      "nama": "KPP Pratama Sukabumi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "406",
+      "nama": "KPP Pratama Cianjur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "407",
+      "nama": "KPP Pratama Bekasi Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "408",
+      "nama": "KPP Pratama Karawang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "409",
+      "nama": "KPP Pratama Purwakarta",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "411",
+      "nama": "KPP Pratama Serpong",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "412",
+      "nama": "KPP Pratama Depok Cimanggis",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "413",
+      "nama": "KPP Pratama Cikarang Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "414",
+      "nama": "KPP Pratama Cikarang Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "415",
+      "nama": "KPP Madya Tangerang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "416",
+      "nama": "KPP Pratama Tangerang Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "417",
+      "nama": "KPP Pratama Cilegon",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "418",
+      "nama": "KPP Pratama Kosambi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "419",
+      "nama": "KPP Pratama Pandeglang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "421",
+      "nama": "KPP Pratama Cimahi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "422",
+      "nama": "KPP Pratama Bandung Tegallega",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": "Klikpajak menulis 442 (itu kode KPP Pratama Ciamis)."
+    },
+    {
+      "kode": "423",
+      "nama": "KPP Pratama Bandung Cibeunying",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "425",
+      "nama": "KPP Pratama Tasikmalaya",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "426",
+      "nama": "KPP Pratama Cirebon Satu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "427",
+      "nama": "KPP Pratama Bekasi Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "428",
+      "nama": "KPP Pratama Bandung Bojonagara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "429",
+      "nama": "KPP Pratama Bandung Cicadas",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "431",
+      "nama": "KPP Madya Bekasi",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "434",
+      "nama": "KPP Pratama Ciawi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "435",
+      "nama": "KPP Pratama Cibitung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "436",
+      "nama": "KPP Pratama Cileungsi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "437",
+      "nama": "KPP Pratama Indramayu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "438",
+      "nama": "KPP Pratama Kuningan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "439",
+      "nama": "KPP Pratama Subang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "441",
+      "nama": "KPP Madya Bandung",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "442",
+      "nama": "KPP Pratama Ciamis",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "443",
+      "nama": "KPP Pratama Garut",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "444",
+      "nama": "KPP Pratama Majalaya",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "445",
+      "nama": "KPP Pratama Soreang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "446",
+      "nama": "KPP Pratama Sumedang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "447",
+      "nama": "KPP Pratama Pondok Gede",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "448",
+      "nama": "KPP Pratama Depok Sawangan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "449",
+      "nama": "KPP Madya Bogor",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "451",
+      "nama": "KPP Pratama Tigaraksa",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "453",
+      "nama": "KPP Pratama Pondok Aren",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "454",
+      "nama": "KPP Pratama Serang Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "455",
+      "nama": "KPP Pratama Cirebon Dua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "456",
+      "nama": "KPP Madya Dua Tangerang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Banten",
+      "catatan": null
+    },
+    {
+      "kode": "457",
+      "nama": "KPP Madya Karawang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat II",
+      "catatan": null
+    },
+    {
+      "kode": "458",
+      "nama": "KPP Madya Kota Bekasi",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat III",
+      "catatan": null
+    },
+    {
+      "kode": "459",
+      "nama": "KPP Madya Dua Bandung",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Barat I",
+      "catatan": null
+    },
+    {
+      "kode": "501",
+      "nama": "KPP Pratama Tegal",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "502",
+      "nama": "KPP Pratama Pekalongan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "503",
+      "nama": "KPP Pratama Semarang Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "504",
+      "nama": "KPP Pratama Semarang Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "505",
+      "nama": "KPP Pratama Salatiga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "506",
+      "nama": "KPP Pratama Kudus",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "507",
+      "nama": "KPP Pratama Pati",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "508",
+      "nama": "KPP Pratama Semarang Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "509",
+      "nama": "KPP Pratama Semarang Tengah",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": "Kode lama KPP Pratama Semarang Tengah Satu; perlu konfirmasi (kandidat lain: 512)."
+    },
+    {
+      "kode": "511",
+      "nama": "KPP Madya Semarang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": "Klikpajak menulis 519 (itu kode KPP Madya Dua Semarang)."
+    },
+    {
+      "kode": "513",
+      "nama": "KPP Pratama Batang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "514",
+      "nama": "KPP Pratama Blora",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "515",
+      "nama": "KPP Pratama Demak",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "516",
+      "nama": "KPP Pratama Jepara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "517",
+      "nama": "KPP Pratama Semarang Candisari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "518",
+      "nama": "KPP Pratama Semarang Gayamsari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "519",
+      "nama": "KPP Madya Dua Semarang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Tengah I",
+      "catatan": null
+    },
+    {
+      "kode": "521",
+      "nama": "KPP Pratama Purwokerto",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "522",
+      "nama": "KPP Pratama Cilacap",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "523",
+      "nama": "KPP Pratama Kebumen",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "524",
+      "nama": "KPP Pratama Magelang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "525",
+      "nama": "KPP Pratama Klaten",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "526",
+      "nama": "KPP Pratama Surakarta",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "527",
+      "nama": "KPP Pratama Boyolali",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "528",
+      "nama": "KPP Pratama Karanganyar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "529",
+      "nama": "KPP Pratama Purbalingga",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "532",
+      "nama": "KPP Pratama Sukoharjo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "533",
+      "nama": "KPP Pratama Temanggung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "534",
+      "nama": "KPP Madya Surakarta",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Tengah II",
+      "catatan": null
+    },
+    {
+      "kode": "541",
+      "nama": "KPP Pratama Yogyakarta",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP DI Yogyakarta",
+      "catatan": null
+    },
+    {
+      "kode": "542",
+      "nama": "KPP Pratama Sleman",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP DI Yogyakarta",
+      "catatan": null
+    },
+    {
+      "kode": "543",
+      "nama": "KPP Pratama Bantul",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP DI Yogyakarta",
+      "catatan": null
+    },
+    {
+      "kode": "544",
+      "nama": "KPP Pratama Wates",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP DI Yogyakarta",
+      "catatan": null
+    },
+    {
+      "kode": "545",
+      "nama": "KPP Pratama Wonosari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP DI Yogyakarta",
+      "catatan": null
+    },
+    {
+      "kode": "601",
+      "nama": "KPP Pratama Bojonegoro",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "602",
+      "nama": "KPP Pratama Mojokerto",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "603",
+      "nama": "KPP Pratama Sidoarjo Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "604",
+      "nama": "KPP Pratama Surabaya Sukomanunggal",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "605",
+      "nama": "KPP Pratama Surabaya Krembangan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "606",
+      "nama": "KPP Pratama Surabaya Gubeng",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "607",
+      "nama": "KPP Pratama Surabaya Tegalsari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "608",
+      "nama": "KPP Pratama Pamekasan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "609",
+      "nama": "KPP Pratama Surabaya Wonocolo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "611",
+      "nama": "KPP Pratama Surabaya Genteng",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "613",
+      "nama": "KPP Pratama Surabaya Pabean Cantikan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "614",
+      "nama": "KPP Pratama Surabaya Sawahan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "615",
+      "nama": "KPP Pratama Surabaya Rungkut",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "617",
+      "nama": "KPP Pratama Sidoarjo Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "618",
+      "nama": "KPP Pratama Surabaya Karangpilang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "619",
+      "nama": "KPP Pratama Surabaya Mulyorejo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "621",
+      "nama": "KPP Pratama Madiun",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "622",
+      "nama": "KPP Pratama Kediri",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "623",
+      "nama": "KPP Pratama Malang Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "624",
+      "nama": "KPP Pratama Pasuruan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "625",
+      "nama": "KPP Pratama Probolinggo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "626",
+      "nama": "KPP Pratama Jember",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "627",
+      "nama": "KPP Pratama Banyuwangi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "628",
+      "nama": "KPP Pratama Batu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "629",
+      "nama": "KPP Pratama Tulungagung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "631",
+      "nama": "KPP Madya Surabaya",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "632",
+      "nama": "KPP Madya Dua Surabaya",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Timur I",
+      "catatan": null
+    },
+    {
+      "kode": "636",
+      "nama": "KPP Madya Gresik",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "641",
+      "nama": "KPP Madya Sidoarjo",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "642",
+      "nama": "KPP Pratama Gresik",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "643",
+      "nama": "KPP Pratama Sidoarjo Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "644",
+      "nama": "KPP Pratama Bangkalan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "645",
+      "nama": "KPP Pratama Lamongan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "646",
+      "nama": "KPP Pratama Ngawi",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "647",
+      "nama": "KPP Pratama Ponorogo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "648",
+      "nama": "KPP Pratama Tuban",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "649",
+      "nama": "KPP Pratama Jombang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur II",
+      "catatan": null
+    },
+    {
+      "kode": "651",
+      "nama": "KPP Madya Malang",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "652",
+      "nama": "KPP Pratama Malang Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "653",
+      "nama": "KPP Pratama Blitar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "654",
+      "nama": "KPP Pratama Kepanjen",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "655",
+      "nama": "KPP Pratama Pare",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "656",
+      "nama": "KPP Pratama Situbondo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "657",
+      "nama": "KPP Pratama Singosari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Jawa Timur III",
+      "catatan": null
+    },
+    {
+      "kode": "701",
+      "nama": "KPP Pratama Pontianak Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "702",
+      "nama": "KPP Pratama Singkawang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "703",
+      "nama": "KPP Pratama Ketapang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "704",
+      "nama": "KPP Pratama Kubu Raya",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "705",
+      "nama": "KPP Pratama Sanggau",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "706",
+      "nama": "KPP Pratama Sintang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "707",
+      "nama": "KPP Pratama Pontianak Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Barat",
+      "catatan": null
+    },
+    {
+      "kode": "711",
+      "nama": "KPP Pratama Palangkaraya",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "712",
+      "nama": "KPP Pratama Sampit",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "713",
+      "nama": "KPP Pratama Pangkalan Bun",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "714",
+      "nama": "KPP Pratama Muara Teweh",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "721",
+      "nama": "KPP Pratama Balikpapan Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "722",
+      "nama": "KPP Pratama Samarinda Ilir",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "723",
+      "nama": "KPP Pratama Tarakan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "724",
+      "nama": "KPP Pratama Bontang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "725",
+      "nama": "KPP Madya Balikpapan",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "726",
+      "nama": "KPP Pratama Penajam",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "727",
+      "nama": "KPP Pratama Tanjung Redeb",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "728",
+      "nama": "KPP Pratama Tenggarong",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "729",
+      "nama": "KPP Pratama Balikpapan Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "731",
+      "nama": "KPP Pratama Banjarmasin",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "732",
+      "nama": "KPP Pratama Banjarbaru",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "733",
+      "nama": "KPP Pratama Barabai",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "734",
+      "nama": "KPP Pratama Batulicin",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "735",
+      "nama": "KPP Pratama Tanjung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "737",
+      "nama": "KPP Madya Banjarmasin",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Kalimantan Selatan dan Tengah",
+      "catatan": null
+    },
+    {
+      "kode": "741",
+      "nama": "KPP Pratama Samarinda Ulu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Kalimantan Timur dan Utara",
+      "catatan": null
+    },
+    {
+      "kode": "801",
+      "nama": "KPP Pratama Makassar Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "802",
+      "nama": "KPP Pratama Parepare",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "803",
+      "nama": "KPP Pratama Palopo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "804",
+      "nama": "KPP Pratama Makassar Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "805",
+      "nama": "KPP Pratama Makassar Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "806",
+      "nama": "KPP Pratama Bulukumba",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "807",
+      "nama": "KPP Pratama Bantaeng",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "808",
+      "nama": "KPP Pratama Watampone",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "809",
+      "nama": "KPP Pratama Maros",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "811",
+      "nama": "KPP Pratama Kendari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "812",
+      "nama": "KPP Madya Makassar",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "813",
+      "nama": "KPP Pratama Majene",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "814",
+      "nama": "KPP Pratama Mamuju",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "815",
+      "nama": "KPP Pratama Kolaka",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "816",
+      "nama": "KPP Pratama Baubau",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Selatan, Barat dan Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "821",
+      "nama": "KPP Pratama Manado",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "822",
+      "nama": "KPP Pratama Gorontalo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "823",
+      "nama": "KPP Pratama Bitung",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "824",
+      "nama": "KPP Pratama Kotamobagu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "825",
+      "nama": "KPP Pratama Tahuna",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "831",
+      "nama": "KPP Pratama Palu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "832",
+      "nama": "KPP Pratama Luwuk",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "833",
+      "nama": "KPP Pratama Poso",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "834",
+      "nama": "KPP Pratama Tolitoli",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "901",
+      "nama": "KPP Pratama Denpasar Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "902",
+      "nama": "KPP Pratama Singaraja",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "903",
+      "nama": "KPP Pratama Denpasar Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "904",
+      "nama": "KPP Madya Denpasar",
+      "jenis": "Madya",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "905",
+      "nama": "KPP Pratama Badung Selatan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "906",
+      "nama": "KPP Pratama Badung Utara",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "907",
+      "nama": "KPP Pratama Gianyar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "908",
+      "nama": "KPP Pratama Tabanan",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Bali",
+      "catatan": null
+    },
+    {
+      "kode": "911",
+      "nama": "KPP Pratama Mataram Barat",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "912",
+      "nama": "KPP Pratama Raba Bima",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "913",
+      "nama": "KPP Pratama Sumbawa Besar",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "914",
+      "nama": "KPP Pratama Mataram Timur",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "915",
+      "nama": "KPP Pratama Praya",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "921",
+      "nama": "KPP Pratama Maumere",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "922",
+      "nama": "KPP Pratama Kupang",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "923",
+      "nama": "KPP Pratama Ende",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "924",
+      "nama": "KPP Pratama Ruteng",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "925",
+      "nama": "KPP Pratama Atambua",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "926",
+      "nama": "KPP Pratama Waingapu",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Nusa Tenggara",
+      "catatan": null
+    },
+    {
+      "kode": "941",
+      "nama": "KPP Pratama Ambon",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    },
+    {
+      "kode": "942",
+      "nama": "KPP Pratama Ternate",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "943",
+      "nama": "KPP Pratama Tobelo",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Sulawesi Utara, Tengah, Gorontalo dan Maluku Utara",
+      "catatan": null
+    },
+    {
+      "kode": "951",
+      "nama": "KPP Pratama Sorong",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    },
+    {
+      "kode": "952",
+      "nama": "KPP Pratama Jayapura",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    },
+    {
+      "kode": "953",
+      "nama": "KPP Pratama Timika",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": "Tidak tercantum di indeks Klikpajak; kode dari daftar DJP sebelumnya."
+    },
+    {
+      "kode": "954",
+      "nama": "KPP Pratama Biak",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    },
+    {
+      "kode": "955",
+      "nama": "KPP Pratama Manokwari",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    },
+    {
+      "kode": "956",
+      "nama": "KPP Pratama Merauke",
+      "jenis": "Pratama",
+      "kanwil": "Kanwil DJP Papua, Papua Barat dan Maluku",
+      "catatan": null
+    }
+  ],
+  "kode_historis": [
+    {
+      "kode_lama": "006",
+      "nama_lama": "KPP Pratama Jakarta Cakung Dua",
+      "dikonversi_menjadi": {
+        "kode": "097",
+        "nama": "KPP Madya Dua Jakarta Timur"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang."
+    },
+    {
+      "kode_lama": "037",
+      "nama_lama": "KPP Pratama Jakarta Tamansari Dua",
+      "dikonversi_menjadi": {
+        "kode": "087",
+        "nama": "KPP Madya Dua Jakarta Barat"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang."
+    },
+    {
+      "kode_lama": "122",
+      "nama_lama": "KPP Pratama Medan Kota",
+      "dikonversi_menjadi": {
+        "kode": "129",
+        "nama": "KPP Madya Dua Medan"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang."
+    },
+    {
+      "kode_lama": "424",
+      "nama_lama": "KPP Pratama Bandung Karees",
+      "dikonversi_menjadi": {
+        "kode": "459",
+        "nama": "KPP Madya Dua Bandung"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang."
+    },
+    {
+      "kode_lama": "612",
+      "nama_lama": "KPP Pratama Gresik Utara (dulu KPP Gresik)",
+      "dikonversi_menjadi": {
+        "kode": "636",
+        "nama": "KPP Madya Gresik"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang. Bahwa kode 612 = Gresik Utara adalah inferensi: sumber konversi hanya menyebut Gresik Utara, dan satu daftar lama masih mencantumkan KPP Madya Gresik dengan kode 612."
+    },
+    {
+      "kode_lama": "616",
+      "nama_lama": "KPP Pratama Surabaya Simokerto",
+      "dikonversi_menjadi": {
+        "kode": "632",
+        "nama": "KPP Madya Dua Surabaya"
+      },
+      "berlaku_sejak": "2021-05-03",
+      "hubungan": "kantor lama dikonversi menjadi",
+      "catatan": "Kantor ini dikonversi menjadi KPP Madya per 3 Mei 2021 (KEP-28/PJ/2021) dan mendapat kode baru (KMK 216/KMK.03/2021). Unit kerjanya berlanjut, tetapi WP-nya tidak ikut pindah semuanya: sebagian besar WP lama dialihkan ke KPP Pratama di wilayahnya. NPWP 15 digit dengan kode ini hanya menunjukkan tempat WP pertama kali terdaftar, bukan KPP yang mengadministrasikannya sekarang."
+    }
+  ]
+}

@@ -10,7 +10,7 @@ mereka merangkai modul-modul ini.
 | `npwp.py` | ML engineer | dua baris import dibuat relatif (`from .kpp_codes import ...`, `from .wilayah_codes import ...`) |
 | `name_extraction.py` | ML engineer | dua baris import dibuat relatif |
 | `name_master.py` | ML engineer (asli, menggantikan pengganti sementara) | path data dibaca saat dipanggil (`default_master_path()`, `default_list_path()`), bukan saat import; default ke `data/` di folder ini |
-| `kpp_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kpp_codes.json` |
+| `kpp_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kpp_codes_v2.json`; `_load_valid_kpp_codes` membaca format v2 (`kpp` + `kode_historis`) selain format lama |
 | `wilayah_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kode_wilayah.json` |
 
 Alasan perubahan path: kiriman asli menghitung path dari `os.environ` saat import dengan fallback ke
@@ -29,12 +29,14 @@ di atas). Butuh `numpy` (`poly_center`), `openpyxl` dan `rapidfuzz` (`name_maste
 | File | Dipakai oleh | Kalau tidak ada |
 |---|---|---|
 | `kode_wilayah.json` | `has_invalid_kecamatan_prefix` (NPWP 16 digit berbasis NIK) | pemeriksaan kecamatan tanpa sinyal (tidak pernah flag); kode provinsi 2 digit tetap diperiksa dari tabel di `npwp.py` |
-| `kpp_codes.json` | `has_invalid_kpp_prefix` (NPWP 15 digit lama) | tanpa sinyal |
+| `kpp_codes_v2.json` | `has_invalid_kpp_prefix` (NPWP 15 digit lama): kode valid = 352 KPP di `kpp` **plus** 6 kode lama di `kode_historis` (kantor yang dikonversi 3 Mei 2021; NPWP lama tetap memuat kodenya) | tanpa sinyal |
 | `name_lnmast.xlsx` | `is_recognized_name`: tie-break antar kandidat nama | jarak ke nomor NPWP yang menentukan, seperti sebelumnya |
 | `list_name_npwp.xlsx` | `correct_name_with_npwp_list` (koreksi nama per `file_id`) | **tidak dipakai di sini**: name matching fuzzy dilakukan di orkestrator, `extract_name` dipanggil tanpa `file_id` |
 
 **Status 23 September 2026:** `kode_wilayah.json` (7.230 kecamatan) dan `kpp_codes.json` (173 KPP) dari ML
-engineer ada di `data/` dan ikut ke image lewat `COPY app`. `name_lnmast.xlsx` (data internal, ~270 ribu nama)
+engineer ada di `data/` dan ikut ke image lewat `COPY app`. **30 September 2026:** `kpp_codes.json` diganti
+`kpp_codes_v2.json` dari ML engineer (352 KPP + 6 kode historis; sumber KMK 216/KMK.03/2021 dkk.). Semua 173 kode
+lama tetap valid (167 ada di `kpp`, 6 di `kode_historis`), 185 kode baru. `name_lnmast.xlsx` (data internal, ~270 ribu nama)
 sengaja diabaikan dulu (keputusan 23 September 2026); kalau nanti dipakai, pasang lewat volume + `NAME_MASTER_PATH` (di-gitignore).
 
 ## Yang berubah dari kiriman 20 September
