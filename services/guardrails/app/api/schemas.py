@@ -52,18 +52,10 @@ class DocumentResult(BaseModel):
         lt=1,
         description=(
             "The threshold the pages were judged with: the central orchestrator's (`GUARDRAILS_THRESHOLD_URL`), "
-            "else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint's 0.5, on the reject side). "
-            "Null with the `remote` backend, which applies its own"
+            "else the default (`GUARDRAILS_THRESHOLD`, else the checkpoint's 0.5). A page is accepted when "
+            "`proba_approve >= threshold`, rejected below it. Null with the `remote` backend, which applies its own"
         ),
         examples=[0.5],
-    )
-    threshold_target: Literal["accept", "reject"] | None = Field(
-        None,
-        description=(
-            "The side `threshold` applies to. `accept`: a page is accepted when `proba_approve >= threshold`. "
-            "`reject`: a page is rejected when `proba_reject >= threshold`. Null with the `remote` backend"
-        ),
-        examples=["reject"],
     )
 
 

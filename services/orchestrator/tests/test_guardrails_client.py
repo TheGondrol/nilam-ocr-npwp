@@ -7,7 +7,6 @@ from ocr_common.errors import ServiceError
 from app.clients.guardrails import (
     PASSTHROUGH_STATUSES,
     GuardrailsClient,
-    GuardrailsThreshold,
     build_guardrails_client,
 )
 from app.config import get_settings
@@ -126,7 +125,7 @@ async def test_the_client_is_built_from_the_settings():
 async def test_a_threshold_from_the_central_orchestrator_is_sent_with_the_document():
     client, handler = _client(httpx.Response(200, json={"data": ACCEPTED_REPORT}))
 
-    await client.check(RID, "npwp.jpg", "image/jpeg", JPEG, GuardrailsThreshold(0.3, "accept"))
+    await client.check(RID, "npwp.jpg", "image/jpeg", JPEG, 0.3)
 
     fields, _ = _form(handler.requests[0])
-    assert fields == {"request_id": RID, "threshold": "0.3", "threshold_target": "accept"}
+    assert fields == {"request_id": RID, "threshold": "0.3"}

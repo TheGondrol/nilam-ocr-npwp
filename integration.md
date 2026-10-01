@@ -163,22 +163,19 @@ kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
 | `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
-| `guardrails_confidence_threshold` | tidak, berpasangan dengan `guardrails_tendency` | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja. Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_REJECT_THRESHOLD`, lalu 0.5 sisi reject dari model) |
-| `guardrails_tendency` | tidak, berpasangan | `accepted`: halaman lolos kalau probabilitas accept ≥ threshold; `rejected`: halaman ditolak kalau probabilitas reject ≥ threshold |
+| `guardrails_confidence_threshold` | tidak | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
 | `column_confidence_threshold` | tidak | JSON object per field, mis. `{"nomor_npwp": 0.9, "nama": 0.5}`, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
 
-Threshold yang tidak bisa dibaca (hanya salah satu dari pasangan guardrails, angka di luar 0–1, `guardrails_tendency`
-selain `accepted` / `rejected`, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
+Threshold yang tidak bisa dibaca (angka guardrails di luar 0–1 atau bukan angka, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
 `INVALID_THRESHOLD`** dan tidak ada yang dijalankan. Contoh lengkap:
 
     request_id                       = OCR_361701a7-ad0f-46f7-9922-8eae7c99015e
     file_url                         = https://minio.example/ocr/abc.jpg
     pipeline_name_sequence           = ["guardrails","extraction","structuring","scoring"]
     guardrails_confidence_threshold  = 0.3
-    guardrails_tendency              = accepted
     column_confidence_threshold      = {"nomor_npwp":0.9,"nama":0.5}
 
-Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`, `document.threshold_target`).
+Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`).
 `column_confidence_threshold` ikut disimpan bersama job, jadi `GET /v1/extract-ocr/{request_id}` menjawab dengan
 `confidence` yang sama dengan jawaban `POST`-nya.
 
@@ -310,7 +307,7 @@ Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks 
 | 413 | `FILE_TOO_LARGE` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | `UNAUTHORIZED` | `X-API-Key` salah atau tidak ada | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
-| 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `guardrails_tendency` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
+| 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
 | 500 | `DOWNSTREAM_SERVER_ERROR` | service internal (guardrails / extraction) menjawab tidak sesuai kontrak | tidak; kirim ulang aman |
 | 500 | `INTERNAL_SERVER_ERROR` | kesalahan tak terduga di orchestrator | tidak; kirim ulang aman |
@@ -572,29 +569,26 @@ dengan:
     GET <URL kalian>/v1/thresholds/guardrails        (path bisa disesuaikan)
     X-API-Key: <opsional>
 
-    {"threshold": 0.6, "target": "accept"}
+    {"threshold": 0.6}
 
 - `threshold`: angka di antara 0 dan 1 (tidak termasuk 0 dan 1).
-- `target`: sisi yang diatur ambang itu.
-  - `accept`: dokumen lolos kalau probabilitas accept dari model **≥** `threshold` (sudah
-    melewati batas minimum), selain itu ditolak.
-  - `reject`: dokumen ditolak kalau probabilitas reject **≥** `threshold`, dan lolos kalau di
-    bawah batas toleransi.
+
+Ambang ini hanya satu, pada probabilitas **accept** dari model: dokumen lolos kalau probabilitas
+accept **≥** `threshold`, dan ditolak kalau di bawahnya.
 
 Contoh, keluaran model probabilitas accept 0,7 (berarti reject 0,3):
 
 | Jawaban endpoint | Hasil |
 |---|---|
-| `{"threshold": 0.6, "target": "accept"}` | lolos (0,7 ≥ 0,6) |
-| `{"threshold": 0.6, "target": "reject"}` | lolos (0,3 < 0,6) |
-| `{"threshold": 0.8, "target": "accept"}` | ditolak (0,7 < 0,8) |
-| `{"threshold": 0.3, "target": "reject"}` | ditolak (0,3 ≥ 0,3) |
+| `{"threshold": 0.6}` | lolos (0,7 ≥ 0,6) |
+| `{"threshold": 0.7}` | lolos (0,7 ≥ 0,7) |
+| `{"threshold": 0.8}` | ditolak (0,7 < 0,8) |
 
 Nilainya kami simpan 60 detik per pod, jadi perubahan di sisi kalian berlaku paling lambat
 semenit kemudian. Kalau endpoint mati atau jawabannya tidak valid, kami tetap memakai ambang
-terakhir yang pernah kalian berikan; kalau belum pernah ada, dipakai default (reject 0,5).
-Ambang yang dipakai tercatat di laporan guardrails (`document.threshold`,
-`document.threshold_target`). Endpoint ini belum ada; sampai ada, kami memakai default.
+terakhir yang pernah kalian berikan; kalau belum pernah ada, dipakai default (0,5).
+Ambang yang dipakai tercatat di laporan guardrails (`document.threshold`). Endpoint ini belum
+ada; sampai ada, kami memakai default.
 
 ## 10. Amplop respons dan kode error
 

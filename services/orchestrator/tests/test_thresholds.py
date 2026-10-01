@@ -7,7 +7,6 @@ from dataclasses import replace
 
 import pytest
 
-from app.clients.guardrails import GuardrailsThreshold
 from tests.conftest import DONE, JPEG
 
 RID = "OCR_361701a7-ad0f-46f7-9922-8eae7c99015e"
@@ -15,7 +14,6 @@ RID = "OCR_361701a7-ad0f-46f7-9922-8eae7c99015e"
 CENTRAL = {
     "pipeline_name_sequence": json.dumps(["guardrails", "extraction", "structuring", "scoring"]),
     "guardrails_confidence_threshold": "0.3",
-    "guardrails_tendency": "accepted",
     "column_confidence_threshold": json.dumps({"nomor_npwp": 0.9, "nama": 0.5}),
 }
 
@@ -39,7 +37,7 @@ def test_the_central_orchestrators_thresholds_reach_guardrails_and_the_pipeline(
     response = _submit(client, auth, **CENTRAL)
 
     assert response.status_code == 200
-    assert stub_guardrails.checked[0]["threshold"] == GuardrailsThreshold(0.3, "accept")
+    assert stub_guardrails.checked[0]["threshold"] == 0.3
     assert stub_extraction.submitted[0]["column_thresholds"] == {"nomor_npwp": 0.9, "nama": 0.5}
     # nomor_npwp 0.7296 < 0.9, nama 0.9471 >= 0.5
     assert _confidences(response.json()) == {"nomor_npwp": 0, "nama": 1}
@@ -61,25 +59,19 @@ def test_a_field_left_out_of_column_confidence_threshold_uses_the_default(client
     assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 0}
 
 
-@pytest.mark.parametrize(
-    ("tendency", "target"),
-    [("accepted", "accept"), ("rejected", "reject"), ("Accepted", "accept"), ("reject", "reject")],
-)
-def test_guardrails_tendency_names_the_side(client, auth, stub_guardrails, tendency, target):
-    _submit(client, auth, guardrails_confidence_threshold="0.6", guardrails_tendency=tendency)
+def test_the_guardrails_threshold_alone_is_enough(client, auth, stub_guardrails):
+    response = _submit(client, auth, guardrails_confidence_threshold="0.6")
 
-    assert stub_guardrails.checked[0]["threshold"] == GuardrailsThreshold(0.6, target)
+    assert response.status_code == 200
+    assert stub_guardrails.checked[0]["threshold"] == 0.6
 
 
 @pytest.mark.parametrize(
     "form",
     [
-        {"guardrails_confidence_threshold": "0.3"},
-        {"guardrails_tendency": "accepted"},
-        {"guardrails_confidence_threshold": "tinggi", "guardrails_tendency": "accepted"},
-        {"guardrails_confidence_threshold": "0", "guardrails_tendency": "accepted"},
-        {"guardrails_confidence_threshold": "1.5", "guardrails_tendency": "accepted"},
-        {"guardrails_confidence_threshold": "0.3", "guardrails_tendency": "maybe"},
+        {"guardrails_confidence_threshold": "tinggi"},
+        {"guardrails_confidence_threshold": "0"},
+        {"guardrails_confidence_threshold": "1.5"},
         {"column_confidence_threshold": "{not json"},
         {"column_confidence_threshold": "[0.9, 0.5]"},
         {"column_confidence_threshold": json.dumps({"npwp": 0.9})},

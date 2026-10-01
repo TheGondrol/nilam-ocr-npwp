@@ -2,14 +2,10 @@
 there without a deploy here; this service reads it from the orchestrator's endpoint and falls back to
 its own default.
 
-The orchestrator sets it on either side of the model's answer, and each side is compared with its own
-probability (never converted with `1 - x`, so a value exactly at the limit is decided as stated):
+There is one threshold, on the model's accepted probability: a page is accepted when
+`proba_approve >= threshold` and rejected when it is below (a value exactly at the limit is accepted).
 
-- `accept`: a page is accepted when `proba_approve >= threshold` (it passed the minimum), else rejected.
-- `reject`: a page is rejected when `proba_reject >= threshold`, else accepted (below the tolerance).
-
-With the model's `proba_approve = 0.7` (`proba_reject = 0.3`): accept 0.6 -> accepted, reject 0.6 ->
-accepted, accept 0.8 -> rejected, reject 0.3 -> rejected.
+With the model's `proba_approve = 0.7`: threshold 0.6 -> accepted, threshold 0.8 -> rejected.
 """
 
 import asyncio
@@ -17,56 +13,40 @@ import logging
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import ServiceError
 
 logger = logging.getLogger(__name__)
 
-ACCEPT = "accept"
-REJECT = "reject"
-Target = Literal["accept", "reject"]
-TARGETS: tuple[Target, ...] = (ACCEPT, REJECT)
-DEFAULT_REJECT_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = 0.5
 
 
-@dataclass(frozen=True)
-class Threshold:
-    """A threshold and the side of the model's answer it applies to."""
-
-    value: float
-    target: Target = REJECT
-
-    def rejects(self, proba_approve: float, proba_reject: float) -> bool:
-        """Whether a page with these probabilities is rejected."""
-        if self.target == ACCEPT:
-            return proba_approve < self.value
-        return proba_reject >= self.value
+def rejects(proba_approve: float, threshold: float) -> bool:
+    """Whether a page with this accepted probability is rejected."""
+    return proba_approve < threshold
 
 
-def default_threshold(configured: float | None, classifier: Any) -> Threshold:
-    """The threshold used when the orchestrator does not give one, on the reject side:
-    GUARDRAILS_REJECT_THRESHOLD when set, else the one stored in the model's checkpoint, else 0.5."""
+def default_threshold(configured: float | None, classifier: Any) -> float:
+    """The threshold used when the orchestrator does not give one:
+    GUARDRAILS_THRESHOLD when set, else the one derived from the model's checkpoint, else 0.5."""
     if configured is not None:
-        return Threshold(configured, REJECT)
-    return Threshold(float(getattr(classifier, "reject_threshold", DEFAULT_REJECT_THRESHOLD)), REJECT)
+        return configured
+    return float(getattr(classifier, "accept_threshold", DEFAULT_THRESHOLD))
 
 
-def parse_threshold(body: Any) -> Threshold:
-    """`{"threshold": 0.6, "target": "accept"}` into a `Threshold`. Raises ValueError for anything else,
-    including a value outside (0, 1) or a target that is not `accept` / `reject`."""
+def parse_threshold(body: Any) -> float:
+    """`{"threshold": 0.6}` into the threshold. Raises ValueError for anything else, including a value
+    outside (0, 1)."""
     if not isinstance(body, dict):
         raise ValueError(f"not a JSON object: {body!r}")
-    value, target = body.get("threshold"), body.get("target")
+    value = body.get("threshold")
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         raise ValueError(f"no numeric threshold in {body!r}")
     if not 0 < value < 1:
         raise ValueError(f"threshold must be between 0 and 1, got {value}")
-    if target not in TARGETS:
-        raise ValueError(f"target must be one of {', '.join(TARGETS)}, got {target!r}")
-    return Threshold(float(value), target)
+    return float(value)
 
 
 class GuardrailsThreshold:
@@ -79,7 +59,7 @@ class GuardrailsThreshold:
         self,
         client: RemoteModelClient | None,
         path: str,
-        default: Threshold,
+        default: float,
         *,
         cache_seconds: float,
         clock: Callable[[], float] = time.monotonic,
@@ -89,11 +69,11 @@ class GuardrailsThreshold:
         self.default = default
         self._cache_seconds = cache_seconds
         self._clock = clock
-        self._value: Threshold | None = None
+        self._value: float | None = None
         self._checked_at: float | None = None
         self._lock = asyncio.Lock()
 
-    async def get(self) -> Threshold:
+    async def get(self) -> float:
         if self._client is None:
             return self.default
         if not self._due():
@@ -110,7 +90,7 @@ class GuardrailsThreshold:
     def _due(self) -> bool:
         return self._checked_at is None or self._clock() - self._checked_at >= self._cache_seconds
 
-    def _current(self) -> Threshold:
+    def _current(self) -> float:
         return self.default if self._value is None else self._value
 
     async def _fetch(self, client: RemoteModelClient) -> None:

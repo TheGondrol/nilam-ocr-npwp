@@ -18,7 +18,7 @@ from ocr_common.pipeline import (
 )
 
 from app.clients.extraction import ExtractionJobClient
-from app.clients.guardrails import GuardrailsClient, GuardrailsThreshold
+from app.clients.guardrails import GuardrailsClient
 from app.config import Settings
 from app.services.document_checks import check_document
 from app.services.guardrails_log import GuardrailsLog, NoGuardrailsLog
@@ -61,7 +61,7 @@ class ExtractOcrService:
         received_at: float | None = None,
         file_url: str | None = None,
         sequence: Sequence[str] = DEFAULT_SEQUENCE,
-        guardrails_threshold: GuardrailsThreshold | None = None,
+        guardrails_threshold: float | None = None,
         column_thresholds: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         """Check the file (type, empty, `MAX_UPLOAD_BYTES`, `MAX_DOCUMENT_PAGES`) before anyone else sees it,

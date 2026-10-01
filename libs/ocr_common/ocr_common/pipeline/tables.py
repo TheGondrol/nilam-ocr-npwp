@@ -111,7 +111,6 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
         Column("verdict", Text, nullable=True),
         Column("confidence", Float, nullable=True),
         Column("threshold", Float, nullable=True),
-        Column("threshold_target", Text, nullable=True),
         Column("threshold_source", Text, nullable=False),
         Column("n_pages", Integer, nullable=True),
         Column("reason", Text, nullable=True),

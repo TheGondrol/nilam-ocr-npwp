@@ -231,12 +231,11 @@ paths:
 
 
         **Thresholds from the central orchestrator, per request, all optional.** `guardrails_confidence_threshold`
-        with `guardrails_tendency` (`accepted`: a page passes when the model''s accept probability reaches
-        it; `rejected`: a page is rejected when its reject probability reaches it) replaces the guardrails
-        threshold for this document; left out, the guardrails service''s own is used (`GUARDRAILS_THRESHOLD_URL`,
-        else `GUARDRAILS_REJECT_THRESHOLD`, else the model''s 0.5 on the reject side). `column_confidence_threshold`
-        (`{"nomor_npwp": 0.9, "nama": 0.5}`) sets, per field, the trust probability for `confidence: 1`,
-        always on the accept side; a field it leaves out, or the whole field omitted, uses `FIELD_CONFIDENCE_THRESHOLD`
+        (a page passes when the model''s accepted probability reaches it, and is rejected below it) replaces
+        the guardrails threshold for this document; left out, the guardrails service''s own is used (`GUARDRAILS_THRESHOLD_URL`,
+        else `GUARDRAILS_THRESHOLD`, else the model''s 0.5). `column_confidence_threshold` (`{"nomor_npwp":
+        0.9, "nama": 0.5}`) sets, per field, the trust probability for `confidence: 1`, always on the
+        accept side; a field it leaves out, or the whole field omitted, uses `FIELD_CONFIDENCE_THRESHOLD`
         (0.5). A threshold that cannot be read answers `422` `INVALID_THRESHOLD` and nothing runs.
 
 
@@ -332,7 +331,6 @@ paths:
                         n_approve: 1
                         n_reject: 0
                         threshold: 0.5
-                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -583,7 +581,6 @@ paths:
                         n_approve: 1
                         n_reject: 0
                         threshold: 0.5
-                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -772,20 +769,11 @@ components:
           - type: string
           - type: 'null'
           title: Guardrails Confidence Threshold
-          description: 'Guardrails threshold for this document, between 0 and 1 (exclusive), with `guardrails_tendency`.
+          description: 'Guardrails threshold for this document, between 0 and 1 (exclusive), on the model''s
+            accepted probability: a page passes when it reaches the threshold, and is rejected below it.
             Omitted: the guardrails service''s own threshold'
           examples:
           - '0.3'
-        guardrails_tendency:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Guardrails Tendency
-          description: 'The side `guardrails_confidence_threshold` applies to: `accepted` (a page passes
-            when its accept probability reaches it) or `rejected` (a page is rejected when its reject
-            probability reaches it)'
-          examples:
-          - accepted
         column_confidence_threshold:
           anyOf:
           - type: string

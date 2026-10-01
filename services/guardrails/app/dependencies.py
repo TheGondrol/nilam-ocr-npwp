@@ -70,7 +70,7 @@ def get_threshold() -> GuardrailsThreshold:
     return GuardrailsThreshold(
         client,
         settings.guardrails_threshold_path,
-        default_threshold(settings.guardrails_reject_threshold, get_page_classifier()),
+        default_threshold(settings.guardrails_threshold, get_page_classifier()),
         cache_seconds=settings.guardrails_threshold_cache_seconds,
     )
 

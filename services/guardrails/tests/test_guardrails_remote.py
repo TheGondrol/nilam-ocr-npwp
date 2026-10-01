@@ -92,7 +92,7 @@ async def test_rejected_report_gets_reason_for_the_orchestrator():
 
 
 async def test_model_verdict_is_not_overridden_by_local_settings():
-    settings = _settings(guardrails_reject_threshold=0.001, guardrails_document_policy="majority")
+    settings = _settings(guardrails_threshold=0.999, guardrails_document_policy="majority")
     report = await GuardrailsService(_model(_reply(ACCEPTED)), settings).check("a.jpg", "image/jpeg", JPEG)
     assert report["document"]["verdict"] == "accepted"
     assert [p["verdict"] for p in report["pages"]] == ["accepted", "accepted"]
@@ -184,7 +184,7 @@ def test_http_check_with_remote_backend(client, auth, use_classifier):
     assert body["request_id"] == "OCR_R1"
     assert body["data"]["passed"] is False
     # The remote model applies its own threshold, so the report does not state one.
-    assert body["data"]["document"] == {**REJECTED["data"]["document"], "threshold": None, "threshold_target": None}
+    assert body["data"]["document"] == {**REJECTED["data"]["document"], "threshold": None}
 
 
 def test_http_model_unreachable_returns_503_envelope(client, auth, use_classifier):

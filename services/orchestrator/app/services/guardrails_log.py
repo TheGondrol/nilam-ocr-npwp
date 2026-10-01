@@ -101,7 +101,6 @@ class SqlGuardrailsLog:
                     verdict=document.get("verdict"),
                     confidence=document.get("confidence"),
                     threshold=document.get("threshold"),
-                    threshold_target=document.get("threshold_target"),
                     threshold_source=SOURCE_REQUEST if threshold_from_request else SOURCE_SERVICE,
                     n_pages=document.get("n_pages"),
                     reason=report.get("reason"),

@@ -11,7 +11,7 @@ class PageClassifier(Protocol):
     GuardrailsService turns the per-page probabilities into the document verdict."""
 
     name: str
-    reject_threshold: float
+    accept_threshold: float
     metadata: dict[str, Any]
 
     def classify(self, filename: str, pages: list[Image.Image]) -> list[PagePrediction]: ...

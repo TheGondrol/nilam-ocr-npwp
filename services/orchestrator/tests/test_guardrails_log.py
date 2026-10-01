@@ -26,7 +26,7 @@ def _submit(client, auth, filename="npwp.jpg", **form):
 
 
 def test_an_accepted_document_is_recorded_with_whose_threshold_decided(client, auth, guardrails_log):
-    _submit(client, auth, guardrails_confidence_threshold="0.3", guardrails_tendency="accepted")
+    _submit(client, auth, guardrails_confidence_threshold="0.3")
     _submit(client, auth)
 
     assert [(r["request_id"], r["report"]["passed"], r["threshold_from_request"]) for r in guardrails_log.records] == [
@@ -75,7 +75,6 @@ async def test_the_verdict_is_written_with_its_threshold_and_the_whole_report(da
         "confidence": 0.9821,
         "n_pages": 1,
         "threshold": 0.3,
-        "threshold_target": "accept",
     }
     report = {**ACCEPTED_REPORT, "document": document}
 
@@ -89,11 +88,8 @@ async def test_the_verdict_is_written_with_its_threshold_and_the_whole_report(da
         "accepted",
         0.9821,
     )
-    assert (accepted["threshold"], accepted["threshold_target"], accepted["threshold_source"]) == (
-        0.3,
-        "accept",
-        "request",
-    )
+    assert (accepted["threshold"], accepted["threshold_source"]) == (0.3, "request")
+    assert "threshold_target" not in accepted
     assert accepted["report"] == report
     assert (rejected["passed"], rejected["threshold_source"], rejected["reason"]) == (
         False,
