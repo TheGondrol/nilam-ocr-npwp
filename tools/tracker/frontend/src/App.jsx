@@ -39,6 +39,11 @@ function sequenceText(sequence) {
   return sequence ? sequence.join(' → ') : 'penuh'
 }
 
+// Service terakhir di pipeline_name_sequence (penuh: scoring). pipeline_last_stage null pada jawaban sukses.
+function lastOfSequence(sequence) {
+  return sequence && sequence.length ? sequence[sequence.length - 1] : 'scoring'
+}
+
 function fmtMs(ms) {
   if (ms == null) return ''
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`
@@ -232,9 +237,9 @@ function httpClass(status) {
   return status === 200 ? 'done' : status === 202 ? 'processing' : status === 400 ? 'rejected' : 'failed'
 }
 
-function httpNote(status, rejectedBy, body) {
-  const last = body?.pipeline_last_stage
-  if (status === 200) return last && last !== 'scoring' ? `200: data = hasil ${last} apa adanya` : '200: hasil lengkap ada di response'
+function httpNote(status, rejectedBy, body, sequence) {
+  const last = lastOfSequence(sequence)
+  if (status === 200) return last !== 'scoring' ? `200: data = hasil ${last} apa adanya` : '200: hasil lengkap ada di response'
   if (status === 202) return '202: hanya request_id, hasil menyusul lewat callback'
   if (status === 422 && body?.errors === INVALID_SEQUENCE) return '422: pipeline_name_sequence tidak valid, tidak ada yang jalan'
   if (status === 422) return '422: satu tahap gagal di dalam batas tunggu'
@@ -262,8 +267,8 @@ function GuardrailsResponse({ http, t0 }) {
       </div>
       <div className="meta">
         {http.http_status === 200 &&
-          (http.pipeline_last_stage && http.pipeline_last_stage !== 'scoring'
-            ? `Request berhenti di ${http.pipeline_last_stage} sesuai sequence: data adalah hasil ${http.pipeline_last_stage} apa adanya, bukan field kontrak.`
+          (lastOfSequence(http.sequence) !== 'scoring'
+            ? `Request berhenti di ${lastOfSequence(http.sequence)} sesuai sequence: data adalah hasil ${lastOfSequence(http.sequence)} apa adanya, bukan field kontrak.`
             : 'Pipeline selesai di dalam batas tunggu: hasil langsung ada di respons, callback yang menyusul boleh diabaikan.')}
         {http.http_status === 202 && 'Batas tunggu habis sebelum tahap terakhir selesai: hasil menyusul lewat callback, dan bisa dibaca kapan saja lewat GET /v1/extract-ocr/{request_id} di orchestrator.'}
         {http.http_status === 422 &&
@@ -1224,7 +1229,7 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
               </button>
               {r.body && (
                 <div className="resp">
-                  <span className="meta">{httpNote(r.http_status, r.rejected_by, r.body)}</span>
+                  <span className="meta">{httpNote(r.http_status, r.rejected_by, r.body, r.sequence)}</span>
                   <Json value={r.body} label="response" />
                 </div>
               )}

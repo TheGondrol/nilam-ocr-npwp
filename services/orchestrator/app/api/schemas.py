@@ -52,14 +52,13 @@ class ExtractOcrResponse(BaseModel):
     pipeline_last_stage: Literal["orchestrator", "guardrails", "extraction", "structuring", "scoring"] | None = Field(
         None,
         description=(
-            "The service this answer comes from, on every answer, errors included. A pipeline service named as in "
-            "`pipeline_name_sequence`: the last service of the sequence when `completed`; the one that rejected "
-            "(`guardrails`, `structuring`) or failed; the one still running on 202; the one that could not be "
-            "reached or answered an error. `orchestrator` when this service refused the request itself before any "
-            "pipeline service was called (API key, file checks, `pipeline_name_sequence`, thresholds, `params`, "
-            "`document_type`, an unknown request_id)"
+            "Null on a success answer (200 `completed`, 202 `processing`). On an error, the service it comes "
+            "from. A pipeline service named as in `pipeline_name_sequence`: the one that rejected (`guardrails`, "
+            "`structuring`) or failed; the one that could not be reached or answered an error. `orchestrator` when "
+            "this service refused the request itself before any pipeline service was called (API key, file "
+            "checks, `pipeline_name_sequence`, thresholds, `params`, `document_type`, an unknown request_id)"
         ),
-        examples=["scoring"],
+        examples=["structuring"],
     )
     document_type: str | None = Field(None, description="Document type of the request", examples=["npwp"])
     job_status: JobStatus | None = Field(

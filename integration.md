@@ -142,13 +142,14 @@ Path, field, dan bentuk jawabannya sama persis dengan `extract-ocr` yang dulu di
 kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
 `pipeline_last_stage`, dan `params`.
 
-**`pipeline_last_stage`** menyebut service pipeline asal jawaban itu, dengan nama yang sama seperti
-di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET /v1/extract-ocr/{request_id}`:
+**`pipeline_last_stage`** bernilai `null` pada jawaban sukses (200, 202) dan menyebut service asal
+**error**, dengan nama yang sama seperti di `pipeline_name_sequence`. Field ini ada di setiap jawaban
+`POST` maupun `GET /v1/extract-ocr/{request_id}`:
 
 | Jawaban | `pipeline_last_stage` |
 |---|---|
-| 200 selesai | service terakhir di urutan (`scoring` untuk urutan penuh) |
-| 202 masih berjalan | service yang sedang berjalan |
+| 200 selesai | `null` |
+| 202 masih berjalan | `null` |
 | 400 ditolak model guardrails | `guardrails` |
 | 400 ditolak aturan structuring | `structuring` |
 | 422 `<TAHAP>_FAILED` | service yang gagal (`OCR_FAILED` = `extraction`) |

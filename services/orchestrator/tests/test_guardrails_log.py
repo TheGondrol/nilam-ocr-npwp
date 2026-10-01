@@ -179,7 +179,7 @@ def test_the_get_of_a_guardrails_only_request_answers_with_the_report(client, au
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"], body["pipeline_last_stage"]) == ("completed", 0, "guardrails")
+    assert (body["job_status"], body["guardrails"], body["pipeline_last_stage"]) == ("completed", 0, None)
     assert body["data"] == posted.json()["data"] == ACCEPTED_REPORT
 
 

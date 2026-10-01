@@ -262,7 +262,7 @@ def _sequence_cut_short(client: httpx.Client, sequence: list[str], data_key: str
     if rejected:
         # Aturan structuring tetap menolak (mis. KPP acak dari OCR mock); tetap bukti structuring jalan dan berhenti.
         print(f"  ditolak aturan structuring: {body.get('message')!r}")
-    elif response.status_code not in (200, 202) or body.get("pipeline_last_stage") != last:
+    elif response.status_code not in (200, 202) or body.get("pipeline_last_stage") is not None:
         return False
     elif response.status_code == 200 and data_key not in (body.get("data") or {}):
         print(f"  data tidak berisi {data_key!r}: {json.dumps(body.get('data'))[:200]}")
@@ -302,11 +302,9 @@ def sequences(client: httpx.Client) -> bool:
         f"guardrails: {response.status_code} pipeline_last_stage={body.get('pipeline_last_stage')} "
         f"data.passed={(body.get('data') or {}).get('passed')}; GET status -> {status.status_code} (tidak disimpan)"
     )
-    results.append(
-        response.status_code in (200, 400)
-        and body.get("pipeline_last_stage") == "guardrails"
-        and status.status_code == 404
-    )
+    # Sukses: pipeline_last_stage null; ditolak: guardrails.
+    expected_stage = {200: None, 400: "guardrails"}.get(response.status_code, "-")
+    results.append(body.get("pipeline_last_stage") == expected_stage and status.status_code == 404)
 
     response = _submit(client, f"REQ_{uuid.uuid4()}", "npwp.jpg", _image(), ["extraction", "scoring"])
     body = response.json()

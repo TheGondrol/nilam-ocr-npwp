@@ -79,9 +79,9 @@ paths:
 
         |---|---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |
+        | Finished | 200 | `completed` | the fields | `0` | null | null |
 
-        | Still running | 202 | `processing` | null | null | null | the service still running |
+        | Still running | 202 | `processing` | null | null | null | null |
 
         | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         | `guardrails` |
@@ -93,8 +93,8 @@ paths:
         | the service that failed |
 
 
-        `pipeline_last_stage` names the service an answer comes from, on every answer, errors included:
-        a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
+        `pipeline_last_stage` is null on a success answer (200, 202) and names the service an error comes
+        from: a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
         `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
         service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
         thresholds, `params`, `document_type`, an unknown request_id).
@@ -386,9 +386,9 @@ paths:
 
         |---|---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null | the last service of the sequence |
+        | Finished | 200 | `completed` | the fields | `0` | null | null |
 
-        | Still running | 202 | `processing` | null | null | null | the service still running |
+        | Still running | 202 | `processing` | null | null | null | null |
 
         | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
         | `guardrails` |
@@ -400,8 +400,8 @@ paths:
         | the service that failed |
 
 
-        `pipeline_last_stage` names the service an answer comes from, on every answer, errors included:
-        a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
+        `pipeline_last_stage` is null on a success answer (200, 202) and names the service an error comes
+        from: a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
         `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
         service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
         thresholds, `params`, `document_type`, an unknown request_id).
@@ -911,14 +911,14 @@ components:
             - scoring
           - type: 'null'
           title: Pipeline Last Stage
-          description: 'The service this answer comes from, on every answer, errors included. A pipeline
-            service named as in `pipeline_name_sequence`: the last service of the sequence when `completed`;
-            the one that rejected (`guardrails`, `structuring`) or failed; the one still running on 202;
-            the one that could not be reached or answered an error. `orchestrator` when this service refused
-            the request itself before any pipeline service was called (API key, file checks, `pipeline_name_sequence`,
-            thresholds, `params`, `document_type`, an unknown request_id)'
+          description: 'Null on a success answer (200 `completed`, 202 `processing`). On an error, the
+            service it comes from. A pipeline service named as in `pipeline_name_sequence`: the one that
+            rejected (`guardrails`, `structuring`) or failed; the one that could not be reached or answered
+            an error. `orchestrator` when this service refused the request itself before any pipeline
+            service was called (API key, file checks, `pipeline_name_sequence`, thresholds, `params`,
+            `document_type`, an unknown request_id)'
           examples:
-          - scoring
+          - structuring
         document_type:
           anyOf:
           - type: string

@@ -56,7 +56,7 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         "document_type": "npwp",
         "job_status": "completed",
         "guardrails": 0,
-        "pipeline_last_stage": "scoring",
+        "pipeline_last_stage": None,
         "params": None,
     }
     assert stub_waiter.snapshots == [RID]

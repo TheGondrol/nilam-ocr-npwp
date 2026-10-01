@@ -43,7 +43,7 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         "document_type": "npwp",
         "job_status": "completed",
         "guardrails": 0,
-        "pipeline_last_stage": "scoring",
+        "pipeline_last_stage": None,
         "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
@@ -333,15 +333,15 @@ def test_missing_api_key_returns_401_envelope(client):
 @pytest.mark.parametrize(
     ("sequence", "outcome", "status", "stage"),
     [
-        (None, None, 200, "scoring"),
-        (["guardrails"], None, 200, "guardrails"),
-        (["guardrails", "extraction"], WaitOutcome("OCR", "DONE", results={"OCR": {"blocks": []}}), 200, "extraction"),
+        (None, None, 200, None),
+        (["guardrails"], None, 200, None),
+        (["guardrails", "extraction"], WaitOutcome("OCR", "DONE", results={"OCR": {"blocks": []}}), 200, None),
         (None, WaitOutcome("OCR", "FAILED", "OCR model is unavailable"), 422, "extraction"),
         (None, WaitOutcome("STRUCTURING", STATUS_REJECTED, "Kode provinsi pada NPWP tidak valid"), 400, "structuring"),
-        (None, WaitOutcome("STRUCTURING", "PROCESSING"), 202, "structuring"),
+        (None, WaitOutcome("STRUCTURING", "PROCESSING"), 202, None),
     ],
 )
-def test_pipeline_last_stage_names_the_service_the_answer_comes_from(
+def test_pipeline_last_stage_names_the_service_of_an_error_and_is_null_on_success(
     client, auth, stub_waiter, sequence, outcome, status, stage
 ):
     if outcome is not None:
