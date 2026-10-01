@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
@@ -22,7 +22,6 @@ from app.api.extract_contract import (
     extract_response,
 )
 from app.api.schemas import ExtractOcrResponse
-from app.clients.guardrails import GuardrailsThreshold
 from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
 from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
@@ -39,13 +38,6 @@ INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 INVALID_THRESHOLD_CODE = "INVALID_THRESHOLD"
 # `pipeline_last_stage` of a request this service refuses itself, before calling any pipeline service.
 ENTRY = "orchestrator"
-# guardrails_tendency as the central orchestrator writes it (accepted / rejected), to the side it names.
-TENDENCIES: dict[str, Literal["accept", "reject"]] = {
-    "accepted": "accept",
-    "accept": "accept",
-    "rejected": "reject",
-    "reject": "reject",
-}
 
 _PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
@@ -103,7 +95,6 @@ _GUARDRAILS_REPORT = {
         "n_approve": 1,
         "n_reject": 0,
         "threshold": 0.5,
-        "threshold_target": "reject",
     },
     "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
 }
@@ -143,24 +134,19 @@ class _InvalidThreshold(Exception):
     pass
 
 
-def _parse_guardrails_threshold(value: str | None, tendency: str | None) -> GuardrailsThreshold | None:
-    """`guardrails_confidence_threshold` + `guardrails_tendency`, both or neither; None (neither) leaves the
-    guardrails service's own threshold in force. Raises `_InvalidThreshold`."""
+def _parse_guardrails_threshold(value: str | None) -> float | None:
+    """`guardrails_confidence_threshold`; None (left out) leaves the guardrails service's own threshold in
+    force. Raises `_InvalidThreshold`."""
     value = (value or "").strip()
-    tendency = (tendency or "").strip().lower()
-    if not value and not tendency:
+    if not value:
         return None
-    if not value or not tendency:
-        raise _InvalidThreshold("send guardrails_confidence_threshold and guardrails_tendency together, or neither")
     try:
         threshold = float(value)
     except ValueError:
         threshold = float("nan")
     if not 0 < threshold < 1:
         raise _InvalidThreshold(f"guardrails_confidence_threshold must be a number between 0 and 1, got {value!r}")
-    if tendency not in TENDENCIES:
-        raise _InvalidThreshold(f"guardrails_tendency must be accepted or rejected, got {tendency!r}")
-    return GuardrailsThreshold(threshold, TENDENCIES[tendency])
+    return threshold
 
 
 # `errors` when calling a pipeline service failed, by the status it failed with.
@@ -244,10 +230,9 @@ def _parse_params(raw: str | None) -> Any:
         "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`. "
         "`params` is returned as sent.\n\n"
         "**Thresholds from the central orchestrator, per request, all optional.** "
-        "`guardrails_confidence_threshold` with `guardrails_tendency` (`accepted`: a page passes when the model's "
-        "accept probability reaches it; `rejected`: a page is rejected when its reject probability reaches it) "
-        "replaces the guardrails threshold for this document; left out, the guardrails service's own is used "
-        "(`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_REJECT_THRESHOLD`, else the model's 0.5 on the reject side). "
+        "`guardrails_confidence_threshold` (a page passes when the model's accepted probability reaches it, and "
+        "is rejected below it) replaces the guardrails threshold for this document; left out, the guardrails "
+        "service's own is used (`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the model's 0.5). "
         '`column_confidence_threshold` (`{"nomor_npwp": 0.9, "nama": 0.5}`) sets, per field, the trust '
         "probability for `confidence: 1`, always on the accept side; a field it leaves out, or the whole field "
         "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read answers `422` "
@@ -377,18 +362,11 @@ async def extract_ocr(
     guardrails_confidence_threshold: str | None = Form(
         None,
         description=(
-            "Guardrails threshold for this document, between 0 and 1 (exclusive), with `guardrails_tendency`. "
+            "Guardrails threshold for this document, between 0 and 1 (exclusive), on the model's accepted "
+            "probability: a page passes when it reaches the threshold, and is rejected below it. "
             "Omitted: the guardrails service's own threshold"
         ),
         examples=["0.3"],
-    ),
-    guardrails_tendency: str | None = Form(
-        None,
-        description=(
-            "The side `guardrails_confidence_threshold` applies to: `accepted` (a page passes when its accept "
-            "probability reaches it) or `rejected` (a page is rejected when its reject probability reaches it)"
-        ),
-        examples=["accepted"],
     ),
     column_confidence_threshold: str | None = Form(
         None,
@@ -434,7 +412,7 @@ async def extract_ocr(
             pipeline_last_stage=ENTRY,
         )
     try:
-        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold, guardrails_tendency)
+        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold)
         try:
             column_thresholds = column_thresholds_from_json(column_confidence_threshold)
         except ValueError as exc:

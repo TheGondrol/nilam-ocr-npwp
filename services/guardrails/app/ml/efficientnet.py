@@ -47,7 +47,8 @@ class EfficientNetPageClassifier:
         self._accepted_index = self.class_names.index(CLASS_ACCEPTED)
         self._reject_index = self.class_names.index(CLASS_REJECT)
         self.image_size: int = int(checkpoint.get("image_size") or 224)
-        self.reject_threshold: float = float(checkpoint.get("reject_threshold") or 0.5)
+        # The checkpoint stores the reject side (reject when proba_reject >= t); the accepted side is 1 - t.
+        self.accept_threshold: float = round(1 - float(checkpoint.get("reject_threshold") or 0.5), 4)
         self.metadata: dict[str, Any] = {
             "architecture": "efficientnet_b0",
             "device": device,
@@ -56,7 +57,7 @@ class EfficientNetPageClassifier:
             "val_macro_f1": checkpoint.get("val_macro_f1"),
             "class_names": self.class_names,
             "image_size": self.image_size,
-            "reject_threshold": self.reject_threshold,
+            "accept_threshold": self.accept_threshold,
         }
 
         model = efficientnet_b0(weights=None, num_classes=len(self.class_names))

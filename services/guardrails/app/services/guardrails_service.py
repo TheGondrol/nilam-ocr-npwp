@@ -2,7 +2,7 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
-from app.clients.threshold import GuardrailsThreshold, Threshold, default_threshold
+from app.clients.threshold import GuardrailsThreshold, default_threshold, rejects
 from app.config import Settings
 from app.services.pages import render_pages
 
@@ -22,18 +22,18 @@ class GuardrailsService:
     count were checked by the orchestrator NPWP before it called this service."""
 
     def __init__(self, classifier, settings: Settings, threshold: GuardrailsThreshold | None = None):
-        """Without `threshold`, the default one (GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's)."""
+        """Without `threshold`, the default one (GUARDRAILS_THRESHOLD, else the checkpoint's)."""
         self._classifier = classifier
         self._settings = settings
         self._threshold = threshold or GuardrailsThreshold(
-            None, "", default_threshold(settings.guardrails_reject_threshold, classifier), cache_seconds=0
+            None, "", default_threshold(settings.guardrails_threshold, classifier), cache_seconds=0
         )
 
     async def check(
-        self, filename: str, content_type: str | None, content: bytes, threshold: Threshold | None = None
+        self, filename: str, content_type: str | None, content: bytes, threshold: float | None = None
     ) -> dict[str, Any]:
         """`threshold`: the one the central orchestrator sent with this request. Without it, the one in force
-        (GUARDRAILS_THRESHOLD_URL, else GUARDRAILS_REJECT_THRESHOLD, else the checkpoint's)."""
+        (GUARDRAILS_THRESHOLD_URL, else GUARDRAILS_THRESHOLD, else the checkpoint's)."""
         if hasattr(self._classifier, "check_document"):
             # The model service renders the PDF and applies its own threshold; a per-request one cannot reach it.
             report = await self._classifier.check_document(filename, content, content_type)
@@ -45,7 +45,7 @@ class GuardrailsService:
         return {"passed": passed, "reason": None if passed else _reject_reason(report["document"]), **report}
 
     def _check_locally(
-        self, filename: str, content_type: str | None, content: bytes, threshold: Threshold
+        self, filename: str, content_type: str | None, content: bytes, threshold: float
     ) -> dict[str, Any]:
         pages = render_pages(
             content_type,
@@ -60,12 +60,12 @@ class GuardrailsService:
                 "page_index": index,
                 "proba_approve": proba_approve,
                 "proba_reject": proba_reject,
-                "verdict": VERDICT_REJECT if threshold.rejects(proba_approve, proba_reject) else VERDICT_ACCEPTED,
+                "verdict": VERDICT_REJECT if rejects(proba_approve, threshold) else VERDICT_ACCEPTED,
             }
             for index, (proba_approve, proba_reject) in enumerate(predictions)
         ]
         # The threshold in the report: it can change at the orchestrator, so a verdict records the one it used.
-        document = {**self._aggregate(page_results), "threshold": threshold.value, "threshold_target": threshold.target}
+        document = {**self._aggregate(page_results), "threshold": threshold}
         return {"document": document, "pages": page_results}
 
     def _aggregate(self, pages: list[dict[str, Any]]) -> dict[str, Any]:

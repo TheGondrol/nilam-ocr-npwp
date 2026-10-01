@@ -5,19 +5,15 @@ from PIL import Image
 
 from ocr_common.errors import UpstreamUnavailable
 
-from app.clients.threshold import GuardrailsThreshold, Threshold, default_threshold, parse_threshold
+from app.clients.threshold import GuardrailsThreshold, default_threshold, parse_threshold, rejects
 from app.config import Settings
 from app.services.guardrails_service import GuardrailsService
 
-REJECT_05 = Threshold(0.5, "reject")
+DEFAULT = 0.5
 
 
-def _accept(value: float) -> dict:
-    return {"threshold": value, "target": "accept"}
-
-
-def _reject(value: float) -> dict:
-    return {"threshold": value, "target": "reject"}
+def _answer(value: float) -> dict:
+    return {"threshold": value}
 
 
 class StubOrchestrator:
@@ -48,16 +44,16 @@ class Clock:
         return self.now
 
 
-def _threshold(stub, clock=None, cache_seconds=60.0, default=REJECT_05) -> GuardrailsThreshold:
+def _threshold(stub, clock=None, cache_seconds=60.0, default=DEFAULT) -> GuardrailsThreshold:
     return GuardrailsThreshold(
         stub, "/v1/thresholds/guardrails", default, cache_seconds=cache_seconds, clock=clock or Clock()
     )
 
 
 class StubClassifier:
-    """The model's answer for every page: proba_approve 0.7, proba_reject 0.3."""
+    """The model's answer for every page: proba_approve 0.7 unless told otherwise."""
 
-    reject_threshold = 0.5
+    accept_threshold = 0.5
 
     def __init__(self, proba_approve: float = 0.7):
         self._prediction = (proba_approve, round(1 - proba_approve, 4))
@@ -72,55 +68,47 @@ def _jpeg() -> bytes:
     return buffer.getvalue()
 
 
-# --- how each side decides ------------------------------------------------------------------
+# --- how the threshold decides ----------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("threshold", "rejected"),
     [
-        # The model's answer: proba_approve 0.7, proba_reject 0.3.
-        (Threshold(0.6, "accept"), False),  # 0.7 passed the minimum of 0.6
-        (Threshold(0.6, "reject"), False),  # 0.3 is below the tolerance of 0.6
-        (Threshold(0.8, "accept"), True),  # 0.7 did not reach the minimum of 0.8
-        (Threshold(0.2, "reject"), True),  # 0.3 is above the tolerance of 0.2
-        # Exactly at the limit, as stated: accept at >= minimum, reject at >= tolerance.
-        (Threshold(0.7, "accept"), False),
-        (Threshold(0.3, "reject"), True),
+        # The model's answer: proba_approve 0.7.
+        (0.6, False),  # 0.7 reached the minimum of 0.6
+        (0.8, True),  # 0.7 did not reach the minimum of 0.8
+        (0.7, False),  # exactly at the limit: accepted
     ],
 )
-def test_each_side_is_compared_with_its_own_probability(threshold, rejected):
-    assert threshold.rejects(proba_approve=0.7, proba_reject=0.3) is rejected
+def test_a_page_below_the_threshold_is_rejected(threshold, rejected):
+    assert rejects(0.7, threshold) is rejected
 
 
-def test_default_is_the_configured_threshold_else_the_checkpoints_on_the_reject_side():
-    assert default_threshold(0.3, StubClassifier()) == Threshold(0.3, "reject")
-    assert default_threshold(None, StubClassifier()) == REJECT_05
-    assert default_threshold(None, object()) == REJECT_05
+def test_default_is_the_configured_threshold_else_the_checkpoints():
+    assert default_threshold(0.3, StubClassifier()) == 0.3
+    assert default_threshold(None, StubClassifier()) == DEFAULT
+    assert default_threshold(None, object()) == DEFAULT
 
 
-def test_parse_reads_the_threshold_and_its_side():
-    assert parse_threshold(_accept(0.6)) == Threshold(0.6, "accept")
-    assert parse_threshold(_reject(0.4)) == Threshold(0.4, "reject")
+def test_parse_reads_the_threshold():
+    assert parse_threshold(_answer(0.6)) == 0.6
 
 
 @pytest.mark.parametrize(
     "body",
     [
         {},
-        {"threshold": 0.6},
-        {"threshold": 0.6, "target": "approve"},
-        {"threshold": 0.6, "target": None},
-        {"threshold": None, "target": "accept"},
-        {"threshold": "0.5", "target": "accept"},
-        {"threshold": True, "target": "reject"},
-        {"threshold": 0, "target": "reject"},
-        {"threshold": 1, "target": "accept"},
-        {"threshold": float("nan"), "target": "reject"},
+        {"threshold": None},
+        {"threshold": "0.5"},
+        {"threshold": True},
+        {"threshold": 0},
+        {"threshold": 1},
+        {"threshold": float("nan")},
         {"reject_threshold": 0.5},
         [0.5],
     ],
 )
-def test_parse_refuses_anything_but_a_threshold_between_0_and_1_with_a_side(body):
+def test_parse_refuses_anything_but_a_threshold_between_0_and_1(body):
     with pytest.raises(ValueError):
         parse_threshold(body)
 
@@ -129,51 +117,51 @@ def test_parse_refuses_anything_but_a_threshold_between_0_and_1_with_a_side(body
 
 
 async def test_without_url_the_default_is_used_and_nothing_is_called():
-    assert await GuardrailsThreshold(None, "", Threshold(0.4), cache_seconds=60).get() == Threshold(0.4, "reject")
+    assert await GuardrailsThreshold(None, "", 0.4, cache_seconds=60).get() == 0.4
 
 
 async def test_the_orchestrators_threshold_is_used_and_cached():
-    stub, clock = StubOrchestrator(_accept(0.6)), Clock()
+    stub, clock = StubOrchestrator(_answer(0.6)), Clock()
     threshold = _threshold(stub, clock)
 
-    assert await threshold.get() == Threshold(0.6, "accept")
+    assert await threshold.get() == 0.6
     clock.now += 59
-    assert await threshold.get() == Threshold(0.6, "accept")
+    assert await threshold.get() == 0.6
     assert stub.paths == ["/v1/thresholds/guardrails"]
 
 
 async def test_a_change_at_the_orchestrator_applies_after_the_cache_expires():
-    stub, clock = StubOrchestrator(_accept(0.6), _reject(0.3)), Clock()
+    stub, clock = StubOrchestrator(_answer(0.6), _answer(0.3)), Clock()
     threshold = _threshold(stub, clock)
 
-    assert await threshold.get() == Threshold(0.6, "accept")
+    assert await threshold.get() == 0.6
     clock.now += 60
-    assert await threshold.get() == Threshold(0.3, "reject")
+    assert await threshold.get() == 0.3
     assert len(stub.paths) == 2
 
 
 async def test_unreachable_orchestrator_gives_the_default():
     stub = StubOrchestrator(UpstreamUnavailable("orchestrator threshold is unavailable"))
-    assert await _threshold(stub).get() == REJECT_05
+    assert await _threshold(stub).get() == DEFAULT
 
 
 async def test_failure_after_a_success_keeps_the_last_value_and_retries_after_the_cache():
-    stub = StubOrchestrator(_accept(0.6), {"threshold": 0.6, "target": "x"}, _reject(0.4))
+    stub = StubOrchestrator(_answer(0.6), {"threshold": "x"}, _answer(0.4))
     clock = Clock()
     threshold = _threshold(stub, clock)
 
-    assert await threshold.get() == Threshold(0.6, "accept")
+    assert await threshold.get() == 0.6
     clock.now += 60
-    assert await threshold.get() == Threshold(0.6, "accept")  # invalid answer: the last one stays
+    assert await threshold.get() == 0.6  # invalid answer: the last one stays
     clock.now += 30
-    assert await threshold.get() == Threshold(0.6, "accept")  # not asked again before the cache expires
+    assert await threshold.get() == 0.6  # not asked again before the cache expires
     clock.now += 30
-    assert await threshold.get() == Threshold(0.4, "reject")
+    assert await threshold.get() == 0.4
     assert len(stub.paths) == 3
 
 
 async def test_aclose_closes_the_client():
-    stub = StubOrchestrator(_accept(0.6))
+    stub = StubOrchestrator(_answer(0.6))
     await _threshold(stub).aclose()
     assert stub.closed
 
@@ -181,30 +169,25 @@ async def test_aclose_closes_the_client():
 # --- the service ------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("answer", "passed"),
-    [(_accept(0.6), True), (_reject(0.6), True), (_accept(0.8), False), (_reject(0.2), False)],
-)
-async def test_the_service_judges_with_the_orchestrators_threshold_and_reports_it(answer, passed):
+@pytest.mark.parametrize(("value", "passed"), [(0.6, True), (0.8, False)])
+async def test_the_service_judges_with_the_orchestrators_threshold_and_reports_it(value, passed):
     settings = Settings(api_key="x", _env_file=None)
-    threshold = _threshold(StubOrchestrator(answer))
+    threshold = _threshold(StubOrchestrator(_answer(value)))
 
     report = await GuardrailsService(StubClassifier(0.7), settings, threshold).check("a.jpg", "image/jpeg", _jpeg())
 
     assert report["passed"] is passed
-    assert (report["document"]["threshold"], report["document"]["threshold_target"]) == (
-        answer["threshold"],
-        answer["target"],
-    )
+    assert report["document"]["threshold"] == value
+    assert "threshold_target" not in report["document"]
 
 
-async def test_without_the_orchestrator_the_default_reject_threshold_applies():
+async def test_without_the_orchestrator_the_default_threshold_applies():
     settings = Settings(api_key="x", _env_file=None)
 
     report = await GuardrailsService(StubClassifier(0.35), settings).check("a.jpg", "image/jpeg", _jpeg())
 
-    assert report["passed"] is False  # proba_reject 0.65 >= 0.5
-    assert (report["document"]["threshold"], report["document"]["threshold_target"]) == (0.5, "reject")
+    assert report["passed"] is False  # proba_approve 0.35 < 0.5
+    assert report["document"]["threshold"] == 0.5
 
 
 def test_threshold_url_on_localhost_is_refused_outside_local():
@@ -223,13 +206,13 @@ def test_threshold_url_on_localhost_is_refused_outside_local():
 
 async def test_a_threshold_given_with_the_request_wins_over_the_one_in_force():
     settings = Settings(api_key="x", _env_file=None)
-    in_force = _threshold(StubOrchestrator(_reject(0.6)))  # would accept proba_reject 0.3
+    in_force = _threshold(StubOrchestrator(_answer(0.6)))  # would accept proba_approve 0.7
     service = GuardrailsService(StubClassifier(0.7), settings, in_force)
 
-    report = await service.check("a.jpg", "image/jpeg", _jpeg(), Threshold(0.8, "accept"))
+    report = await service.check("a.jpg", "image/jpeg", _jpeg(), 0.8)
 
     assert report["passed"] is False  # proba_approve 0.7 < 0.8
-    assert (report["document"]["threshold"], report["document"]["threshold_target"]) == (0.8, "accept")
+    assert report["document"]["threshold"] == 0.8
 
 
 def _check(client, auth, **form):
@@ -244,14 +227,10 @@ def _check(client, auth, **form):
 def test_the_endpoint_judges_with_the_threshold_it_is_sent(client, auth, use_classifier):
     use_classifier(StubClassifier(0.7))
 
-    strict = _check(client, auth, threshold="0.8", threshold_target="accept").json()["data"]
-    lenient = _check(client, auth, threshold="0.3", threshold_target="accept").json()["data"]
+    strict = _check(client, auth, threshold="0.8").json()["data"]
+    lenient = _check(client, auth, threshold="0.3").json()["data"]
 
-    assert (strict["passed"], strict["document"]["threshold"], strict["document"]["threshold_target"]) == (
-        False,
-        0.8,
-        "accept",
-    )
+    assert (strict["passed"], strict["document"]["threshold"]) == (False, 0.8)
     assert (lenient["passed"], lenient["document"]["threshold"]) == (True, 0.3)
 
 
@@ -260,20 +239,11 @@ def test_without_a_threshold_the_endpoint_falls_back_to_the_default(client, auth
 
     document = _check(client, auth).json()["data"]["document"]
 
-    assert (document["threshold"], document["threshold_target"]) == (0.5, "reject")
+    assert document["threshold"] == 0.5
 
 
-@pytest.mark.parametrize(
-    "form",
-    [
-        {"threshold": "0.3"},
-        {"threshold_target": "accept"},
-        {"threshold": "0", "threshold_target": "accept"},
-        {"threshold": "1", "threshold_target": "reject"},
-        {"threshold": "0.3", "threshold_target": "accepted"},
-    ],
-)
-def test_a_threshold_without_its_side_or_out_of_range_is_422(client, auth, use_classifier, form):
+@pytest.mark.parametrize("threshold", ["0", "1", "1.5", "tinggi"])
+def test_a_threshold_out_of_range_is_422(client, auth, use_classifier, threshold):
     use_classifier(StubClassifier(0.7))
 
-    assert _check(client, auth, **form).status_code == 422
+    assert _check(client, auth, threshold=threshold).status_code == 422

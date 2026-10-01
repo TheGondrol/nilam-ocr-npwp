@@ -222,7 +222,6 @@ paths:
                         n_approve: 1
                         n_reject: 0
                         threshold: 0.5
-                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.9821
@@ -245,7 +244,6 @@ paths:
                         n_approve: 0
                         n_reject: 1
                         threshold: 0.5
-                        threshold_target: reject
                       pages:
                       - page_index: 0
                         proba_approve: 0.1179
@@ -346,22 +344,11 @@ components:
           - type: 'null'
           title: Threshold
           description: 'The threshold for this document only, from the central orchestrator (forwarded
-            by the orchestrator NPWP); send it with `threshold_target`. Omitted: the one in force (`GUARDRAILS_THRESHOLD_URL`,
-            else `GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s). Not applied by the `remote` backend'
+            by the orchestrator NPWP): a page passes when `proba_approve >= threshold`, else it is rejected.
+            Omitted: the one in force (`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the
+            checkpoint''s). Not applied by the `remote` backend'
           examples:
           - 0.3
-        threshold_target:
-          anyOf:
-          - type: string
-            enum:
-            - accept
-            - reject
-          - type: 'null'
-          title: Threshold Target
-          description: 'The side `threshold` applies to: `accept` = a page passes when `proba_approve
-            >= threshold`; `reject` = a page is rejected when `proba_reject >= threshold`'
-          examples:
-          - accept
         file:
           anyOf:
           - type: string
@@ -429,23 +416,11 @@ components:
           - type: 'null'
           title: Threshold
           description: 'The threshold the pages were judged with: the central orchestrator''s (`GUARDRAILS_THRESHOLD_URL`),
-            else the default (`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint''s 0.5, on the reject
-            side). Null with the `remote` backend, which applies its own'
+            else the default (`GUARDRAILS_THRESHOLD`, else the checkpoint''s 0.5). A page is accepted
+            when `proba_approve >= threshold`, rejected below it. Null with the `remote` backend, which
+            applies its own'
           examples:
           - 0.5
-        threshold_target:
-          anyOf:
-          - type: string
-            enum:
-            - accept
-            - reject
-          - type: 'null'
-          title: Threshold Target
-          description: 'The side `threshold` applies to. `accept`: a page is accepted when `proba_approve
-            >= threshold`. `reject`: a page is rejected when `proba_reject >= threshold`. Null with the
-            `remote` backend'
-          examples:
-          - reject
       type: object
       required:
       - verdict

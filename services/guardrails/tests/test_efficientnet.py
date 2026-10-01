@@ -69,7 +69,7 @@ def test_a_checkpoint_with_other_classes_is_refused(tmp_path):
 def test_checkpoint_metadata_is_read(classifier):
     assert sorted(classifier.class_names) == ["accepted", "reject"]
     assert classifier.image_size == 224
-    assert classifier.reject_threshold == 0.5
+    assert classifier.accept_threshold == 0.5
     assert classifier.metadata["architecture"] == "efficientnet_b0"
     assert 0 < classifier.metadata["val_macro_f1"] <= 1
 

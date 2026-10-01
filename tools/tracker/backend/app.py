@@ -144,7 +144,7 @@ app = FastAPI(title="nilam-ocr tracker (stand-in Orkestrasi)", lifespan=lifespan
 XREAD_BLOCK_MS = 5000
 redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=XREAD_BLOCK_MS / 1000 + 10)
 http = httpx.AsyncClient(timeout=120.0, headers={"X-API-Key": API_KEY} if API_KEY else {})
-simulation: dict[str, Any] = {"callback": "ok", "guardrails_threshold": 0.5, "guardrails_threshold_target": "reject"}
+simulation: dict[str, Any] = {"callback": "ok", "guardrails_threshold": 0.5}
 watchers: dict[str, asyncio.Task[None]] = {}
 files: dict[str, tuple[bytes, str]] = {}  # token -> (isi, content type) untuk file_url
 pool: Any = None
@@ -815,13 +815,9 @@ async def put_simulation(body: dict[str, Any]):
     threshold = body.get("guardrails_threshold", simulation["guardrails_threshold"])
     if isinstance(threshold, bool) or not isinstance(threshold, int | float) or not 0 < threshold < 1:
         raise HTTPException(status_code=422, detail="guardrails_threshold harus angka di antara 0 dan 1")
-    target = body.get("guardrails_threshold_target", simulation["guardrails_threshold_target"])
-    if target not in ("accept", "reject"):
-        raise HTTPException(status_code=422, detail="guardrails_threshold_target harus accept atau reject")
     simulation["callback"] = mode
     simulation["guardrails_threshold"] = float(threshold)
-    simulation["guardrails_threshold_target"] = target
-    log.info("simulation: callback=%s guardrails_threshold=%s target=%s", mode, threshold, target)
+    log.info("simulation: callback=%s guardrails_threshold=%s", mode, threshold)
     return await get_simulation()
 
 
@@ -829,10 +825,9 @@ async def put_simulation(body: dict[str, Any]):
 async def guardrails_threshold():
     """DUMMY endpoint threshold milik Orkestrasi pusat, yang dibaca guardrails (GUARDRAILS_THRESHOLD_URL +
     GUARDRAILS_THRESHOLD_PATH, di-cache GUARDRAILS_THRESHOLD_CACHE_SECONDS). Ganti nilainya dengan
-    PUT /api/simulation {"guardrails_threshold": 0.6, "guardrails_threshold_target": "accept"}. `target`
-    accept: lolos kalau proba_accept >= threshold; reject: ditolak kalau proba_reject >= threshold.
-    Diganti endpoint asli begitu Orkestrasi punya."""
-    return {"threshold": simulation["guardrails_threshold"], "target": simulation["guardrails_threshold_target"]}
+    PUT /api/simulation {"guardrails_threshold": 0.6}. Halaman lolos kalau proba_approve >= threshold,
+    ditolak kalau di bawahnya. Diganti endpoint asli begitu Orkestrasi punya."""
+    return {"threshold": simulation["guardrails_threshold"]}
 
 
 @app.post("/api/requests/{request_id}/outbox/release")

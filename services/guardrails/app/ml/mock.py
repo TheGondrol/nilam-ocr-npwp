@@ -9,7 +9,7 @@ from app.ml.base import PagePrediction
 
 class MockPageClassifier:
     name = "mock"
-    reject_threshold = 0.5
+    accept_threshold = 0.5
     metadata: dict[str, Any] = {"architecture": "mock"}
 
     def classify(self, filename: str, pages: list[Image.Image]) -> list[PagePrediction]:

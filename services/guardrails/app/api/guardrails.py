@@ -1,8 +1,5 @@
-from typing import Literal
-
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
 
-from ocr_common.errors import UnprocessableEntity
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import get_request_id
@@ -10,7 +7,6 @@ from ocr_common.web.schemas import UNAUTHORIZED, error, success_examples
 from ocr_common.web.security import verify_api_key
 
 from app.api.schemas import GuardrailReportResponse
-from app.clients.threshold import Threshold
 from app.dependencies import get_guardrails_service
 from app.services.guardrails_service import GuardrailsService
 
@@ -30,7 +26,6 @@ _ACCEPTED_REPORT = {
         "n_approve": 1,
         "n_reject": 0,
         "threshold": 0.5,
-        "threshold_target": "reject",
     },
     "pages": [_ACCEPTED_PAGE],
 }
@@ -44,7 +39,6 @@ _REJECTED_REPORT = {
         "n_approve": 0,
         "n_reject": 1,
         "threshold": 0.5,
-        "threshold_target": "reject",
     },
     "pages": [_REJECTED_PAGE],
 }
@@ -92,26 +86,16 @@ async def check_document(
         lt=1,
         description=(
             "The threshold for this document only, from the central orchestrator (forwarded by the orchestrator "
-            "NPWP); send it with `threshold_target`. Omitted: the one in force (`GUARDRAILS_THRESHOLD_URL`, else "
-            "`GUARDRAILS_REJECT_THRESHOLD`, else the checkpoint's). Not applied by the `remote` backend"
+            "NPWP): a page passes when `proba_approve >= threshold`, else it is rejected. Omitted: the one in "
+            "force (`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the checkpoint's). Not applied "
+            "by the `remote` backend"
         ),
         examples=[0.3],
-    ),
-    threshold_target: Literal["accept", "reject"] | None = Form(
-        None,
-        description=(
-            "The side `threshold` applies to: `accept` = a page passes when `proba_approve >= threshold`; "
-            "`reject` = a page is rejected when `proba_reject >= threshold`"
-        ),
-        examples=["accept"],
     ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
     service: GuardrailsService = Depends(get_guardrails_service),
 ):
-    if (threshold is None) != (threshold_target is None):
-        raise UnprocessableEntity("send threshold and threshold_target together, or neither")
     content, filename, content_type = await read_image(request, file, file_url)
-    given = Threshold(threshold, threshold_target) if threshold is not None and threshold_target else None
-    report = await service.check(filename, content_type, content, given)
+    report = await service.check(filename, content_type, content, threshold)
     return envelope(200, "OK", report, request_id or get_request_id(request))
