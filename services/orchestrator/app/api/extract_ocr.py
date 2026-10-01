@@ -134,22 +134,9 @@ class _InvalidThreshold(Exception):
     pass
 
 
-# The only guardrails_tendency still accepted: the threshold is on the accepted probability now.
-ACCEPTED_TENDENCY = "accepted"
-
-
-def _parse_guardrails_threshold(value: str | None, tendency: str | None = None) -> float | None:
+def _parse_guardrails_threshold(value: str | None) -> float | None:
     """`guardrails_confidence_threshold`; None (left out) leaves the guardrails service's own threshold in
-    force. `guardrails_tendency` (deprecated) may still be sent, but only as `accepted`: a caller that still
-    means the reject side (`rejected`) would otherwise have its threshold read on the other side without
-    noticing. Raises `_InvalidThreshold`."""
-    tendency = (tendency or "").strip().lower()
-    if tendency and tendency != ACCEPTED_TENDENCY:
-        raise _InvalidThreshold(
-            f"guardrails_tendency {tendency!r} is no longer supported: guardrails_confidence_threshold is on the "
-            "accepted probability (a page passes when it reaches the threshold); leave guardrails_tendency out or "
-            f"send {ACCEPTED_TENDENCY!r}"
-        )
+    force. Raises `_InvalidThreshold`."""
     value = (value or "").strip()
     if not value:
         return None
@@ -246,8 +233,6 @@ def _parse_params(raw: str | None) -> Any:
         "`guardrails_confidence_threshold` (a page passes when the model's accepted probability reaches it, and "
         "is rejected below it) replaces the guardrails threshold for this document; left out, the guardrails "
         "service's own is used (`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the model's 0.5). "
-        "`guardrails_tendency` is deprecated: left out or `accepted` it changes nothing, anything else (e.g. the "
-        "old `rejected`) answers `422`. "
         '`column_confidence_threshold` (`{"nomor_npwp": 0.9, "nama": 0.5}`) sets, per field, the trust '
         "probability for `confidence: 1`, always on the accept side; a field it leaves out, or the whole field "
         "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read answers `422` "
@@ -383,15 +368,6 @@ async def extract_ocr(
         ),
         examples=["0.3"],
     ),
-    guardrails_tendency: str | None = Form(
-        None,
-        description=(
-            "Deprecated. `guardrails_confidence_threshold` is always on the accepted probability; left out or "
-            "`accepted` changes nothing, any other value (e.g. `rejected`) answers 422 `INVALID_THRESHOLD`"
-        ),
-        deprecated=True,
-        examples=["accepted"],
-    ),
     column_confidence_threshold: str | None = Form(
         None,
         description=f"{COLUMN_THRESHOLD_DESCRIPTION}. A JSON object string",
@@ -436,7 +412,7 @@ async def extract_ocr(
             pipeline_last_stage=ENTRY,
         )
     try:
-        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold, guardrails_tendency)
+        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold)
         try:
             column_thresholds = column_thresholds_from_json(column_confidence_threshold)
         except ValueError as exc:
