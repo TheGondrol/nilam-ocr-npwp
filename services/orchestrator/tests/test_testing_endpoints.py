@@ -46,7 +46,7 @@ def test_testing_endpoint_answers_like_extract_ocr_through_the_testing_clients(
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"]) == ("completed", 0)
+    assert (body["status_code"], body["guardrails"]) == (200, 0)
     # The id is minted here; the one in the form is ignored, and the pipeline runs under the minted one.
     request_id = body["request_id"]
     assert re.fullmatch(r"TEST_[0-9a-f]{32}", request_id)
@@ -62,7 +62,7 @@ def test_testing_status_reads_the_testing_jobs_under_the_path_request_id(testing
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["request_id"], body["job_status"]) == ("TEST_run1_abc", "completed")
+    assert (body["request_id"], body["status_code"]) == ("TEST_run1_abc", 200)
     assert waiter.snapshots == ["TEST_run1_abc"]
     assert stub_waiter.snapshots == []
 

@@ -75,10 +75,9 @@ kalian. Orchestrator memeriksa file, meminta guardrails menilainya, lalu menungg
                                          tidak ada yang jalan, tidak ada callback
       ditolak aturan structuring -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 1,
                                          message = alasan penolakan dari aturan ML; scoring tidak jalan
-      lolos, selesai tepat waktu -> 200  job_status = completed, data = {nomor_npwp, nama}, guardrails = 0
-      lolos, gagal tepat waktu   -> 422  job_status = failed,
-                                         errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
-      lolos, belum selesai       -> 202  job_status = processing, data = null, guardrails = null
+      lolos, selesai tepat waktu -> 200  data = {nomor_npwp, nama}, guardrails = 0
+      lolos, gagal tepat waktu   -> 422  errors = OCR_FAILED | STRUCTURING_FAILED | SCORING_FAILED
+      lolos, belum selesai       -> 202  data = null, guardrails = null
                                          hasil menyusul di callback SCORING
 
 Callback bersifat **opsional**: kalau kalian tidak menyediakan endpoint callback, kami
@@ -139,8 +138,10 @@ supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
 Path, field, dan bentuk jawabannya sama persis dengan `extract-ocr` yang dulu di guardrails port
 8031; hanya port-nya yang berubah ke **8034**. Bentuk jawabannya mengikuti kontrak `extract-ocr`
-kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
-`pipeline_last_stage`, dan `params`.
+kalian: envelope standar ditambah `pipeline_last_stage` dan `guardrails`. Keadaan request dibaca
+dari kode HTTP (juga di `status_code`): 200 selesai, 202 masih berjalan, 4xx / 5xx gagal atau ditolak.
+Sejak 1 Oktober 2026 jawaban tidak lagi membawa `document_type`, `job_status`, dan `params`, dan field
+`params` di request dihapus (kalau masih dikirim, diabaikan).
 
 **`pipeline_last_stage`** bernilai `null` pada jawaban sukses (200, 202) dan menyebut service asal
 **error**, dengan nama yang sama seperti di `pipeline_name_sequence`. Field ini ada di setiap jawaban
@@ -154,13 +155,12 @@ kalian: envelope standar ditambah `document_type`, `job_status`, `guardrails`,
 | 400 ditolak aturan structuring | `structuring` |
 | 422 `<TAHAP>_FAILED` | service yang gagal (`OCR_FAILED` = `extraction`) |
 | 400 / 500 / 503 / 504 saat memanggil sebuah service (tidak terjangkau, timeout, file tidak terbaca model) | service itu |
-| ditolak orchestrator sendiri sebelum service pipeline mana pun dipanggil (API key, file, `pipeline_name_sequence`, threshold, `params`, `document_type`, request_id tidak dikenal pada `GET`) | `orchestrator` |
+| ditolak orchestrator sendiri sebelum service pipeline mana pun dipanggil (API key, file, `pipeline_name_sequence`, threshold, `document_type`, request_id tidak dikenal pada `GET`) | `orchestrator` |
 
 | Field | Wajib | Keterangan |
 |---|---|---|
 | `request_id` | ya | dibuat oleh kalian |
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
-| `params` | tidak | JSON object atau string berkutip; tidak ditafsirkan, dikembalikan apa adanya di `params`. JSON tidak valid dijawab 422 `INVALID_PARAMS` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
 | `guardrails_confidence_threshold` | tidak | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
@@ -200,7 +200,7 @@ guardrails butuh hasil service sebelumnya).
 | `[structuring, scoring]`, `[scoring]` | tidak: tidak ada input untuk service pertama | **422** `INVALID_PIPELINE_SEQUENCE` |
 | urutan terbalik, nama dobel, nama tidak dikenal (mis. `ekstraksi`) | tidak | **422** `INVALID_PIPELINE_SEQUENCE` |
 
-Selain `data`, bentuk jawabannya tetap sama (`status_code`, `job_status`, `guardrails`, `params`,
+Selain `data`, bentuk jawabannya tetap sama (`status_code`, `guardrails`, `pipeline_last_stage`,
 dan seterusnya), begitu juga kode 200 / 202 / 400 / 422-nya. Service terakhir di urutan mengakhiri
 request: hasilnya jadi `data`, dan tidak ada yang diteruskan ke service berikutnya. Aturan structuring
 tetap bisa menolak (400) selama `structuring` ada di urutan. Request `[guardrails]` saja tidak
@@ -238,10 +238,8 @@ Selesai dalam waktu tunggu, **200**:
       },
       "errors": null,
       "request_id": "REQ_001",
-      "document_type": "npwp",
-      "job_status": "completed",
-      "guardrails": 0,
-      "params": {"nik": "3123456711950001", "refno": "PK19039Y8U"}
+      "pipeline_last_stage": null,
+      "guardrails": 0
     }
 
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
@@ -259,15 +257,15 @@ Belum selesai saat waktu tunggu habis, **202**; hasil menyusul lewat callback, a
 `GET /v1/extract-ocr/{request_id}` (di bawah):
 
     {"status_code": 202, "status_desc": "Accepted", "message": "OCR job accepted; still processing",
-     "data": null, "errors": null, "request_id": "REQ_001", "document_type": "npwp",
-     "job_status": "processing", "guardrails": null, "params": {...}}
+     "data": null, "errors": null, "request_id": "REQ_001", "pipeline_last_stage": null,
+     "guardrails": null}
 
 Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
 
     {"status_code": 400, "status_desc": "Bad Request",
      "message": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.99)",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
+     "pipeline_last_stage": "guardrails", "guardrails": 1}
 
 Ditolak aturan structuring ML engineer (23 Sep 2026), juga **400** dengan bentuk yang sama;
 `message` adalah alasan penolakan pertama dari aturan itu (bukan alasan flag yang ditoleransi),
@@ -276,7 +274,7 @@ dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan ter
     {"status_code": 400, "status_desc": "Bad Request",
      "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 1, "params": {...}}
+     "pipeline_last_stage": "structuring", "guardrails": 1}
 
 Alasan yang menolak: dokumen blur / blank, bukan format standar NPWP, dokumen lain terdeteksi,
 screenshot cek NPWP online, jumlah halaman melebihi batas, serta kode provinsi, kecamatan, tanggal
@@ -291,7 +289,7 @@ callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
     {"status_code": 422, "status_desc": "Unprocessable Entity",
      "message": "extraction OCR model is unavailable",
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
-     "document_type": "npwp", "job_status": "failed", "guardrails": 0, "params": {...}}
+     "pipeline_last_stage": "extraction", "guardrails": 0}
 
 Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks yang bisa berubah:
 
@@ -308,7 +306,7 @@ Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks 
 | 401 | `UNAUTHORIZED` | `X-API-Key` salah atau tidak ada | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
-| 422 | `INVALID_PARAMS` / `VALIDATION_ERROR` | `params` bukan JSON object / string, atau field wajib tidak dikirim | tidak |
+| 422 | `VALIDATION_ERROR` | field wajib tidak dikirim | tidak |
 | 500 | `DOWNSTREAM_SERVER_ERROR` | service internal (guardrails / extraction) menjawab tidak sesuai kontrak | tidak; kirim ulang aman |
 | 500 | `INTERNAL_SERVER_ERROR` | kesalahan tak terduga di orchestrator | tidak; kirim ulang aman |
 | 503 / 504 | `DOWNSTREAM_UNAVAILABLE` / `DOWNSTREAM_TIMEOUT` | guardrails atau modelnya tidak terjangkau / tidak menjawab (tidak dicoba ulang), atau tahap OCR tidak terjangkau / tidak menjawab (sudah dicoba ulang 3 kali) | tidak; kirim ulang aman |
@@ -329,17 +327,16 @@ tidak datang.
     curl http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
       -H "X-API-Key: changeme"
 
-| Keadaan | HTTP | `job_status` | `errors` |
+| Keadaan | HTTP | isi | `errors` |
 |---|---|---|---|
-| selesai | 200 | `completed` + `data` | null |
-| masih berjalan | 202 | `processing` | null |
-| ditolak aturan structuring | 400 | `failed`, `guardrails: 1` | `DOWNSTREAM_VALIDATION_ERROR` |
-| ditolak model guardrails | 400 | `failed`, `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
-| `[guardrails]` saja, lolos | 200 | `completed` + laporan guardrails sebagai `data` | null |
-| satu tahap gagal | 422 | `failed` | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
+| selesai | 200 | `data` | null |
+| masih berjalan | 202 | – | null |
+| ditolak aturan structuring | 400 | `guardrails: 1`, `pipeline_last_stage: structuring` | `DOWNSTREAM_VALIDATION_ERROR` |
+| ditolak model guardrails | 400 | `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
+| `[guardrails]` saja, lolos | 200 | laporan guardrails sebagai `data` | null |
+| satu tahap gagal | 422 | `pipeline_last_stage`: tahap yang gagal | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
 | tidak dikenal | 404 | – | `REQUEST_ID_NOT_FOUND` |
 
-- `params` selalu `null` di sini (tidak disimpan); `document_type` selalu `npwp`.
 - Request yang tidak punya job di tahap mana pun dijawab dari putusan guardrails terakhirnya
   (`guardrails_results`), sama seperti jawaban `POST`-nya: 400 kalau ditolak model guardrails, 200 dengan
   laporan guardrails kalau `[guardrails]` satu-satunya service-nya.
@@ -612,7 +609,7 @@ penjelasan yang aman untuk di-log.
 | 422 | body atau field tidak valid |
 | 502/503 | model atau service tujuan tidak bisa dihubungi |
 
-`extract-ocr` menambah `document_type`, `job_status`, `guardrails`, dan `params` ke amplop ini
+`extract-ocr` menambah `pipeline_last_stage` dan `guardrails` ke amplop ini
 (bagian 4).
 
 ## 11. Kontrak lama (sinkron): sudah dihapus

@@ -26,7 +26,6 @@ def _submit(client, auth, files=None, **form):
         ({}, {}, 400, "INVALID_FILE_SOURCE"),
         (None, {"file_url": "https://minio.example/a.jpg"}, 400, "INVALID_FILE_SOURCE"),
         (None, {"document_type": "ktp"}, 400, "UNSUPPORTED_DOCUMENT_TYPE"),
-        (None, {"params": "{bad"}, 422, "INVALID_PARAMS"),
     ],
 )
 def test_refusals_before_the_pipeline_carry_their_code(client, auth, files, form, status, code):

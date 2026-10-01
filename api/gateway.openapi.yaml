@@ -5,52 +5,51 @@ info:
   description: "Everything the central orchestrator / gateway needs to integrate the NPWP OCR pipeline,\
     \ merged from the\nservices' own specs. Each service also serves its full Swagger UI at `/docs`.\n\
     \n## The flow\n\n1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your\
-    \ `request_id` and the\n   document (`file` or `file_url`, optional `params`). It answers in the central\
-    \ orchestrator's\n   `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):\n   -\
-    \ rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails:\
-    \ 1`;\n     nothing runs and no callback follows.\n   - passed -> the document goes on to the OCR\
-    \ stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS` (15 s by default,\
-    \ counted from the request's arrival). Finished in time ->\n     **200**, `job_status: completed`,\
-    \ `data` = `nomor_npwp` and `nama` as `{value, confidence}` with\n     confidence 0/1; a stage failed\
-    \ -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still\n     running -> **202**,\
-    \ `job_status: processing`. Give this call an HTTP timeout well above the wait.\n2. **Receive callbacks**\
-    \ (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The\n   `SCORING` / `DONE`\
-    \ callback carries the **final result** (richer than `data`: OCR scores, trust\n   probabilities,\
-    \ the guardrails report). A `FAILED` callback of any stage ends the request.\n3. **Read the status\
-    \ when needed** with `GET /v1/extract-ocr/{request_id}` on the same service: the same\n   contract,\
-    \ without waiting.\n\nTime a request out on your side: a stage that crashes mid-job cannot send its\
-    \ callback.\n\n## What the result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`, `nama_badan`.\
-    \ `scoring` holds `npwp_confidence` and\n`name_confidence`: the probability, from the ML team's trust\
-    \ model, that each extracted field is\ncorrect. There is **no document-level score and no approve\
-    \ / reject decision**; thresholds are yours.\n\n## Addresses\n\nThe orchestrator is the only service\
-    \ you call. From another namespace in GKE:\n`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034`\
-    \ (the release's entry Service). The\nguardrails and pipeline stage services are internal. Nothing\
-    \ is exposed outside the cluster.\n\n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.**\
-    \ Every endpoint except `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing\
-    \ or wrong key answers `401`. The services are reachable only from inside the cluster.\n\n**Envelope.**\
-    \ Every JSON response, success or error, has the same shape:\n`{status_code, status_desc, message,\
-    \ data, errors, request_id}`. `status_code` always equals the HTTP\nstatus. On success `errors` is\
-    \ null; on error `data` is null.\n\n**Errors.** `errors` is a stable, machine-readable code; branch\
-    \ on it, not on the wording of `message`.\nThe document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`,\
-    \ `UNREADABLE_FILE`, `TOO_MANY_PAGES`,\n`INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE`\
-    \ (413). Otherwise the code of the status:\n`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404, an\
-    \ unknown request_id), `NOT_FOUND` (404, a path that does\nnot exist), `METHOD_NOT_ALLOWED` (405),\
-    \ `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR` (500),\n`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT`\
-    \ (504), unless an endpoint documents a more precise one.\n`400` = the request or the document is\
-    \ unusable (do not retry unchanged). `503` / `504` are safe to retry.\n\n**request_id.** Minted by\
-    \ the central orchestrator and carried through every stage. Where an endpoint has\nno request_id of\
-    \ its own, the `X-Request-ID` request header is used (and echoed in the response header);\nwithout\
-    \ it the service generates one.\n\n**Asynchronous stages** (internal: only the orchestrator NPWP and\
-    \ the previous stage call them). `POST\n.../jobs` answers `202` immediately and does the work in the\
-    \ background. The outcome is reported by a\ncallback to the central orchestrator (see *Webhooks*),\
-    \ and can be read at any time with\n`GET .../jobs/{request_id}`, which the orchestrator NPWP's `GET\
-    \ /v1/extract-ocr/{request_id}` combines\nover the three stages. Submitting the same request_id again\
-    \ is idempotent:\n`202` with `duplicate: true`, the work is not repeated, unless the earlier attempt\
-    \ `FAILED` or has been\n`PROCESSING` for longer than the job lease (`PIPELINE_JOB_LEASE_SECONDS`,\
-    \ 5 minutes by default: the\nprocess running it died). A job still running when the service shuts\
-    \ down is reported `FAILED`. Because\nthe request was already answered `202`, a problem with the document\
-    \ itself (unreadable file, no text,\nunsupported document type) shows up as a `FAILED` job and callback,\
-    \ not as a `4xx`.\n"
+    \ `request_id` and the\n   document (`file` or `file_url`). It answers in the central orchestrator's\n\
+    \   `extract-ocr` contract (`data`, `guardrails`, `pipeline_last_stage`; the HTTP status says where\
+    \ it is):\n   - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`,\
+    \ `guardrails: 1`;\n     nothing runs and no callback follows.\n   - passed -> the document goes on\
+    \ to the OCR stage and the service waits for the pipeline for up to\n     `PIPELINE_WAIT_SECONDS`\
+    \ (15 s by default, counted from the request's arrival). Finished in time ->\n     **200**, `data`\
+    \ = `nomor_npwp` and `nama` as `{value, confidence}` with\n     confidence 0/1; a stage failed ->\
+    \ **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still\n     running -> **202**.\
+    \ Give this call an HTTP timeout well above the wait.\n2. **Receive callbacks** (see *Webhooks*),\
+    \ sent by the pipeline stages themselves after a hand-off. The\n   `SCORING` / `DONE` callback carries\
+    \ the **final result** (richer than `data`: OCR scores, trust\n   probabilities, the guardrails report).\
+    \ A `FAILED` callback of any stage ends the request.\n3. **Read the status when needed** with `GET\
+    \ /v1/extract-ocr/{request_id}` on the same service: the same\n   contract, without waiting.\n\nTime\
+    \ a request out on your side: a stage that crashes mid-job cannot send its callback.\n\n## What the\
+    \ result is, and is not\n\n`fields` holds `nomor_npwp`, `nama`, `nama_badan`. `scoring` holds `npwp_confidence`\
+    \ and\n`name_confidence`: the probability, from the ML team's trust model, that each extracted field\
+    \ is\ncorrect. There is **no document-level score and no approve / reject decision**; thresholds are\
+    \ yours.\n\n## Addresses\n\nThe orchestrator is the only service you call. From another namespace\
+    \ in GKE:\n`http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034` (the release's entry Service).\
+    \ The\nguardrails and pipeline stage services are internal. Nothing is exposed outside the cluster.\n\
+    \n\n## Conventions (the same for every nilam-ocr service)\n\n**Authentication.** Every endpoint except\
+    \ `/health`, `/ready` and `/metrics` requires the header `X-API-Key`.\nA missing or wrong key answers\
+    \ `401`. The services are reachable only from inside the cluster.\n\n**Envelope.** Every JSON response,\
+    \ success or error, has the same shape:\n`{status_code, status_desc, message, data, errors, request_id}`.\
+    \ `status_code` always equals the HTTP\nstatus. On success `errors` is null; on error `data` is null.\n\
+    \n**Errors.** `errors` is a stable, machine-readable code; branch on it, not on the wording of `message`.\n\
+    The document checks: `EMPTY_FILE`, `UNSUPPORTED_FILE_TYPE`, `UNREADABLE_FILE`, `TOO_MANY_PAGES`,\n\
+    `INVALID_FILE_SOURCE`, `FILE_URL_REJECTED` (400), `FILE_TOO_LARGE` (413). Otherwise the code of the\
+    \ status:\n`UNAUTHORIZED` (401), `REQUEST_ID_NOT_FOUND` (404, an unknown request_id), `NOT_FOUND`\
+    \ (404, a path that does\nnot exist), `METHOD_NOT_ALLOWED` (405), `VALIDATION_ERROR` (422), `INTERNAL_SERVER_ERROR`\
+    \ (500),\n`DOWNSTREAM_UNAVAILABLE` (503), `DOWNSTREAM_TIMEOUT` (504), unless an endpoint documents\
+    \ a more precise one.\n`400` = the request or the document is unusable (do not retry unchanged). `503`\
+    \ / `504` are safe to retry.\n\n**request_id.** Minted by the central orchestrator and carried through\
+    \ every stage. Where an endpoint has\nno request_id of its own, the `X-Request-ID` request header\
+    \ is used (and echoed in the response header);\nwithout it the service generates one.\n\n**Asynchronous\
+    \ stages** (internal: only the orchestrator NPWP and the previous stage call them). `POST\n.../jobs`\
+    \ answers `202` immediately and does the work in the background. The outcome is reported by a\ncallback\
+    \ to the central orchestrator (see *Webhooks*), and can be read at any time with\n`GET .../jobs/{request_id}`,\
+    \ which the orchestrator NPWP's `GET /v1/extract-ocr/{request_id}` combines\nover the three stages.\
+    \ Submitting the same request_id again is idempotent:\n`202` with `duplicate: true`, the work is not\
+    \ repeated, unless the earlier attempt `FAILED` or has been\n`PROCESSING` for longer than the job\
+    \ lease (`PIPELINE_JOB_LEASE_SECONDS`, 5 minutes by default: the\nprocess running it died). A job\
+    \ still running when the service shuts down is reported `FAILED`. Because\nthe request was already\
+    \ answered `202`, a problem with the document itself (unreadable file, no text,\nunsupported document\
+    \ type) shows up as a `FAILED` job and callback, not as a `4xx`.\n"
 tags:
 - name: 1. Start the pipeline
   description: 'The call you make: guardrails check, then OCR -> structuring -> scoring, waited on for
@@ -75,35 +74,39 @@ paths:
         `extract-ocr` contract ("Finished" meaning finished within the wait):
 
 
-        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
+        | Outcome | HTTP | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
 
-        |---|---|---|---|---|---|---|
+        |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null | null |
+        | Finished | 200 | the fields | `0` | null | null |
 
-        | Still running | 202 | `processing` | null | null | null | null |
+        | Still running | 202 | null | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        | `guardrails` |
+        | Rejected by the guardrails model | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
+        |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        | `structuring` |
+        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
+        |
 
-        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        | the service that failed |
+        | A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED` |
+        the service that failed |
+
+
+        The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running,
+        4xx / 5xx failed or refused.
 
 
         `pipeline_last_stage` is null on a success answer (200, 202) and names the service an error comes
         from: a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
         `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
         service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
-        thresholds, `params`, `document_type`, an unknown request_id).
+        thresholds, `document_type`, an unknown request_id).
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
         or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
         gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
-        default), else `0`. `params` is returned as sent.
+        default), else `0`.
 
 
         **Thresholds from the central orchestrator, per request, all optional.** `guardrails_confidence_threshold`
@@ -123,7 +126,7 @@ paths:
         the fields are returned, and the trust model''s confidence already accounts for it.
 
 
-        **Refused before anything runs** (plain error envelope, no `job_status`): a document above `MAX_UPLOAD_BYTES`
+        **Refused before anything runs** (plain error envelope, no `guardrails`): a document above `MAX_UPLOAD_BYTES`
         (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` (2) pages answers `400`,
         both with an Indonesian `message` the client can show as is.
 
@@ -186,12 +189,7 @@ paths:
                         value: BUDI SANTOSO
                         confidence: 1
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: completed
                     guardrails: 0
-                    params:
-                      nik: '3123456711950001'
-                      refno: PK19039Y8U
                 guardrails_only:
                   summary: '`pipeline_name_sequence: ["guardrails"]`: the guardrails report as it is'
                   value:
@@ -213,12 +211,7 @@ paths:
                         proba_reject: 0.0179
                         verdict: accepted
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: completed
                     guardrails: 0
-                    params:
-                      nik: '3123456711950001'
-                      refno: PK19039Y8U
         '202':
           description: 'Accepted, but still running when the wait ran out: the result follows by callback'
           content:
@@ -233,11 +226,6 @@ paths:
                     status_desc: Accepted
                     message: OCR job accepted; still processing
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: processing
-                    params:
-                      nik: '3123456711950001'
-                      refno: PK19039Y8U
         '400':
           description: 'Rejected by the guardrails model or by the structuring rules (`DOWNSTREAM_VALIDATION_ERROR`,
             `guardrails: 1`), unsupported `document_type` (`UNSUPPORTED_DOCUMENT_TYPE`), more than `MAX_DOCUMENT_PAGES`
@@ -253,13 +241,8 @@ paths:
                 message: 'Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)'
                 errors: DOWNSTREAM_VALIDATION_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 1
                 pipeline_last_stage: guardrails
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
+                guardrails: 1
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -286,9 +269,8 @@ paths:
                 pipeline_last_stage: orchestrator
         '422':
           description: A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`;
-            `message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence`
-            breaks the order rules (`INVALID_PIPELINE_SEQUENCE`), a threshold cannot be read (`INVALID_THRESHOLD`),
-            or a required field is missing (`VALIDATION_ERROR`)
+            `message` says why), `pipeline_name_sequence` breaks the order rules (`INVALID_PIPELINE_SEQUENCE`),
+            a threshold cannot be read (`INVALID_THRESHOLD`), or a required field is missing (`VALIDATION_ERROR`)
           content:
             application/json:
               schema:
@@ -299,13 +281,8 @@ paths:
                 message: No text lines to structure
                 errors: STRUCTURING_FAILED
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
                 pipeline_last_stage: structuring
-                params:
-                  nik: '3123456711950001'
-                  refno: PK19039Y8U
+                guardrails: 0
         '500':
           description: The guardrails or extraction service failed, or answered in an unexpected shape;
             `pipeline_last_stage` names which
@@ -319,7 +296,6 @@ paths:
                 message: guardrails service returned an unexpected response
                 errors: DOWNSTREAM_SERVER_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: guardrails
         '503':
           description: The guardrails service, its model, or the extraction service is unreachable; nothing
@@ -334,7 +310,6 @@ paths:
                 message: extraction service is unavailable
                 errors: DOWNSTREAM_UNAVAILABLE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: extraction
         '504':
           description: The guardrails service, its model, or the extraction service did not answer in
@@ -349,7 +324,6 @@ paths:
                 message: extraction service timed out after 10.0s
                 errors: DOWNSTREAM_TIMEOUT
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: extraction
       security:
       - APIKeyHeader: []
@@ -380,33 +354,36 @@ paths:
         by now):
 
 
-        | Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
+        | Outcome | HTTP | `data` | `guardrails` | `errors` | `pipeline_last_stage` |
 
-        |---|---|---|---|---|---|---|
+        |---|---|---|---|---|---|
 
-        | Finished | 200 | `completed` | the fields | `0` | null | null |
+        | Finished | 200 | the fields | `0` | null | null |
 
-        | Still running | 202 | `processing` | null | null | null | null |
+        | Still running | 202 | null | null | null | null |
 
-        | Rejected by the guardrails model | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        | `guardrails` |
+        | Rejected by the guardrails model | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
+        |
 
-        | Rejected by the structuring rules | 400 | `failed` | null | `1` | `DOWNSTREAM_VALIDATION_ERROR`
-        | `structuring` |
+        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
+        |
 
-        | A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
-        | the service that failed |
+        | A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED` |
+        the service that failed |
+
+
+        The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running,
+        4xx / 5xx failed or refused.
 
 
         `pipeline_last_stage` is null on a success answer (200, 202) and names the service an error comes
         from: a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`,
         `scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this
         service refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`,
-        thresholds, `params`, `document_type`, an unknown request_id).
+        thresholds, `document_type`, an unknown request_id).
 
 
-        Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is
-        always null here (it is not stored) and `document_type` is `npwp`.
+        Use it for a request that was answered `202`, e.g. when a callback did not arrive.
 
 
         A request no stage has a job for is answered from its last guardrails verdict (`guardrails_results`),
@@ -456,8 +433,6 @@ paths:
                         value: BUDI SANTOSO
                         confidence: 1
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: completed
                     guardrails: 0
                 guardrails_only:
                   summary: '`pipeline_name_sequence: ["guardrails"]`: the kept guardrails report'
@@ -480,8 +455,6 @@ paths:
                         proba_reject: 0.0179
                         verdict: accepted
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: completed
                     guardrails: 0
         '202':
           description: Still running
@@ -495,8 +468,6 @@ paths:
                     status_desc: Accepted
                     message: OCR job accepted; still processing
                     request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                    document_type: npwp
-                    job_status: processing
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '400':
@@ -510,10 +481,8 @@ paths:
                 message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
                 errors: DOWNSTREAM_VALIDATION_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 1
                 pipeline_last_stage: structuring
+                guardrails: 1
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '401':
@@ -550,10 +519,8 @@ paths:
                 message: No text lines to structure
                 errors: STRUCTURING_FAILED
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
-                job_status: failed
-                guardrails: 0
                 pipeline_last_stage: structuring
+                guardrails: 0
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '500':
@@ -567,7 +534,6 @@ paths:
                 message: 'structuring service error (401): Invalid or missing API key'
                 errors: DOWNSTREAM_SERVER_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
@@ -581,7 +547,6 @@ paths:
                 message: structuring service is unavailable
                 errors: DOWNSTREAM_UNAVAILABLE
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
@@ -595,7 +560,6 @@ paths:
                 message: structuring service timed out after 10.0s
                 errors: DOWNSTREAM_TIMEOUT
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                document_type: npwp
                 pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'
@@ -696,15 +660,6 @@ components:
           default: npwp
           examples:
           - npwp
-        params:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Params
-          description: 'Client metadata as JSON: an object, or a quoted string. Not interpreted; returned
-            unchanged in `params`'
-          examples:
-          - '{"nik": "3123456711950001", "refno": "PK19039Y8U"}'
         file:
           anyOf:
           - type: string
@@ -870,8 +825,8 @@ components:
             type: object
           - type: 'null'
           title: Data
-          description: The result when `job_status` is `completed`; null otherwise. The fields (`nomor_npwp`,
-            `nama`) when scoring ended the request; the result of the last service of `pipeline_name_sequence`,
+          description: The result on 200 (finished); null otherwise. The fields (`nomor_npwp`, `nama`)
+            when scoring ended the request; the result of the last service of `pipeline_name_sequence`,
             as it is, when the sequence ends earlier (the guardrails report, the OCR result, or the structuring
             result)
         errors:
@@ -903,32 +858,10 @@ components:
             service it comes from. A pipeline service named as in `pipeline_name_sequence`: the one that
             rejected (`guardrails`, `structuring`) or failed; the one that could not be reached or answered
             an error. `orchestrator` when this service refused the request itself before any pipeline
-            service was called (API key, file checks, `pipeline_name_sequence`, thresholds, `params`,
-            `document_type`, an unknown request_id)'
+            service was called (API key, file checks, `pipeline_name_sequence`, thresholds, `document_type`,
+            an unknown request_id)'
           examples:
           - structuring
-        document_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Document Type
-          description: Document type of the request
-          examples:
-          - npwp
-        job_status:
-          anyOf:
-          - type: string
-            enum:
-            - pending
-            - processing
-            - completed
-            - failed
-          - type: 'null'
-          title: Job Status
-          description: '`completed` (200), `processing` (202), or `failed`; null when the request was
-            refused before anything was processed'
-          examples:
-          - completed
         guardrails:
           anyOf:
           - type: integer
@@ -942,13 +875,6 @@ components:
             was refused before the check'
           examples:
           - 0
-        params:
-          title: Params
-          description: The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not
-            sent. Not stored, so always null on `GET /v1/extract-ocr/{request_id}`
-          examples:
-          - nik: '3123456711950001'
-            refno: PK19039Y8U
       type: object
       required:
       - status_code

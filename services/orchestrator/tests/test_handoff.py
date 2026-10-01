@@ -94,7 +94,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["job_status"], body["guardrails"]) == (200, "completed", 0)
+    assert (body["status_code"], body["guardrails"]) == (200, 0)
 
     [sent] = handler.requests
     assert sent.url.path == "/v1/extraction/jobs"
@@ -139,12 +139,7 @@ def test_rejected_document_stops_here(client, auth, extraction):
 
     assert response.status_code == 400
     body = response.json()
-    assert (body["errors"], body["job_status"], body["guardrails"], body["data"]) == (
-        "DOWNSTREAM_VALIDATION_ERROR",
-        "failed",
-        1,
-        None,
-    )
+    assert (body["errors"], body["guardrails"], body["data"]) == ("DOWNSTREAM_VALIDATION_ERROR", 1, None)
     assert body["message"].startswith("Document rejected by guardrails")
     assert handler.requests == []
 

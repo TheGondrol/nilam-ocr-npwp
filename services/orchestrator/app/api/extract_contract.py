@@ -16,21 +16,17 @@ def extract_body(
     message: str,
     *,
     request_id: str | None,
-    document_type: str | None,
     data: Mapping[str, Any] | None = None,
     errors: str | None = None,
-    job_status: str | None = None,
     guardrails: int | None = None,
-    params: Any = None,
     pipeline_last_stage: str | None = None,
 ) -> dict[str, Any]:
+    """The extract-ocr answer: the standard envelope plus `pipeline_last_stage` and `guardrails`. The HTTP status
+    (`status_code`) says where the request is: 200 finished, 202 still running, 4xx / 5xx failed or refused."""
     return {
         **envelope(status_code, message, dict(data) if data is not None else None, request_id, errors=errors),
-        "document_type": document_type,
-        "job_status": job_status,
-        "guardrails": guardrails,
         "pipeline_last_stage": pipeline_last_stage,
-        "params": params,
+        "guardrails": guardrails,
     }
 
 
@@ -49,8 +45,6 @@ def extract_response(
     outcome: dict[str, Any],
     *,
     request_id: str,
-    document_type: str,
-    params: Any,
     threshold: float,
     column_thresholds: Mapping[str, float] | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -62,11 +56,8 @@ def extract_response(
             400,
             outcome["reason"],
             errors=REJECTED_CODE,
-            job_status="failed",
             guardrails=1,
             request_id=request_id,
-            document_type=document_type,
-            params=params,
             pipeline_last_stage=stage_name,
         )
         return 400, body
@@ -78,11 +69,8 @@ def extract_response(
             400,
             pipeline["error_message"],
             errors=REJECTED_CODE,
-            job_status="failed",
             guardrails=1,
             request_id=request_id,
-            document_type=document_type,
-            params=params,
             pipeline_last_stage=stage_name,
         )
     if pipeline.get("status") == STATUS_DONE:
@@ -92,16 +80,7 @@ def extract_response(
         data = (
             contract_fields(result, threshold, column_thresholds) if pipeline.get("stage") == STAGE_SCORING else result
         )
-        return 200, extract_body(
-            200,
-            COMPLETED_MESSAGE,
-            data=data,
-            job_status="completed",
-            guardrails=0,
-            request_id=request_id,
-            document_type=document_type,
-            params=params,
-        )
+        return 200, extract_body(200, COMPLETED_MESSAGE, data=data, guardrails=0, request_id=request_id)
     if pipeline.get("status") == STATUS_FAILED:
         stage = pipeline["stage"]
         message = pipeline.get("error_message") or f"{stage} stage failed"
@@ -109,18 +88,8 @@ def extract_response(
             422,
             message,
             errors=f"{stage}_FAILED",
-            job_status="failed",
             guardrails=0,
             request_id=request_id,
-            document_type=document_type,
-            params=params,
             pipeline_last_stage=stage_name,
         )
-    return 202, extract_body(
-        202,
-        PROCESSING_MESSAGE,
-        job_status="processing",
-        request_id=request_id,
-        document_type=document_type,
-        params=params,
-    )
+    return 202, extract_body(202, PROCESSING_MESSAGE, request_id=request_id)

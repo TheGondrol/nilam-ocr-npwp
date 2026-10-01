@@ -49,15 +49,15 @@ services' own specs. Each service also serves its full Swagger UI at `/docs`.
 ## The flow
 
 1. **`POST /v1/extract-ocr`** on the *orchestrator* service (port `8034`) with your `request_id` and the
-   document (`file` or `file_url`, optional `params`). It answers in the central orchestrator's
-   `extract-ocr` contract (`job_status`, `data`, `guardrails`, `params`):
+   document (`file` or `file_url`). It answers in the central orchestrator's
+   `extract-ocr` contract (`data`, `guardrails`, `pipeline_last_stage`; the HTTP status says where it is):
    - rejected by the guardrails model -> **400**, `errors: DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 1`;
      nothing runs and no callback follows.
    - passed -> the document goes on to the OCR stage and the service waits for the pipeline for up to
      `PIPELINE_WAIT_SECONDS` (15 s by default, counted from the request's arrival). Finished in time ->
-     **200**, `job_status: completed`, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with
+     **200**, `data` = `nomor_npwp` and `nama` as `{value, confidence}` with
      confidence 0/1; a stage failed -> **422** `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`; still
-     running -> **202**, `job_status: processing`. Give this call an HTTP timeout well above the wait.
+     running -> **202**. Give this call an HTTP timeout well above the wait.
 2. **Receive callbacks** (see *Webhooks*), sent by the pipeline stages themselves after a hand-off. The
    `SCORING` / `DONE` callback carries the **final result** (richer than `data`: OCR scores, trust
    probabilities, the guardrails report). A `FAILED` callback of any stage ends the request.

@@ -2,8 +2,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-JobStatus = Literal["pending", "processing", "completed", "failed"]
-
 
 class ContractField(BaseModel):
     value: str | None = Field(
@@ -40,7 +38,7 @@ class ExtractOcrResponse(BaseModel):
     data: NpwpData | dict[str, Any] | None = Field(
         None,
         description=(
-            "The result when `job_status` is `completed`; null otherwise. The fields (`nomor_npwp`, `nama`) when "
+            "The result on 200 (finished); null otherwise. The fields (`nomor_npwp`, `nama`) when "
             "scoring ended the request; the result of the last service of `pipeline_name_sequence`, as it is, "
             "when the sequence ends earlier (the guardrails report, the OCR result, or the structuring result)"
         ),
@@ -56,18 +54,9 @@ class ExtractOcrResponse(BaseModel):
             "from. A pipeline service named as in `pipeline_name_sequence`: the one that rejected (`guardrails`, "
             "`structuring`) or failed; the one that could not be reached or answered an error. `orchestrator` when "
             "this service refused the request itself before any pipeline service was called (API key, file "
-            "checks, `pipeline_name_sequence`, thresholds, `params`, `document_type`, an unknown request_id)"
+            "checks, `pipeline_name_sequence`, thresholds, `document_type`, an unknown request_id)"
         ),
         examples=["structuring"],
-    )
-    document_type: str | None = Field(None, description="Document type of the request", examples=["npwp"])
-    job_status: JobStatus | None = Field(
-        None,
-        description=(
-            "`completed` (200), `processing` (202), or `failed`; null when the request was refused before "
-            "anything was processed"
-        ),
-        examples=["completed"],
     )
     guardrails: Literal[0, 1] | None = Field(
         None,
@@ -77,12 +66,4 @@ class ExtractOcrResponse(BaseModel):
             "the check"
         ),
         examples=[0],
-    )
-    params: Any = Field(
-        None,
-        description=(
-            "The `params` sent with `POST /v1/extract-ocr`, returned unchanged; null when not sent. Not stored, so "
-            "always null on `GET /v1/extract-ocr/{request_id}`"
-        ),
-        examples=[{"nik": "3123456711950001", "refno": "PK19039Y8U"}],
     )

@@ -129,13 +129,13 @@ def async_pipeline(client: httpx.Client) -> bool:
     elapsed = time.monotonic() - started
     body = submitted.json()
     print(
-        f"orchestrator extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s job_status={body.get('job_status')} "
+        f"orchestrator extract-ocr: {submitted.status_code} dalam {elapsed:.2f}s "
         f"guardrails={body.get('guardrails')} errors={body.get('errors')} message={body.get('message')!r}"
     )
     if submitted.status_code not in (200, 202):
         print("  pipeline tidak dimulai atau gagal")
         return False
-    finished_in_time = submitted.status_code == 200 and body.get("job_status") == "completed"
+    finished_in_time = submitted.status_code == 200
     if finished_in_time:
         print("  selesai dalam waktu tunggu; data di respons 200:")
         for name, field in body["data"].items():
@@ -159,17 +159,18 @@ def async_pipeline(client: httpx.Client) -> bool:
 
     status = _status(client, request_id)
     read_back = status.json()
-    print(
-        f"GET status -> {status.status_code} job_status={read_back.get('job_status')} params={read_back.get('params')}"
-    )
-    ok = ok and status.status_code == 200 and read_back.get("job_status") == "completed"
+    print(f"GET status -> {status.status_code} errors={read_back.get('errors')}")
+    leftover = {"job_status", "document_type", "params"} & set(read_back)
+    if leftover:
+        print(f"  jawaban masih membawa {sorted(leftover)}")
+    ok = ok and status.status_code == 200 and not leftover
     if finished_in_time:
         ok = ok and read_back["data"] == body["data"]
 
     again = _submit(client, request_id, "npwp.jpg", image)
     repeated = again.json()
-    print(f"kirim ulang request_id yang sama -> {again.status_code} job_status={repeated.get('job_status')}")
-    ok = ok and again.status_code == 200 and repeated.get("job_status") == "completed"
+    print(f"kirim ulang request_id yang sama -> {again.status_code}")
+    ok = ok and again.status_code == 200
     if finished_in_time:
         ok = ok and repeated["data"] == body["data"]
 
@@ -255,7 +256,7 @@ def _sequence_cut_short(client: httpx.Client, sequence: list[str], data_key: str
     response = _submit(client, request_id, "npwp.jpg", _image(), sequence)
     body = response.json()
     print(
-        f"{' -> '.join(sequence)}: {response.status_code} job_status={body.get('job_status')} "
+        f"{' -> '.join(sequence)}: {response.status_code} "
         f"pipeline_last_stage={body.get('pipeline_last_stage')} errors={body.get('errors')}"
     )
     rejected = response.status_code == 400 and body.get("pipeline_last_stage") == "structuring"

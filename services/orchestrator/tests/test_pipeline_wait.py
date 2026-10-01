@@ -46,7 +46,7 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0, None)
     assert body["data"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
         "nama": {"value": "BUDI SANTOSO", "confidence": 1},
@@ -68,7 +68,7 @@ def test_still_running_when_the_wait_runs_out_is_202(client, auth, stub_waiter):
         "Accepted",
         "OCR job accepted; still processing",
     )
-    assert (body["job_status"], body["data"], body["guardrails"], body["errors"]) == ("processing", None, None, None)
+    assert (body["status_code"], body["data"], body["guardrails"], body["errors"]) == (202, None, None, None)
 
 
 def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub_waiter):
@@ -79,7 +79,7 @@ def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub
     assert response.status_code == 422
     body = response.json()
     assert (body["errors"], body["message"]) == ("OCR_FAILED", "extraction OCR model is unavailable")
-    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 0)
+    assert (body["status_code"], body["data"], body["guardrails"]) == (422, None, 0)
 
 
 def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, auth, stub_waiter):
@@ -91,7 +91,7 @@ def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, aut
     assert response.status_code == 400
     body = response.json()
     assert (body["errors"], body["message"]) == ("DOWNSTREAM_VALIDATION_ERROR", reason)
-    assert (body["job_status"], body["data"], body["guardrails"]) == ("failed", None, 1)
+    assert (body["status_code"], body["data"], body["guardrails"]) == (400, None, 1)
 
 
 def test_rejected_document_answers_at_once_without_waiting(client, auth, stub_waiter):
@@ -110,7 +110,7 @@ def test_waiting_disabled_answers_202_right_after_the_handoff(client, auth, stub
         app.dependency_overrides.pop(get_settings, None)
 
     assert response.status_code == 202
-    assert response.json()["job_status"] == "processing"
+    assert response.status_code == 202
     assert stub_waiter.calls == []
 
 

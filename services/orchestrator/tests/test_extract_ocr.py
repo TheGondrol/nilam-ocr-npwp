@@ -40,11 +40,8 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
         },
         "errors": None,
         "request_id": "OCR_1",
-        "document_type": "npwp",
-        "job_status": "completed",
         "guardrails": 0,
         "pipeline_last_stage": None,
-        "params": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
     [handed] = stub_extraction.submitted
@@ -62,11 +59,8 @@ def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth
         "data": None,
         "errors": "DOWNSTREAM_VALIDATION_ERROR",
         "request_id": "OCR_1",
-        "document_type": "npwp",
-        "job_status": "failed",
         "guardrails": 1,
         "pipeline_last_stage": "guardrails",
-        "params": None,
     }
     assert stub_extraction.submitted == [] and stub_waiter.calls == []
 
@@ -91,7 +85,7 @@ def test_file_url_is_fetched_here_and_forwarded_as_url(client, auth, monkeypatch
         headers=auth,
     )
     assert response.status_code == 200
-    assert response.json()["job_status"] == "completed"
+    assert response.status_code == 200
     assert stub_extraction.submitted[0]["file_url"] == "http://minio.local/bucket/npwp.jpg"
 
 
@@ -135,7 +129,7 @@ def test_more_than_two_pages_is_400_before_guardrails(client, auth, stub_guardra
     assert response.status_code == 400
     body = response.json()
     assert (body["message"], body["errors"]) == (TOO_MANY_PAGES, "TOO_MANY_PAGES")
-    assert "job_status" not in body
+    assert "guardrails" not in body, "a plain error envelope"
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 
@@ -246,7 +240,7 @@ def test_guardrails_only_answers_with_the_report_as_it_is(client, auth, stub_ext
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0, None)
     assert body["data"] == ACCEPTED_REPORT
     assert stub_extraction.submitted == [] and stub_waiter.calls == []
 
@@ -265,7 +259,7 @@ def test_a_sequence_ending_at_extraction_answers_with_the_ocr_result_as_it_is(cl
     response = _submit(client, auth, pipeline_name_sequence=["guardrails", "extraction"])
 
     assert response.status_code == 200
-    assert (response.json()["job_status"], response.json()["data"]) == ("completed", ocr)
+    assert (response.status_code, response.json()["data"]) == (200, ocr)
 
 
 def test_a_sequence_ending_at_structuring_answers_with_its_result_as_it_is(client, auth, stub_waiter):
@@ -287,7 +281,7 @@ def test_without_guardrails_the_document_is_handed_on_without_a_report(client, a
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["job_status"], body["guardrails"], body["errors"]) == ("completed", 0, None)
+    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0, None)
     assert stub_guardrails.checked == []
     [handed] = stub_extraction.submitted
     assert (handed["guardrails"], handed["sequence"]) == (None, NO_GUARDRAILS)
@@ -367,7 +361,7 @@ def test_an_unreachable_service_is_named_in_the_error(client, auth, stub_guardra
     stub = stub_guardrails if failing == "guardrails" else stub_extraction
     stub.error = UpstreamUnavailable(f"{failing} service is unavailable")
 
-    response = _submit(client, auth, params='{"refno": "X1"}')
+    response = _submit(client, auth)
 
     assert response.status_code == 503
     body = response.json()
@@ -376,7 +370,7 @@ def test_an_unreachable_service_is_named_in_the_error(client, auth, stub_guardra
         f"{failing} service is unavailable",
         "DOWNSTREAM_UNAVAILABLE",
     )
-    assert (body["request_id"], body["params"]) == ("OCR_1", {"refno": "X1"})
+    assert body["request_id"] == "OCR_1"
 
 
 def test_a_refusal_before_any_pipeline_service_names_the_orchestrator(client, auth):

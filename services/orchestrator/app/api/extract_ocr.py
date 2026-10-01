@@ -33,56 +33,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Extract OCR"], dependencies=[Depends(verify_api_key)])
 
 RID = "OCR_9cb01af2-493d-446d-b191-af120333f6d0"
-INVALID_PARAMS_MESSAGE = "params must be valid JSON: an object, or a quoted string"
 INVALID_SEQUENCE_CODE = "INVALID_PIPELINE_SEQUENCE"
 INVALID_THRESHOLD_CODE = "INVALID_THRESHOLD"
 # `pipeline_last_stage` of a request this service refuses itself, before calling any pipeline service.
 ENTRY = "orchestrator"
 
-_PARAMS = {"nik": "3123456711950001", "refno": "PK19039Y8U"}
 _DATA = {
     "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
     "nama": {"value": "BUDI SANTOSO", "confidence": 1},
 }
-_COMPLETED = extract_body(
-    200,
-    COMPLETED_MESSAGE,
-    data=_DATA,
-    job_status="completed",
-    guardrails=0,
-    errors=None,
-    request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
-)
-_PROCESSING = extract_body(
-    202,
-    PROCESSING_MESSAGE,
-    job_status="processing",
-    request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
-)
+_COMPLETED = extract_body(200, COMPLETED_MESSAGE, data=_DATA, guardrails=0, request_id=RID)
+_PROCESSING = extract_body(202, PROCESSING_MESSAGE, request_id=RID)
 _REJECTED = extract_body(
     400,
     "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",
     errors=REJECTED_CODE,
-    job_status="failed",
     guardrails=1,
     request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
     pipeline_last_stage="guardrails",
 )
 _FAILED = extract_body(
     422,
     "No text lines to structure",
     errors="STRUCTURING_FAILED",
-    job_status="failed",
     guardrails=0,
     request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
     pipeline_last_stage="structuring",
 )
 _GUARDRAILS_REPORT = {
@@ -98,36 +73,25 @@ _GUARDRAILS_REPORT = {
     },
     "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
 }
-_GUARDRAILS_ONLY = extract_body(
-    200,
-    COMPLETED_MESSAGE,
-    data=_GUARDRAILS_REPORT,
-    job_status="completed",
-    guardrails=0,
-    request_id=RID,
-    document_type="npwp",
-    params=_PARAMS,
-)
+_GUARDRAILS_ONLY = extract_body(200, COMPLETED_MESSAGE, data=_GUARDRAILS_REPORT, guardrails=0, request_id=RID)
 
 _CONTRACT_TABLE = (
-    "| Outcome | HTTP | `job_status` | `data` | `guardrails` | `errors` | `pipeline_last_stage` |\n"
-    "|---|---|---|---|---|---|---|\n"
-    "| Finished | 200 | `completed` | the fields | `0` | null | null |\n"
-    "| Still running | 202 | `processing` | null | null | null | null |\n"
-    f"| Rejected by the guardrails model | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
-    f"| Rejected by the structuring rules | 400 | `failed` | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
-    "| A stage failed | 422 | `failed` | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
+    "| Outcome | HTTP | `data` | `guardrails` | `errors` | `pipeline_last_stage` |\n"
+    "|---|---|---|---|---|---|\n"
+    "| Finished | 200 | the fields | `0` | null | null |\n"
+    "| Still running | 202 | null | null | null | null |\n"
+    f"| Rejected by the guardrails model | 400 | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
+    f"| Rejected by the structuring rules | 400 | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
+    "| A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` | the service that failed |\n\n"
+    "The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running, "
+    "4xx / 5xx failed or refused.\n\n"
     "`pipeline_last_stage` is null on a success answer (200, 202) and names the service an error comes from: "
     "a pipeline service as `pipeline_name_sequence` names it (`guardrails`, `extraction`, `structuring`, "
     "`scoring`), also on a 400 / 500 / 503 / 504 from calling one of them, or `orchestrator` when this service "
     "refused the request itself before calling any (API key, file checks, `pipeline_name_sequence`, thresholds, "
-    "`params`, `document_type`, an unknown request_id).\n\n"
+    "`document_type`, an unknown request_id).\n\n"
 )
-
-
-class _InvalidParams(Exception):
-    pass
 
 
 class _InvalidThreshold(Exception):
@@ -158,7 +122,7 @@ STAGE_ERROR_CODES = {
 }
 
 
-def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, params: Any) -> dict[str, Any]:
+def _stage_error_body(exc: StageError, *, request_id: str) -> dict[str, Any]:
     """The answer when calling a pipeline service failed (unreachable, timed out, refused the file, answered
     wrongly): the error envelope's status and message, in the extract-ocr shape, naming that service."""
     if exc.status_code >= 500:
@@ -168,16 +132,12 @@ def _stage_error_body(exc: StageError, *, request_id: str, document_type: str, p
         exc.message,
         errors=STAGE_ERROR_CODES.get(exc.status_code, "DOWNSTREAM_BAD_REQUEST"),
         request_id=request_id,
-        document_type=document_type,
-        params=params,
         pipeline_last_stage=exc.service,
     )
 
 
 def _stage_error_response(code: int, description: str, service: str, message: str) -> dict[str, Any]:
-    example = extract_body(
-        code, message, errors=STAGE_ERROR_CODES[code], request_id=RID, document_type="npwp", pipeline_last_stage=service
-    )
+    example = extract_body(code, message, errors=STAGE_ERROR_CODES[code], request_id=RID, pipeline_last_stage=service)
     return {
         "model": ExtractOcrResponse,
         "description": description,
@@ -201,18 +161,6 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
     return validate_sequence(values)
 
 
-def _parse_params(raw: str | None) -> Any:
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw)
-    except ValueError as exc:
-        raise _InvalidParams from exc
-    if not isinstance(value, dict | str):
-        raise _InvalidParams
-    return value
-
-
 @router.post(
     "/v1/extract-ocr",
     response_model=ExtractOcrResponse,
@@ -227,8 +175,7 @@ def _parse_params(raw: str | None) -> Any:
         + _CONTRACT_TABLE
         + "`data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer's name, or the "
         "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
-        "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`. "
-        "`params` is returned as sent.\n\n"
+        "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`.\n\n"
         "**Thresholds from the central orchestrator, per request, all optional.** "
         "`guardrails_confidence_threshold` (a page passes when the model's accepted probability reaches it, and "
         "is rejected below it) replaces the guardrails threshold for this document; left out, the guardrails "
@@ -243,7 +190,7 @@ def _parse_params(raw: str | None) -> Any:
         "or KPP code. `message` is the rules' Indonesian reason, e.g. `Kode provinsi pada NPWP tidak valid, mohon "
         "dicek kembali`. A single-word name or a letter in the number is tolerated: the fields are returned, and "
         "the trust model's confidence already accounts for it.\n\n"
-        "**Refused before anything runs** (plain error envelope, no `job_status`): a document above "
+        "**Refused before anything runs** (plain error envelope, no `guardrails`): a document above "
         "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
         "**Which services run: `pipeline_name_sequence`.** The services of this request, in order: `guardrails`, "
@@ -305,7 +252,7 @@ def _parse_params(raw: str | None) -> Any:
             "model": ExtractOcrResponse,
             "description": (
                 "A pipeline stage failed within the wait (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`; "
-                "`message` says why), `params` is not valid JSON (`INVALID_PARAMS`), `pipeline_name_sequence` breaks "
+                "`message` says why), `pipeline_name_sequence` breaks "
                 f"the order rules (`{INVALID_SEQUENCE_CODE}`), a threshold cannot be read "
                 f"(`{INVALID_THRESHOLD_CODE}`), or a required field is missing (`VALIDATION_ERROR`)"
             ),
@@ -341,13 +288,6 @@ async def extract_ocr(
     document_type: str = Form(
         DOCUMENT_TYPE, description="Document type chosen by the client. Only `npwp` is supported", examples=["npwp"]
     ),
-    params: str | None = Form(
-        None,
-        description=(
-            "Client metadata as JSON: an object, or a quoted string. Not interpreted; returned unchanged in " "`params`"
-        ),
-        examples=['{"nik": "3123456711950001", "refno": "PK19039Y8U"}'],
-    ),
     file: UploadFile | str | None = FileField,
     file_url: str | None = FileUrlField,
     pipeline_name_sequence: list[str] | None = Form(
@@ -377,18 +317,6 @@ async def extract_ocr(
     settings: Settings = Depends(get_settings),
 ):
     received_at = time.monotonic()
-    try:
-        parsed_params = _parse_params(params)
-    except _InvalidParams:
-        response.status_code = 422
-        return extract_body(
-            422,
-            INVALID_PARAMS_MESSAGE,
-            errors="INVALID_PARAMS",
-            request_id=request_id,
-            document_type=document_type,
-            pipeline_last_stage=ENTRY,
-        )
     if document_type != DOCUMENT_TYPE:
         response.status_code = 400
         return extract_body(
@@ -396,7 +324,6 @@ async def extract_ocr(
             f"Unsupported document_type: {document_type}. Supported: {DOCUMENT_TYPE}",
             errors="UNSUPPORTED_DOCUMENT_TYPE",
             request_id=request_id,
-            document_type=document_type,
             pipeline_last_stage=ENTRY,
         )
     try:
@@ -408,7 +335,6 @@ async def extract_ocr(
             f"Invalid pipeline_name_sequence: {exc}",
             errors=INVALID_SEQUENCE_CODE,
             request_id=request_id,
-            document_type=document_type,
             pipeline_last_stage=ENTRY,
         )
     try:
@@ -424,7 +350,6 @@ async def extract_ocr(
             str(exc),
             errors=INVALID_THRESHOLD_CODE,
             request_id=request_id,
-            document_type=document_type,
             pipeline_last_stage=ENTRY,
         )
 
@@ -448,14 +373,12 @@ async def extract_ocr(
         )
     except StageError as exc:
         response.status_code = exc.status_code
-        return _stage_error_body(exc, request_id=request_id, document_type=document_type, params=parsed_params)
+        return _stage_error_body(exc, request_id=request_id)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(
         outcome,
         request_id=request_id,
-        document_type=document_type,
-        params=parsed_params,
         threshold=settings.field_confidence_threshold,
         column_thresholds=column_thresholds,
     )
@@ -472,8 +395,7 @@ async def extract_ocr(
         "Reads the OCR, structuring and scoring jobs of `request_id` once each, in pipeline order, and answers in "
         'the same contract as `POST /v1/extract-ocr` ("Finished" meaning finished by now):\n\n'
         + _CONTRACT_TABLE
-        + "Use it for a request that was answered `202`, e.g. when a callback did not arrive. `params` is always "
-        "null here (it is not stored) and `document_type` is `npwp`.\n\n"
+        + "Use it for a request that was answered `202`, e.g. when a callback did not arrive.\n\n"
         "A request no stage has a job for is answered from its last guardrails verdict "
         "(`guardrails_results`), as its POST was: `400` `DOWNSTREAM_VALIDATION_ERROR` with `guardrails: 1` when "
         "the guardrails model rejected it, `200` with the guardrails report as `data` when `guardrails` was its "
@@ -490,16 +412,16 @@ async def extract_ocr(
     responses={
         200: success_examples(
             "Finished",
-            completed=("The OCR result", {**_COMPLETED, "params": None}),
+            completed=("The OCR result", _COMPLETED),
             guardrails_only=(
                 '`pipeline_name_sequence: ["guardrails"]`: the kept guardrails report',
-                {**_GUARDRAILS_ONLY, "params": None},
+                _GUARDRAILS_ONLY,
             ),
         ),
         202: {
             **success_examples(
                 "Still running",
-                processing=("Still processing", {**_PROCESSING, "params": None}),
+                processing=("Still processing", _PROCESSING),
             ),
             "model": ExtractOcrResponse,
         },
@@ -515,7 +437,6 @@ async def extract_ocr(
                         **_REJECTED,
                         "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
                         "pipeline_last_stage": "structuring",
-                        "params": None,
                     }
                 }
             },
@@ -530,7 +451,7 @@ async def extract_ocr(
         422: {
             "model": ExtractOcrResponse,
             "description": "A pipeline stage failed (`OCR_FAILED`, `STRUCTURING_FAILED`, `SCORING_FAILED`)",
-            "content": {"application/json": {"example": {**_FAILED, "params": None}}},
+            "content": {"application/json": {"example": _FAILED}},
         },
         500: _stage_error_response(
             500,
@@ -565,14 +486,12 @@ async def get_extract_ocr(
         outcome = await service.status(request_id)
     except StageError as exc:
         response.status_code = exc.status_code
-        return _stage_error_body(exc, request_id=request_id, document_type=DOCUMENT_TYPE, params=None)
+        return _stage_error_body(exc, request_id=request_id)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(
         outcome,
         request_id=request_id,
-        document_type=DOCUMENT_TYPE,
-        params=None,
         threshold=settings.field_confidence_threshold,
         column_thresholds=outcome.get("column_thresholds"),
     )

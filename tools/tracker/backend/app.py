@@ -200,6 +200,12 @@ async def emit(request_id: str, stage: str, status: str, *, type: str = "stage",
 # --- pipeline_name_sequence --------------------------------------------------------
 
 
+def job_status_of(http_status: int) -> str:
+    """Keadaan request menurut kode HTTP jawaban orchestrator (jawabannya tidak lagi membawa job_status):
+    200 completed, 202 processing, selain itu failed. Hanya untuk tampilan tracker."""
+    return {200: "completed", 202: "processing"}.get(http_status, "failed")
+
+
 def parse_sequence(raw: str) -> list[str] | None:
     """`pipeline_name_sequence` dari form tracker sebagai JSON array; kosong = pipeline penuh. Aturan urutannya
     tidak diperiksa di sini: sequence yang salah sengaja diteruskan supaya jawaban 422 orchestrator terlihat."""
@@ -550,7 +556,7 @@ async def run_request(
     answer = {
         "request_id": request_id,
         "http_status": r.status_code,
-        "job_status": body.get("job_status"),
+        "job_status": job_status_of(r.status_code),
         "errors": body.get("errors"),
         "message": body.get("message"),
         "pipeline_last_stage": last_service,
@@ -567,7 +573,7 @@ async def run_request(
         "RESPONSE",
         type="http",
         http_status=r.status_code,
-        job_status=body.get("job_status"),
+        job_status=job_status_of(r.status_code),
         errors=body.get("errors"),
         message=body.get("message"),
         elapsed_ms=elapsed_ms,

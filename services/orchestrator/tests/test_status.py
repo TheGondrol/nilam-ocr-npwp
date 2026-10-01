@@ -39,7 +39,7 @@ def _get(client, auth, request_id=RID):
 # --- the endpoint -----------------------------------------------------------------------------------
 
 
-def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_waiter, stub_guardrails):
+def test_finished_request_is_200_with_its_data(client, auth, stub_waiter, stub_guardrails):
     response = _get(client, auth)
 
     assert response.status_code == 200
@@ -53,11 +53,8 @@ def test_finished_request_is_200_with_its_data_and_no_params(client, auth, stub_
         },
         "errors": None,
         "request_id": RID,
-        "document_type": "npwp",
-        "job_status": "completed",
         "guardrails": 0,
         "pipeline_last_stage": None,
-        "params": None,
     }
     assert stub_waiter.snapshots == [RID]
     assert stub_waiter.calls == [], "the status is read, not waited for"
@@ -70,7 +67,7 @@ def test_running_request_is_202(client, auth, stub_waiter):
     response = _get(client, auth)
 
     assert response.status_code == 202
-    assert (response.json()["job_status"], response.json()["guardrails"]) == ("processing", None)
+    assert (response.status_code, response.json()["guardrails"]) == (202, None)
 
 
 def test_failed_stage_is_422(client, auth, stub_waiter):
@@ -270,7 +267,7 @@ def test_a_request_that_ended_before_scoring_is_answered_with_that_result(client
     response = _get(client, auth)
 
     assert response.status_code == 200
-    assert (response.json()["job_status"], response.json()["data"]) == ("completed", structuring)
+    assert (response.status_code, response.json()["data"]) == (200, structuring)
 
 
 def test_an_unreachable_stage_is_named_in_the_error(client, auth, stub_waiter):

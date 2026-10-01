@@ -136,7 +136,6 @@ export default function () {
         request_id: body && body.request_id ? body.request_id : requestId,
         image: image.name,
         status: res.status,
-        job_status: body && body.job_status ? body.job_status : null,
         guardrails: body && body.guardrails != null ? body.guardrails : null,
         pipeline_last_stage: body && body.pipeline_last_stage ? body.pipeline_last_stage : null,
         errors: body && body.errors ? body.errors : null,
