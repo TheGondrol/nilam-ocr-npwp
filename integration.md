@@ -163,9 +163,10 @@ di `pipeline_name_sequence`. Field ini ada di setiap jawaban `POST` maupun `GET 
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
 | `guardrails_confidence_threshold` | tidak | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
+| `guardrails_tendency` | tidak, **deprecated** | dulu memilih sisi threshold guardrails. Sekarang threshold selalu pada probabilitas accept: tidak dikirim atau `accepted` tidak mengubah apa pun, nilai lain (mis. `rejected`) dijawab 422 `INVALID_THRESHOLD`, supaya threshold sisi reject tidak terbaca diam-diam sebagai sisi accept |
 | `column_confidence_threshold` | tidak | JSON object per field, mis. `{"nomor_npwp": 0.9, "nama": 0.5}`, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
 
-Threshold yang tidak bisa dibaca (angka guardrails di luar 0–1 atau bukan angka, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
+Threshold yang tidak bisa dibaca (angka guardrails di luar 0–1 atau bukan angka, `guardrails_tendency` selain `accepted`, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
 `INVALID_THRESHOLD`** dan tidak ada yang dijalankan. Contoh lengkap:
 
     request_id                       = OCR_361701a7-ad0f-46f7-9922-8eae7c99015e

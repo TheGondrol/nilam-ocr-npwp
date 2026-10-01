@@ -66,6 +66,14 @@ def test_the_guardrails_threshold_alone_is_enough(client, auth, stub_guardrails)
     assert stub_guardrails.checked[0]["threshold"] == 0.6
 
 
+@pytest.mark.parametrize("tendency", ["accepted", "ACCEPTED", ""])
+def test_a_deprecated_accepted_tendency_changes_nothing(client, auth, stub_guardrails, tendency):
+    response = _submit(client, auth, guardrails_confidence_threshold="0.6", guardrails_tendency=tendency)
+
+    assert response.status_code == 200
+    assert stub_guardrails.checked[0]["threshold"] == 0.6
+
+
 @pytest.mark.parametrize(
     "form",
     [
@@ -77,6 +85,10 @@ def test_the_guardrails_threshold_alone_is_enough(client, auth, stub_guardrails)
         {"column_confidence_threshold": json.dumps({"npwp": 0.9})},
         {"column_confidence_threshold": json.dumps({"nama": 2})},
         {"column_confidence_threshold": json.dumps({"nama": "tinggi"})},
+        # The old reject side: read as the accepted side it would pass far more documents, so it is refused.
+        {"guardrails_confidence_threshold": "0.3", "guardrails_tendency": "rejected"},
+        {"guardrails_tendency": "rejected"},
+        {"guardrails_confidence_threshold": "0.3", "guardrails_tendency": "reject"},
     ],
 )
 def test_a_threshold_that_cannot_be_read_is_422_and_nothing_runs(client, auth, stub_guardrails, stub_extraction, form):
