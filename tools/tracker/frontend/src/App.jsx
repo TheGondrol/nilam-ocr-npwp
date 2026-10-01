@@ -24,16 +24,78 @@ const SOURCES = [
 // pipeline_name_sequence: service yang dijalankan satu request. Urutannya selalu guardrails -> extraction ->
 // structuring -> scoring; guardrails boleh tidak ada di depan dan ujungnya boleh dipotong, tidak boleh melompat.
 const SERVICE_OF_STAGE = { GUARDRAILS: 'guardrails', OCR: 'extraction', STRUCTURING: 'structuring', SCORING: 'scoring' }
-const SEQUENCES = [
-  { key: 'full', label: 'penuh (default)', value: null },
-  { key: 'no-guardrails', label: 'tanpa guardrails', value: ['extraction', 'structuring', 'scoring'] },
-  { key: 'guardrails', label: 'guardrails saja', value: ['guardrails'] },
-  { key: 'to-extraction', label: 'sampai extraction (OCR)', value: ['guardrails', 'extraction'] },
-  { key: 'to-structuring', label: 'sampai structuring', value: ['guardrails', 'extraction', 'structuring'] },
-  { key: 'extraction', label: 'extraction saja', value: ['extraction'] },
-  { key: 'invalid', label: 'tidak valid: melompati structuring (422)', value: ['extraction', 'scoring'], invalid: true },
+const PIPELINE_NAMES = ['guardrails', 'extraction', 'structuring', 'scoring']
+const SERVICE_LABELS = { guardrails: 'guardrails', extraction: 'extraction (OCR)', structuring: 'structuring', scoring: 'scoring' }
+// Pintasan untuk toggle; kombinasi lain tinggal diklik sendiri.
+const SEQUENCE_PRESETS = [
+  { label: 'penuh', value: PIPELINE_NAMES },
+  { label: 'tanpa guardrails', value: ['extraction', 'structuring', 'scoring'] },
+  { label: 'guardrails saja', value: ['guardrails'] },
+  { label: 'sampai extraction', value: ['guardrails', 'extraction'] },
+  { label: 'sampai structuring', value: ['guardrails', 'extraction', 'structuring'] },
+  { label: 'extraction saja', value: ['extraction'] },
 ]
 const INVALID_SEQUENCE = 'INVALID_PIPELINE_SEQUENCE'
+
+// Aturan yang sama dengan validate_sequence di orchestrator (ocr_common/pipeline/sequence.py), supaya UI bisa
+// memberi tahu lebih dulu kalau sequence ini akan dijawab 422. null = valid.
+function sequenceProblem(names) {
+  if (!names.length) return 'pilih minimal satu service'
+  const start = PIPELINE_NAMES.indexOf(names[0])
+  if (start > PIPELINE_NAMES.indexOf('extraction')) return `${names[0]} tidak bisa di depan: butuh hasil ${PIPELINE_NAMES[start - 1]}`
+  if (names.some((name, i) => name !== PIPELINE_NAMES[start + i])) return 'tidak boleh melompati service di tengah'
+  return null
+}
+
+// Yang dikirim sebagai pipeline_name_sequence: null (field tidak dikirim, orchestrator memakai pipeline penuh)
+// kalau keempatnya menyala, selain itu daftar service yang menyala dalam urutan pipeline.
+function sequenceToSend(names) {
+  return names.length === PIPELINE_NAMES.length ? null : names
+}
+
+// Toggle on/off per service. `names`: service yang menyala, selalu dalam urutan pipeline. `allowInvalid`: sequence
+// yang melanggar aturan tetap boleh dikirim (form satu dokumen, supaya jawaban 422 orchestrator bisa dilihat).
+function SequenceToggles({ names, onChange, allowInvalid }) {
+  const toggle = (name) =>
+    onChange(PIPELINE_NAMES.filter((n) => (n === name ? !names.includes(n) : names.includes(n))))
+  const problem = sequenceProblem(names)
+  const sent = sequenceToSend(names)
+  return (
+    <div className="sequence">
+      <div className="sequence-label">pipeline_name_sequence</div>
+      <div className="toggles">
+        {PIPELINE_NAMES.map((name, i) => (
+          <Fragment key={name}>
+            {i > 0 && <span className="arrow">→</span>}
+            <button
+              type="button"
+              className={`toggle ${names.includes(name) ? 'on' : ''}`}
+              aria-pressed={names.includes(name)}
+              onClick={() => toggle(name)}
+            >
+              {SERVICE_LABELS[name]}
+            </button>
+          </Fragment>
+        ))}
+      </div>
+      <div className="presets">
+        {SEQUENCE_PRESETS.map((p) => (
+          <button key={p.label} type="button" className="link small-link" onClick={() => onChange(p.value)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="hint small">
+        dikirim: {sent ? <code>{JSON.stringify(sent)}</code> : 'tidak dikirim (orchestrator memakai pipeline penuh)'}
+      </div>
+      {problem && (
+        <div className={allowInvalid && names.length ? 'warn small' : 'error small'}>
+          {allowInvalid && names.length ? `akan ditolak orchestrator: 422 ${INVALID_SEQUENCE} (${problem})` : problem}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function sequenceText(sequence) {
   return sequence ? sequence.join(' → ') : 'penuh'
@@ -606,7 +668,7 @@ function LoadTest({ overview, nav }) {
   const [duration, setDuration] = useState(60)
   const [mode, setMode] = useState('constant')
   const [images, setImages] = useState([])
-  const [sequenceKey, setSequenceKey] = useState('full')
+  const [sequence, setSequence] = useState(PIPELINE_NAMES)
   const [error, setError] = useState(null)
   const [starting, setStarting] = useState(false)
 
@@ -672,7 +734,7 @@ function LoadTest({ overview, nav }) {
           duration_seconds: duration,
           mode,
           images,
-          pipeline_name_sequence: SEQUENCES.find((s) => s.key === sequenceKey)?.value ?? null,
+          pipeline_name_sequence: sequenceToSend(sequence),
         }),
       })
       const body = await r.json()
@@ -724,17 +786,7 @@ function LoadTest({ overview, nav }) {
               <option value="ramp">naik bertahap</option>
             </select>
           </label>
-          <label className="field">
-            pipeline_name_sequence
-            <select value={sequenceKey} onChange={(e) => setSequenceKey(e.target.value)}>
-              {SEQUENCES.filter((s) => !s.invalid).map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                  {s.value ? `: ${sequenceText(s.value)}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SequenceToggles names={sequence} onChange={setSequence} />
           <TestFiles config={config} selected={images} setSelected={setImages} onChanged={loadConfig} />
           <div className="hint small">
             Tuntas = callback DONE tahap terakhir sequence (<code>final: true</code>); untuk &quot;guardrails saja&quot;, jawaban 200 itu sendiri.
@@ -746,7 +798,7 @@ function LoadTest({ overview, nav }) {
             memanggil <code>{config?.target}</code>. Koneksi ditahan sampai {waitSeconds} dtk, jadi ~{Math.ceil(rate * (waitSeconds + 10))} VU
             disiapkan.
           </div>
-          <button disabled={starting || running || images.length === 0}>
+          <button disabled={starting || running || images.length === 0 || sequenceProblem(sequence) !== null}>
             {running ? 'Ada run yang berjalan' : starting ? 'Menyalakan k6…' : 'Mulai load test'}
           </button>
         </form>
@@ -997,7 +1049,7 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
   const [live, setLive] = useState(false)
   const [slow, setSlow] = useState(false)
   const [slowSeconds, setSlowSeconds] = useState(20)
-  const [sequenceKey, setSequenceKey] = useState('full')
+  const [sendNames, setSendNames] = useState(PIPELINE_NAMES)
   const [source, setSource] = useState('upload')
   const [resendId, setResendId] = useState('')
   const [sim, setSim] = useState({ callback: 'ok', wait_seconds: 15, database: null })
@@ -1050,8 +1102,8 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
     form.append('file', file)
     form.append('document_type', 'npwp')
     form.append('slow_seconds', slow ? String(slowSeconds) : '0')
-    const sequence = SEQUENCES.find((s) => s.key === sequenceKey)?.value
-    form.append('pipeline_name_sequence', sequence ? JSON.stringify(sequence) : '')
+    const sent = sequenceToSend(sendNames)
+    form.append('pipeline_name_sequence', sent ? JSON.stringify(sent) : '')
     form.append('source', source)
     form.append('request_id', resendId.trim())
     try {
@@ -1145,17 +1197,7 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
           <div className="hint small">
             batas tunggu orchestrator {sim.wait_seconds} dtk: di bawah itu jawabannya 200 + hasil, di atas itu 202 dan hasil menyusul lewat callback. Nama file diberi awalan <code>delay{slowSeconds}s-</code>; hook ini hanya hidup di ENVIRONMENT=local.
           </div>
-          <label className="field">
-            pipeline_name_sequence
-            <select value={sequenceKey} onChange={(e) => setSequenceKey(e.target.value)}>
-              {SEQUENCES.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                  {s.value ? `: ${sequenceText(s.value)}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SequenceToggles names={sendNames} onChange={setSendNames} allowInvalid />
           <div className="hint small">
             Service yang dijalankan request ini. Tahap terakhir mengakhiri request: hasilnya jadi <code>data</code> apa adanya dan callback DONE-nya
             membawa <code>final: true</code>. Pengecekan file di orchestrator selalu jalan, dan aturan structuring tetap menolak kalau structuring jalan.
@@ -1179,7 +1221,7 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
               pakai request_id yang sedang dilihat
             </button>
           )}
-          <button disabled={busy}>
+          <button disabled={busy || sendNames.length === 0}>
             {busy ? `Menunggu orchestrator (maks. ${sim.wait_seconds} dtk)…` : resendId.trim() ? 'Kirim ulang request_id ini' : 'Kirim dokumen'}
           </button>
         </form>
