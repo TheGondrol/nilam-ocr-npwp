@@ -143,29 +143,31 @@ def test_name_value_is_normalised_but_name_base_is_the_raw_read():
 # --- the number is not corrected; what OCR misread is flagged ----------------------------------
 
 
-def test_homoglyph_is_dropped_not_corrected_and_flagged():
+def test_homoglyph_makes_the_number_null_and_flagged():
     document = structure(_card("63.48O.341.5-5O1.000"))
     number = document["fields"]["nomor_npwp"]
-    assert number["value"] == "6348341551000", "the two O are dropped, not read as 0 (correction is off)"
+    assert number["value"] is None, "the two O are neither dropped nor read as 0: the number is not reported"
+    assert number["confidence"] == 0.0
     assert _signals(number)["has_homoglyph"] is True
     assert (document["flag"], document["flag_reason"]) == (True, npwp_rules.FLAG_HOMOGLYPH)
+    assert document["reject_reason"] is None, "a null number from a homoglyph is tolerated, not a blank document"
     assert document["fields"]["nama"]["value"] == "SRI WAHYUNI"
 
 
-def test_an_unresolved_t_is_dropped_and_flagged_not_reported_as_a_valid_15_digit_number():
+def test_an_unresolved_t_makes_the_number_null_and_flagged():
     document = structure(_card("3329 1T30 1001 0006"))
     number = document["fields"]["nomor_npwp"]
-    assert number["value"] == "332913010010006", "15 digits left, but not the printed 15-digit shape: no dots"
+    assert number["value"] is None
     assert _signals(number)["has_homoglyph"] is True
     assert document["flag_reason"] == npwp_rules.FLAG_HOMOGLYPH
 
 
-def test_a_t_in_the_province_prefix_is_dropped_too_while_correction_is_off():
-    # The rules can resolve "T7.." to "17.." (Bengkulu), but the ML team wires normalize_npwp_raw, not
-    # normalize_npwp, so the T is dropped like any other letter and the number is flagged.
+def test_a_t_in_the_province_prefix_is_not_resolved_either():
+    # The rules can resolve "T7.." to "17.." (Bengkulu), but no homoglyph correction is applied: null.
     number = fields(_card("T701 0130 1001 0006"))["nomor_npwp"]
-    assert number["value"] == "701013010010006"
+    assert number["value"] is None
     assert _signals(number)["has_homoglyph"] is True
+    assert _signals(number)["invalid_province_prefix"] is False
 
 
 def test_invalid_province_code_is_flagged_for_a_16_digit_number():
