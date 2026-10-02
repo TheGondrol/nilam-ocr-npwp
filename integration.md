@@ -163,17 +163,17 @@ Sejak 1 Oktober 2026 jawaban tidak lagi membawa `document_type`, `job_status`, d
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
-| `guardrails_confidence_threshold` | tidak | angka di antara 0 dan 1: threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
-| `column_confidence_threshold` | tidak | JSON object per field, mis. `{"nomor_npwp": 0.9, "nama": 0.5}`, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
+| `guardrails_confidence_threshold` | tidak | JSON object per guardrails, `{"acc_rej": 0.8}`: pipeline ini punya satu guardrails, `acc_rej` (accept/reject), jadi hanya key itu yang valid. Nilainya angka di antara 0 dan 1 (eksklusif): threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
+| `column_confidence_threshold` | tidak | JSON object, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya, `0` kalau di bawahnya. Key `all_field` berlaku untuk semua field (`{"all_field": 0.8}`); key per field `nomor_npwp` / `nama` boleh dipakai sebagai gantinya atau bersamaan, dan key per field menang atas `all_field`. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
 
-Threshold yang tidak bisa dibaca (angka guardrails di luar 0–1 atau bukan angka, JSON tidak valid, atau nama field selain `nomor_npwp` / `nama`) dijawab **422
-`INVALID_THRESHOLD`** dan tidak ada yang dijalankan. Contoh lengkap:
+Threshold yang tidak bisa dibaca (bukan JSON object, nilai di luar rentang atau bukan angka, key guardrails selain `acc_rej`, atau key field selain `all_field` / `nomor_npwp` / `nama`) dijawab **422
+`INVALID_THRESHOLD`** dengan `message` yang menyebut key atau nilai mana yang salah, dan tidak ada yang dijalankan. Contoh lengkap:
 
     request_id                       = OCR_361701a7-ad0f-46f7-9922-8eae7c99015e
     file_url                         = https://minio.example/ocr/abc.jpg
     pipeline_name_sequence           = ["guardrails","extraction","structuring","scoring"]
-    guardrails_confidence_threshold  = 0.3
-    column_confidence_threshold      = {"nomor_npwp":0.9,"nama":0.5}
+    guardrails_confidence_threshold  = {"acc_rej":0.8}
+    column_confidence_threshold      = {"all_field":0.8}
 
 Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`).
 `column_confidence_threshold` ikut disimpan bersama job, jadi `GET /v1/extract-ocr/{request_id}` menjawab dengan

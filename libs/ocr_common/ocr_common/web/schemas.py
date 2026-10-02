@@ -122,8 +122,9 @@ class JobStatusBase(BaseModel):
     column_confidence_threshold: dict[str, float] | None = Field(
         None,
         description=(
-            "The central orchestrator's per-field thresholds the job was submitted with (`nomor_npwp`, `nama`); "
-            "null when none were given: `FIELD_CONFIDENCE_THRESHOLD` for every field"
+            "The central orchestrator's per-field thresholds the job was submitted with (`nomor_npwp`, `nama`; "
+            "an `all_field` it sent is already spread over them); null when none were given: "
+            "`FIELD_CONFIDENCE_THRESHOLD` for every field"
         ),
         examples=[{"nomor_npwp": 0.9, "nama": 0.5}],
     )

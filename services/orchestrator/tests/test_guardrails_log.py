@@ -26,7 +26,7 @@ def _submit(client, auth, filename="npwp.jpg", **form):
 
 
 def test_an_accepted_document_is_recorded_with_whose_threshold_decided(client, auth, guardrails_log):
-    _submit(client, auth, guardrails_confidence_threshold="0.3")
+    _submit(client, auth, guardrails_confidence_threshold='{"acc_rej": 0.3}')
     _submit(client, auth)
 
     assert [(r["request_id"], r["report"]["passed"], r["threshold_from_request"]) for r in guardrails_log.records] == [

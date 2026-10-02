@@ -871,9 +871,9 @@ components:
           title: Column Confidence Threshold
           description: 'Per field, from the central orchestrator: the trust model''s probability that
             the field''s value is correct must reach it for the field''s `confidence` to be `1` (else
-            `0`), always on the accept side. Keys: `nomor_npwp`, `nama`; a field left out (or the whole
-            map omitted) uses `FIELD_CONFIDENCE_THRESHOLD`. Serialised as a JSON object string; carried
-            on to scoring'
+            `0`), always on the accept side. Keys: `all_field` (every field), `nomor_npwp`, `nama`; a
+            field''s own key wins over `all_field`, and a field left out (or the whole map omitted) uses
+            `FIELD_CONFIDENCE_THRESHOLD`. Serialised as a JSON object string; carried on to scoring'
           examples:
           - '{"nomor_npwp": 0.9, "nama": 0.5}'
         file:
@@ -1236,7 +1236,8 @@ components:
           - type: 'null'
           title: Column Confidence Threshold
           description: 'The central orchestrator''s per-field thresholds the job was submitted with (`nomor_npwp`,
-            `nama`); null when none were given: `FIELD_CONFIDENCE_THRESHOLD` for every field'
+            `nama`; an `all_field` it sent is already spread over them); null when none were given: `FIELD_CONFIDENCE_THRESHOLD`
+            for every field'
           examples:
           - nama: 0.5
             nomor_npwp: 0.9

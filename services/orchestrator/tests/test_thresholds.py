@@ -13,7 +13,7 @@ RID = "OCR_361701a7-ad0f-46f7-9922-8eae7c99015e"
 # The central orchestrator's example request (trust probabilities of the stub: npwp 0.7296, name 0.9471).
 CENTRAL = {
     "pipeline_name_sequence": json.dumps(["guardrails", "extraction", "structuring", "scoring"]),
-    "guardrails_confidence_threshold": "0.3",
+    "guardrails_confidence_threshold": json.dumps({"acc_rej": 0.3}),
     "column_confidence_threshold": json.dumps({"nomor_npwp": 0.9, "nama": 0.5}),
 }
 
@@ -59,8 +59,21 @@ def test_a_field_left_out_of_column_confidence_threshold_uses_the_default(client
     assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 0}
 
 
+def test_all_field_sets_every_field_and_a_fields_own_key_wins(client, auth, stub_extraction):
+    # all_field 0.8: nomor_npwp 0.7296 < 0.8, nama 0.9471 >= 0.8
+    response = _submit(client, auth, column_confidence_threshold=json.dumps({"all_field": 0.8}))
+
+    assert stub_extraction.submitted[0]["column_thresholds"] == {"nomor_npwp": 0.8, "nama": 0.8}
+    assert _confidences(response.json()) == {"nomor_npwp": 0, "nama": 1}
+
+    response = _submit(client, auth, column_confidence_threshold=json.dumps({"all_field": 0.8, "nomor_npwp": 0.7}))
+
+    assert stub_extraction.submitted[1]["column_thresholds"] == {"nomor_npwp": 0.7, "nama": 0.8}
+    assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 1}
+
+
 def test_the_guardrails_threshold_alone_is_enough(client, auth, stub_guardrails):
-    response = _submit(client, auth, guardrails_confidence_threshold="0.6")
+    response = _submit(client, auth, guardrails_confidence_threshold=json.dumps({"acc_rej": 0.6}))
 
     assert response.status_code == 200
     assert stub_guardrails.checked[0]["threshold"] == 0.6
@@ -69,12 +82,18 @@ def test_the_guardrails_threshold_alone_is_enough(client, auth, stub_guardrails)
 @pytest.mark.parametrize(
     "form",
     [
-        {"guardrails_confidence_threshold": "tinggi"},
-        {"guardrails_confidence_threshold": "0"},
-        {"guardrails_confidence_threshold": "1.5"},
+        {"guardrails_confidence_threshold": "0.3"},  # the old bare number: the contract is an object by guardrails name
+        {"guardrails_confidence_threshold": "{not json"},
+        {"guardrails_confidence_threshold": json.dumps({"acc_rej": "tinggi"})},
+        {"guardrails_confidence_threshold": json.dumps({"acc_rej": 0})},
+        {"guardrails_confidence_threshold": json.dumps({"acc_rej": 1.5})},
+        {"guardrails_confidence_threshold": json.dumps({"accept": 0.3})},
+        {"guardrails_confidence_threshold": json.dumps({"acc_rej": 0.3, "blur": 0.3})},
         {"column_confidence_threshold": "{not json"},
         {"column_confidence_threshold": "[0.9, 0.5]"},
         {"column_confidence_threshold": json.dumps({"npwp": 0.9})},
+        {"column_confidence_threshold": json.dumps({"all_fields": 0.9})},
+        {"column_confidence_threshold": json.dumps({"all_field": 0.9, "npwp": 0.9})},
         {"column_confidence_threshold": json.dumps({"nama": 2})},
         {"column_confidence_threshold": json.dumps({"nama": "tinggi"})},
     ],

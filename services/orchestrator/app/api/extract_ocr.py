@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 
 from ocr_common.errors import UNREADABLE_FILE
 from ocr_common.image_validation import PAYLOAD_TOO_LARGE_MESSAGE
-from ocr_common.npwp import COLUMN_THRESHOLD_DESCRIPTION, DOCUMENT_TYPE, column_thresholds_from_json
+from ocr_common.npwp import (
+    COLUMN_THRESHOLD_DESCRIPTION,
+    DOCUMENT_TYPE,
+    GUARDRAILS_THRESHOLD_DESCRIPTION,
+    column_thresholds_from_json,
+    guardrails_threshold_from_json,
+)
 from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
@@ -94,25 +100,6 @@ _CONTRACT_TABLE = (
 )
 
 
-class _InvalidThreshold(Exception):
-    pass
-
-
-def _parse_guardrails_threshold(value: str | None) -> float | None:
-    """`guardrails_confidence_threshold`; None (left out) leaves the guardrails service's own threshold in
-    force. Raises `_InvalidThreshold`."""
-    value = (value or "").strip()
-    if not value:
-        return None
-    try:
-        threshold = float(value)
-    except ValueError:
-        threshold = float("nan")
-    if not 0 < threshold < 1:
-        raise _InvalidThreshold(f"guardrails_confidence_threshold must be a number between 0 and 1, got {value!r}")
-    return threshold
-
-
 # `errors` when calling a pipeline service failed, by the status it failed with.
 STAGE_ERROR_CODES = {
     400: UNREADABLE_FILE,  # guardrails could not read the file (the type and size were checked here)
@@ -177,13 +164,15 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
         "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
         "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`.\n\n"
         "**Thresholds from the central orchestrator, per request, all optional.** "
-        "`guardrails_confidence_threshold` (a page passes when the model's accepted probability reaches it, and "
-        "is rejected below it) replaces the guardrails threshold for this document; left out, the guardrails "
-        "service's own is used (`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the model's 0.5). "
-        '`column_confidence_threshold` (`{"nomor_npwp": 0.9, "nama": 0.5}`) sets, per field, the trust '
+        '`guardrails_confidence_threshold` (`{"acc_rej": 0.8}`, keyed by guardrails name; this pipeline has one, '
+        "`acc_rej`: a page passes when the model's accepted probability reaches it, and is rejected below it) "
+        "replaces the guardrails threshold for this document; left out, the guardrails service's own is used "
+        "(`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the model's 0.5). "
+        '`column_confidence_threshold` (`{"all_field": 0.8}` for every field, or per field '
+        '`{"nomor_npwp": 0.9, "nama": 0.5}`, a field\'s own key winning over `all_field`) sets the trust '
         "probability for `confidence: 1`, always on the accept side; a field it leaves out, or the whole field "
-        "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read answers `422` "
-        f"`{INVALID_THRESHOLD_CODE}` and nothing runs.\n\n"
+        "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read, or an unknown key "
+        f"in either, answers `422` `{INVALID_THRESHOLD_CODE}` and nothing runs.\n\n"
         "**Rejected by the structuring rules**: the ML team's rules reject a document that is blurred or blank, "
         "not in the standard NPWP format, another document or bundled with one, a screenshot of the online NPWP "
         "lookup, longer than the page limit, or whose number carries an invalid birthdate, province, kecamatan "
@@ -301,17 +290,13 @@ async def extract_ocr(
     ),
     guardrails_confidence_threshold: str | None = Form(
         None,
-        description=(
-            "Guardrails threshold for this document, between 0 and 1 (exclusive), on the model's accepted "
-            "probability: a page passes when it reaches the threshold, and is rejected below it. "
-            "Omitted: the guardrails service's own threshold"
-        ),
-        examples=["0.3"],
+        description=f"{GUARDRAILS_THRESHOLD_DESCRIPTION}. A JSON object string",
+        examples=['{"acc_rej": 0.8}'],
     ),
     column_confidence_threshold: str | None = Form(
         None,
         description=f"{COLUMN_THRESHOLD_DESCRIPTION}. A JSON object string",
-        examples=['{"nomor_npwp": 0.9, "nama": 0.5}'],
+        examples=['{"all_field": 0.8}', '{"nomor_npwp": 0.9, "nama": 0.5}'],
     ),
     service: ExtractOcrService = Depends(get_extract_service),
     settings: Settings = Depends(get_settings),
@@ -338,12 +323,9 @@ async def extract_ocr(
             pipeline_last_stage=ENTRY,
         )
     try:
-        guardrails_threshold = _parse_guardrails_threshold(guardrails_confidence_threshold)
-        try:
-            column_thresholds = column_thresholds_from_json(column_confidence_threshold)
-        except ValueError as exc:
-            raise _InvalidThreshold(str(exc)) from exc
-    except _InvalidThreshold as exc:
+        guardrails_threshold = guardrails_threshold_from_json(guardrails_confidence_threshold)
+        column_thresholds = column_thresholds_from_json(column_confidence_threshold)
+    except ValueError as exc:
         response.status_code = 422
         return extract_body(
             422,
