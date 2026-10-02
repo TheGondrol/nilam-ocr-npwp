@@ -5,9 +5,8 @@ Per page: the NPWP-shaped lines inside the card region compete on `npwp_priority
 15, then OCR score); the name is the nearest name-shaped line to the number (`extract_name`). Per
 document: the first page with a number / name wins, and every check the rules provide raises the
 document flag (`flag`, `flag_reason`), a feature of the trust model. Nine of the eleven checks also
-reject the document (`reject_reason`, see `TOLERATED`). Digit-homoglyph correction is switched off by the ML team
-(`normalize_npwp_raw`: a misread letter is dropped, the flag says so), so a number can come back
-shorter than 15 digits; the trust model then gives it a low confidence."""
+reject the document (`reject_reason`, see `TOLERATED`). Digit-homoglyph correction is switched off: a number
+with a misread letter is flagged (tolerated) and its `nomor_npwp` value is null, never a corrected or shortened number."""
 
 from typing import Any
 
@@ -136,6 +135,10 @@ def _process_page(page: dict[str, Any]) -> dict[str, Any]:
     candidates = in_region or texts
     best = max(candidates, key=lambda t: rules.npwp_priority(str(t["text"]), float(t["score"])), default=None)
     raw = best["raw"] if best else ""
+    has_homoglyph = bool(best) and (rules.contains_digit_homoglyph(raw) or _lost_a_character(best["text"], raw))
+    # The has_invalid_* checks read the number through the homoglyph translation, which is no longer
+    # applied: a number with a misread letter is not reported at all, so they give no signal for it.
+    checkable = bool(best) and not has_homoglyph
 
     return {
         "npwp": best["text"] if best else None,
@@ -143,11 +146,11 @@ def _process_page(page: dict[str, Any]) -> dict[str, Any]:
         "npwp_score": float(best["score"]) if best else None,
         "npwp_source": best["line"] if best else None,
         "npwp_candidate_count": len(candidates),
-        "has_homoglyph": bool(best) and (rules.contains_digit_homoglyph(raw) or _lost_a_character(best["text"], raw)),
-        "invalid_province_prefix": bool(best) and rules.has_invalid_province_prefix(raw),
-        "invalid_kecamatan_prefix": bool(best) and rules.has_invalid_kecamatan_prefix(raw),
-        "invalid_birthdate": bool(best) and rules.has_invalid_birthdate_digits(raw),
-        "invalid_kpp_prefix": bool(best) and rules.has_invalid_kpp_prefix(raw),
+        "has_homoglyph": has_homoglyph,
+        "invalid_province_prefix": checkable and rules.has_invalid_province_prefix(raw),
+        "invalid_kecamatan_prefix": checkable and rules.has_invalid_kecamatan_prefix(raw),
+        "invalid_birthdate": checkable and rules.has_invalid_birthdate_digits(raw),
+        "invalid_kpp_prefix": checkable and rules.has_invalid_kpp_prefix(raw),
         "name": name_match[0] if name_match else None,
         "name_score": float(name_match[1]) if name_match and name_match[1] is not None else None,
         "name_base": name_match_base[0] if name_match_base else None,
@@ -219,9 +222,11 @@ class NpwpRulesStructurer:
 
         fields: dict[str, StructuredField] = {}
         if number is not None:
+            # A number with a misread letter is not guessed at: the field is null (the reviewer reads the
+            # source line) and, like any missing value, has no confidence.
             fields["nomor_npwp"] = {
-                "value": number["npwp"],
-                "confidence": round(number["npwp_score"], 4),
+                "value": None if number["has_homoglyph"] else number["npwp"],
+                "confidence": 0.0 if number["has_homoglyph"] else round(number["npwp_score"], 4),
                 "source": number["npwp_source"],
                 "signals": {"candidate_count": candidate_count, **number_signals},
             }
