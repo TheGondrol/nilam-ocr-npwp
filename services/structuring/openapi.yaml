@@ -4,7 +4,8 @@ info:
   description: 'Pipeline step 3 for Indonesian NPWP documents: turns raw OCR text lines into named fields
     (nomor_npwp, nama, nama_badan) with per-field confidence. **Async pipeline:** the OCR service POSTs
     /v1/structuring/jobs and gets 202; this service structures in the background, stores the result, POSTs
-    a stage callback to the orchestrator, and hands the job to the scoring service. All endpoints except
+    a stage callback to the orchestrator, and hands the job to the scoring service. /v1/structuring-direct
+    runs the same rules on an OCR result synchronously, for testing this stage alone. All endpoints except
     /health require an X-API-Key header.
 
 
@@ -542,6 +543,140 @@ paths:
                 pipeline_last_stage: structuring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/structuring-direct:
+    post:
+      tags:
+      - Direct
+      summary: Structure an OCR result now, synchronous (no job, no callback, no hand-off)
+      description: '**For testing one stage on its own (QC).** Takes the output of the previous stage,
+        the extraction service''s OCR result (`data` of its `POST /v1/extraction/extract`, or the `result`
+        of its job), runs the same structuring rules the pipeline runs, and answers with the structured
+        document in the body. Nothing is recorded: no `structuring_jobs` row, no callback, no hand-off
+        to scoring, so it never touches the orchestrator''s data.
+
+
+        The answer is exactly what `GET /v1/structuring/jobs/{request_id}` reports as `result`, and what
+        the scoring stage receives as `structuring`: paste it into `POST /v1/scoring-direct` to test the
+        next stage. Always 200 when the rules ran, also for a document they reject: read `reject_reason`
+        (in the pipeline that rejection fails the job and gives the client a 400). OCR output without
+        a single non-empty line is 400.'
+      operationId: structureDirect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StructuringDirectRequest'
+        required: true
+      responses:
+        '200':
+          description: The OCR result was structured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StructuringDirectResponse'
+              examples:
+                accepted:
+                  summary: An NPWP card
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      document_type: npwp
+                      fields:
+                        nomor_npwp:
+                          value: 12.345.678.9-012.345
+                          confidence: 0.9992
+                          source: 'NPWP : 12.345.678.9-012.345'
+                          signals:
+                            candidate_count: 1
+                            has_homoglyph: false
+                            invalid_province_prefix: false
+                            invalid_kecamatan_prefix: false
+                            invalid_birthdate: false
+                            invalid_kpp_prefix: false
+                        nama:
+                          value: BUDI SANTOSO
+                          confidence: 0.9773
+                          source: BUDI SANTOSO
+                          signals:
+                            name_base: BUDI SANTOSO
+                            corrected: false
+                        nama_badan:
+                          confidence: 0.0
+                      flag: false
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+                rejected:
+                  summary: 'A document the rules reject: `reject_reason` says why'
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      document_type: npwp
+                      fields:
+                        nomor_npwp:
+                          value: 12.345.678.9-012.345
+                          confidence: 0.9992
+                          source: 'NPWP : 12.345.678.9-012.345'
+                          signals:
+                            candidate_count: 1
+                            has_homoglyph: false
+                            invalid_province_prefix: false
+                            invalid_kecamatan_prefix: false
+                            invalid_birthdate: false
+                            invalid_kpp_prefix: false
+                        nama:
+                          value: BUDI SANTOSO
+                          confidence: 0.9773
+                          source: BUDI SANTOSO
+                          signals:
+                            name_base: BUDI SANTOSO
+                            corrected: false
+                        nama_badan:
+                          confidence: 0.0
+                      flag: true
+                      flag_reason: Dokumen bukan NPWP, mohon unggah kartu NPWP
+                      reject_reason: Dokumen bukan NPWP, mohon unggah kartu NPWP
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '400':
+          description: No text lines to structure, or an unsupported `document_type`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: No text lines to structure
+                errors: BAD_REQUEST
+                pipeline_last_stage: structuring
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: UNAUTHORIZED
+                pipeline_last_stage: structuring
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.ocr: Field required'
+                errors: VALIDATION_ERROR
+                pipeline_last_stage: structuring
+      security:
+      - APIKeyHeader: []
 webhooks:
   stageCallback:
     post:
@@ -1424,6 +1559,75 @@ components:
       required:
       - confidence
       title: StructuredField
+    StructuringDirectRequest:
+      properties:
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Echoed in the response; optional, nothing is recorded under it
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Only `npwp` is supported; anything else is 400
+          default: npwp
+          examples:
+          - npwp
+        ocr:
+          $ref: '#/components/schemas/OcrPayload'
+          description: 'The extraction service''s output: `data` of its `POST /v1/extraction/extract`,
+            or the `result` of `GET /v1/extraction/jobs/{request_id}`. Only `blocks` is read'
+      type: object
+      required:
+      - ocr
+      title: StructuringDirectRequest
+      description: '`POST /v1/structuring-direct`: the previous stage''s output, nothing of the pipeline
+        run.'
+    StructuringDirectResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/StructuredDocument'
+      type: object
+      required:
+      - data
+      title: StructuringDirectResponse
     StructuringJobRequest:
       properties:
         request_id:
@@ -1627,5 +1831,7 @@ tags:
   description: 'Asynchronous pipeline stage: 202, background work, callback, hand-off'
 - name: Callbacks
   description: Requests this service SENDS to the orchestrator (see Webhooks)
+- name: Direct
+  description: 'This stage alone on the previous stage''s output, synchronous: nothing recorded (QC)'
 - name: Health
   description: Health and readiness checks; no API key

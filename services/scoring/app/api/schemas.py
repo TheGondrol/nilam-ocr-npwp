@@ -153,3 +153,49 @@ class ScoringJobStatus(JobStatusBase):
 
 class ScoringJobStatusResponse(SuccessEnvelope):
     data: ScoringJobStatus
+
+
+class ScoringDirectRequest(BaseModel):
+    """`POST /v1/scoring-direct`: the previous stages' outputs, nothing of the pipeline run."""
+
+    request_id: str | None = Field(
+        None,
+        description="Echoed in the response; optional, nothing is recorded under it",
+        examples=[REQUEST_ID_EXAMPLE],
+    )
+    document_type: str = Field("npwp", description="Only `npwp` is supported; anything else is 400", examples=["npwp"])
+    guardrails: GuardrailsResult | None = Field(
+        None,
+        description=(
+            "The guardrails report (`data` of `POST /v1/guardrails/check`): `document.confidence` of an accepted "
+            "document is the model's `guardrail_probability`. Left out: null, filled by the model's imputer"
+        ),
+    )
+    ocr: OcrPayload | None = Field(
+        None,
+        description=(
+            "The extraction service's output (`data` of `POST /v1/extraction/extract`): `avg_doc_score` / "
+            "`min_doc_score` are computed from its `blocks`. Left out: null, filled by the model's imputer"
+        ),
+    )
+    structuring: StructuringPayload = Field(
+        ...,
+        description=(
+            "The structuring service's output: `data` of `POST /v1/structuring-direct`, or the `result` of "
+            "`GET /v1/structuring/jobs/{request_id}`"
+        ),
+    )
+    column_confidence_threshold: dict[str, float] | None = Field(
+        None,
+        description=f"{COLUMN_THRESHOLD_DESCRIPTION}. Decides the 0/1 `confidence` of `fields` in the answer",
+        examples=[{"all_field": 0.8}, {"nomor_npwp": 0.9, "nama": 0.5}],
+    )
+
+    @field_validator("column_confidence_threshold")
+    @classmethod
+    def _known_fields(cls, value: dict[str, float] | None) -> dict[str, float] | None:
+        return parse_column_thresholds(value)
+
+
+class ScoringDirectResponse(SuccessEnvelope):
+    data: ScoringJobResult

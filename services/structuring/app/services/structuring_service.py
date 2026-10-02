@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from typing import Any
+
 from ocr_common.errors import BadRequest
 from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.types import OcrBlock, StructuringResult
@@ -10,6 +13,19 @@ class StructuringService:
 
     def __init__(self, structurer: Structurer):
         self._structurer = structurer
+
+    @staticmethod
+    def lines_from_ocr(ocr: Mapping[str, Any]) -> list[OcrBlock]:
+        """The OCR stage's result (`blocks`) as the lines the structurer reads, defaults filled in."""
+        return [
+            {
+                "text": block.get("text") or "",
+                "confidence": block.get("confidence", 1.0),
+                "bbox": block.get("bbox"),
+                "page": block.get("page", 0),
+            }
+            for block in ocr.get("blocks") or []
+        ]
 
     def structure(self, lines: list[OcrBlock]) -> StructuringResult:
         cleaned = [line for line in lines if (line.get("text") or "").strip()]

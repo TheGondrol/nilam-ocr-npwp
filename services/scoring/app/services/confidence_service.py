@@ -1,7 +1,10 @@
 import re
+from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.types import FieldConfidences
+from ocr_common.errors import BadRequest
+from ocr_common.npwp import DOCUMENT_TYPE, final_result, scored_fields
+from ocr_common.types import FieldConfidences, ScoringResult
 
 from app.ml.trust_model import TrustModel
 
@@ -18,6 +21,35 @@ class ConfidenceService:
 
     def predict(self, payload: dict[str, Any]) -> FieldConfidences:
         return self._model.predict(payload)
+
+    def score(
+        self,
+        document_type: str,
+        guardrails: dict[str, Any] | None,
+        ocr: dict[str, Any] | None,
+        structuring: dict[str, Any],
+        threshold: float,
+        column_thresholds: Mapping[str, float] | None = None,
+    ) -> ScoringResult:
+        """The scoring stage's result for the chained stage results: the ML team's payload built from them,
+        the trust model's two probabilities, and the 0/1 decision per field with the threshold that decided
+        it (the field's `column_thresholds` entry, else `threshold`). The same for a job and for
+        `/v1/scoring-direct`."""
+        if document_type != DOCUMENT_TYPE:
+            raise BadRequest(f"Unsupported document_type: {document_type}. Supported: ['{DOCUMENT_TYPE}']")
+        payload = self.payload_from_chain(guardrails, ocr, structuring)
+        result = self.predict(payload)
+        npwp, name = result["npwp_confidence"], result["name_confidence"]
+        # The 0/1 decision is stored with the probabilities: which field passed, with which threshold.
+        decided = final_result(
+            document_type, guardrails, structuring, {"npwp_confidence": npwp, "name_confidence": name}
+        )
+        return {
+            "npwp_confidence": npwp,
+            "name_confidence": name,
+            "fields": scored_fields(decided, threshold, column_thresholds),
+            "payload": payload,
+        }
 
     @staticmethod
     def payload_from_chain(

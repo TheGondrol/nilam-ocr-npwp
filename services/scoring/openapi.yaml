@@ -4,8 +4,10 @@ info:
   description: 'Pipeline step 4 (last) for Indonesian NPWP documents: the ML team''s trust model gives
     each extracted field (nomor_npwp, nama) the probability that it is correct. **Async pipeline:** the
     structuring service POSTs /v1/scoring/jobs and gets 202; this service scores in the background, stores
-    the result, and POSTs the stage callback carrying the final result to the orchestrator. /v1/scoring/confidence
-    runs the trust model alone, synchronous. All endpoints except /health require an X-API-Key header.
+    the result, and POSTs the stage callback carrying the final result to the orchestrator. /v1/scoring-direct
+    scores a structuring result synchronously, for testing this stage alone; /v1/scoring/confidence runs
+    the trust model alone on the ML team''s payload. All endpoints except /health require an X-API-Key
+    header.
 
 
     ## Conventions (the same for every nilam-ocr service)
@@ -542,6 +544,106 @@ paths:
                 pipeline_last_stage: scoring
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/scoring-direct:
+    post:
+      tags:
+      - Direct
+      summary: Score a structured document now, synchronous (no job, no callback)
+      description: '**For testing one stage on its own (QC).** Takes the output of the previous stages,
+        the structuring result (`data` of `POST /v1/structuring-direct`, or the `result` of a structuring
+        job) and, like the pipeline, the OCR result and the guardrails report it depends on, builds the
+        ML team''s scoring payload from them, runs the trust model, and answers with the scoring result
+        in the body. Nothing is recorded: no `scoring_jobs` row, no callback, no outcome row, so it never
+        touches the orchestrator''s data.
+
+
+        The answer is exactly what `GET /v1/scoring/jobs/{request_id}` reports as `result`: the two probabilities,
+        the 0/1 decision per field with the threshold used (`column_confidence_threshold` of the request,
+        else `FIELD_CONFIDENCE_THRESHOLD`), and the exact payload that was scored. `ocr` left out gives
+        null document scores, `guardrails` left out gives a null guardrails probability; the model''s
+        imputer fills both.'
+      operationId: scoreDirect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringDirectRequest'
+        required: true
+      responses:
+        '200':
+          description: The structured document was scored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringDirectResponse'
+              examples:
+                scored:
+                  summary: Both fields present
+                  value:
+                    status_code: 200
+                    status_desc: OK
+                    message: Success
+                    data:
+                      npwp_confidence: 0.9806
+                      name_confidence: 0.9948
+                      fields:
+                        nomor_npwp:
+                          value: 12.345.678.9-012.000
+                          confidence: 1
+                          threshold: 0.9
+                        nama:
+                          value: PT CONTOH INDONESIA
+                          confidence: 1
+                          threshold: 0.5
+                      payload:
+                        npwp: 12.345.678.9-012.000
+                        npwp_score: 0.98
+                        npwp_candidate_count: 1
+                        name_base: PT CONTOH INDONESIA
+                        name_score: 0.95
+                        avg_doc_score: 0.91
+                        min_doc_score: 0.62
+                        flag: false
+                        guardrail_probability: 0.98
+                    request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        '400':
+          description: An unsupported `document_type`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 400
+                status_desc: Bad Request
+                message: 'Unsupported document_type: ktp. Supported: [''npwp'']'
+                errors: BAD_REQUEST
+                pipeline_last_stage: scoring
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 401
+                status_desc: Unauthorized
+                message: Invalid or missing API key
+                errors: UNAUTHORIZED
+                pipeline_last_stage: scoring
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status_code: 422
+                status_desc: Unprocessable Entity
+                message: 'body.structuring: Field required'
+                errors: VALIDATION_ERROR
+                pipeline_last_stage: scoring
+      security:
+      - APIKeyHeader: []
   /v1/scoring/confidence:
     post:
       tags:
@@ -1609,6 +1711,104 @@ components:
       - confidence
       - threshold
       title: ScoredField
+    ScoringDirectRequest:
+      properties:
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Echoed in the response; optional, nothing is recorded under it
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        document_type:
+          type: string
+          title: Document Type
+          description: Only `npwp` is supported; anything else is 400
+          default: npwp
+          examples:
+          - npwp
+        guardrails:
+          anyOf:
+          - $ref: '#/components/schemas/GuardrailsResult'
+          - type: 'null'
+          description: 'The guardrails report (`data` of `POST /v1/guardrails/check`): `document.confidence`
+            of an accepted document is the model''s `guardrail_probability`. Left out: null, filled by
+            the model''s imputer'
+        ocr:
+          anyOf:
+          - $ref: '#/components/schemas/OcrPayload'
+          - type: 'null'
+          description: 'The extraction service''s output (`data` of `POST /v1/extraction/extract`): `avg_doc_score`
+            / `min_doc_score` are computed from its `blocks`. Left out: null, filled by the model''s imputer'
+        structuring:
+          $ref: '#/components/schemas/StructuringPayload'
+          description: 'The structuring service''s output: `data` of `POST /v1/structuring-direct`, or
+            the `result` of `GET /v1/structuring/jobs/{request_id}`'
+        column_confidence_threshold:
+          anyOf:
+          - additionalProperties:
+              type: number
+            type: object
+          - type: 'null'
+          title: Column Confidence Threshold
+          description: 'Per field, from the central orchestrator: the trust model''s probability that
+            the field''s value is correct must reach it for the field''s `confidence` to be `1` (else
+            `0`), always on the accept side. Keys: `all_field` (every field), `nomor_npwp`, `nama`; a
+            field''s own key wins over `all_field`, and a field left out (or the whole map omitted) uses
+            `FIELD_CONFIDENCE_THRESHOLD`. Decides the 0/1 `confidence` of `fields` in the answer'
+          examples:
+          - all_field: 0.8
+          - nama: 0.5
+            nomor_npwp: 0.9
+      type: object
+      required:
+      - structuring
+      title: ScoringDirectRequest
+      description: '`POST /v1/scoring-direct`: the previous stages'' outputs, nothing of the pipeline
+        run.'
+    ScoringDirectResponse:
+      properties:
+        status_code:
+          type: integer
+          title: Status Code
+          description: Same as the HTTP status code
+          default: 200
+          examples:
+          - 200
+        status_desc:
+          type: string
+          title: Status Desc
+          description: Reason phrase of `status_code`
+          default: OK
+          examples:
+          - OK
+        message:
+          type: string
+          title: Message
+          description: Human-readable outcome
+          default: Success
+          examples:
+          - Success
+        errors:
+          type: 'null'
+          title: Errors
+          description: Always null on success
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: 'The request_id this response belongs to: the one sent in the form / body / path,
+            otherwise the `X-Request-ID` header, otherwise one generated by the service'
+          examples:
+          - REQ_9cb01af2-493d-446d-b191-af120333f6d0
+        data:
+          $ref: '#/components/schemas/ScoringJobResult'
+      type: object
+      required:
+      - data
+      title: ScoringDirectResponse
     ScoringJobRequest:
       properties:
         request_id:
@@ -2023,6 +2223,8 @@ tags:
   description: 'Asynchronous pipeline stage: 202, background work, callback'
 - name: Callbacks
   description: Requests this service SENDS to the orchestrator (see Webhooks)
+- name: Direct
+  description: 'This stage alone on the previous stages'' outputs, synchronous: nothing recorded (QC)'
 - name: Scoring
   description: The trust model on one payload, synchronous (debugging)
 - name: Health

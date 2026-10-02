@@ -3,8 +3,8 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
-from ocr_common.errors import BadRequest, UnprocessableEntity
-from ocr_common.npwp import DOCUMENT_TYPE, contract_data, contract_fields, final_result, scored_fields
+from ocr_common.errors import UnprocessableEntity
+from ocr_common.npwp import DOCUMENT_TYPE, contract_data, contract_fields, final_result
 from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import ContractData, FinalResult, ScoringResult
@@ -108,8 +108,6 @@ class ScoringJobService:
         chain: dict[str, Any] = {}
 
         async def work() -> ScoringResult:
-            if document_type != DOCUMENT_TYPE:
-                raise BadRequest(f"Unsupported document_type: {document_type}. Supported: ['{DOCUMENT_TYPE}']")
             chain["structuring"] = (
                 structuring
                 if structuring is not None
@@ -118,22 +116,15 @@ class ScoringJobService:
             ocr_result = ocr
             if ocr_result is None and self._results is not None:
                 ocr_result = await self._results.get("ocr", request_id)
-            payload = self._confidence.payload_from_chain(guardrails, ocr_result, chain["structuring"])
-            result = await run_in_threadpool(self._confidence.predict, payload)
-            npwp, name = result["npwp_confidence"], result["name_confidence"]
-            # The 0/1 decision is stored with the probabilities: which field passed, with which threshold.
-            decided = final_result(
+            return await run_in_threadpool(
+                self._confidence.score,
                 document_type,
                 guardrails,
+                ocr_result,
                 chain["structuring"],
-                {"npwp_confidence": npwp, "name_confidence": name},
+                self._confidence_threshold,
+                column_thresholds,
             )
-            return {
-                "npwp_confidence": npwp,
-                "name_confidence": name,
-                "fields": scored_fields(decided, self._confidence_threshold, column_thresholds),
-                "payload": payload,
-            }
 
         def final(scoring: Mapping[str, Any]) -> FinalResult:
             return final_result(document_type, guardrails, chain["structuring"], scoring)

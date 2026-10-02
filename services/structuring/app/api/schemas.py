@@ -133,3 +133,25 @@ class StructuringJobStatus(JobStatusBase):
 
 class StructuringJobStatusResponse(SuccessEnvelope):
     data: StructuringJobStatus
+
+
+class StructuringDirectRequest(BaseModel):
+    """`POST /v1/structuring-direct`: the previous stage's output, nothing of the pipeline run."""
+
+    request_id: str | None = Field(
+        None,
+        description="Echoed in the response; optional, nothing is recorded under it",
+        examples=[REQUEST_ID_EXAMPLE],
+    )
+    document_type: str = Field("npwp", description="Only `npwp` is supported; anything else is 400", examples=["npwp"])
+    ocr: OcrPayload = Field(
+        ...,
+        description=(
+            "The extraction service's output: `data` of its `POST /v1/extraction/extract`, or the `result` of "
+            "`GET /v1/extraction/jobs/{request_id}`. Only `blocks` is read"
+        ),
+    )
+
+
+class StructuringDirectResponse(SuccessEnvelope):
+    data: StructuredDocument

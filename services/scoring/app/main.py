@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from ocr_common.pipeline.schemas import ScoringStageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import jobs, scoring, testing
+from app.api import direct, jobs, scoring, testing
 from app.config import get_settings
 from app.dependencies import (
     get_pipeline,
@@ -64,15 +64,20 @@ app = create_app(
         "field (nomor_npwp, nama) the probability that it is correct. "
         "**Async pipeline:** the structuring service POSTs /v1/scoring/jobs and gets 202; this service "
         "scores in the background, stores the result, and POSTs the stage callback carrying the final "
-        "result to the orchestrator. /v1/scoring/confidence runs the trust model alone, synchronous. "
+        "result to the orchestrator. /v1/scoring-direct scores a structuring result synchronously, for testing "
+        "this stage alone; /v1/scoring/confidence runs the trust model alone on the ML team's payload. "
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
         {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback"},
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
+        {
+            "name": "Direct",
+            "description": "This stage alone on the previous stages' outputs, synchronous: nothing recorded (QC)",
+        },
         {"name": "Scoring", "description": "The trust model on one payload, synchronous (debugging)"},
     ],
-    routers=[jobs.router, scoring.router, *([testing.router] if settings.testing_endpoints else [])],
+    routers=[jobs.router, direct.router, scoring.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "scoring": "trust_model",
         "storage": "postgres" if settings.database_url else "memory",

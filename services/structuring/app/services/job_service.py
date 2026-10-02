@@ -7,7 +7,7 @@ from ocr_common.errors import UnprocessableEntity
 from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.pipeline import STRUCTURING, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
-from ocr_common.types import OcrBlock, StructuringResult
+from ocr_common.types import StructuringResult
 
 from app.services.structuring_service import StructuringService
 
@@ -94,15 +94,7 @@ class StructuringJobService:
 
         async def work() -> StructuringResult:
             upstream["ocr"] = ocr if ocr is not None else await load_upstream(self._results, "ocr", request_id)
-            lines: list[OcrBlock] = [
-                {
-                    "text": block.get("text") or "",
-                    "confidence": block.get("confidence", 1.0),
-                    "bbox": block.get("bbox"),
-                    "page": block.get("page", 0),
-                }
-                for block in upstream["ocr"].get("blocks") or []
-            ]
+            lines = StructuringService.lines_from_ocr(upstream["ocr"])
             return await run_in_threadpool(self._structuring.structure, lines)
 
         def handoff(structuring: Mapping[str, Any]) -> dict[str, Any]:

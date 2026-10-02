@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from ocr_common.pipeline.schemas import StageCallback
 from ocr_common.web.app import add_stage_callback_webhook, create_app, database_readiness
 
-from app.api import jobs, testing
+from app.api import direct, jobs, testing
 from app.config import get_settings
 from app.dependencies import (
     get_next_stage,
@@ -70,13 +70,18 @@ app = create_app(
         "**Async pipeline:** the OCR service POSTs /v1/structuring/jobs and gets 202; this service "
         "structures in the background, stores the result, POSTs a stage callback to the orchestrator, and "
         "hands the job to the scoring service. "
+        "/v1/structuring-direct runs the same rules on an OCR result synchronously, for testing this stage alone. "
         "All endpoints except /health require an X-API-Key header."
     ),
     tags=[
         {"name": "Pipeline", "description": "Asynchronous pipeline stage: 202, background work, callback, hand-off"},
         {"name": "Callbacks", "description": "Requests this service SENDS to the orchestrator (see Webhooks)"},
+        {
+            "name": "Direct",
+            "description": "This stage alone on the previous stage's output, synchronous: nothing recorded (QC)",
+        },
     ],
-    routers=[jobs.router, *([testing.router] if settings.testing_endpoints else [])],
+    routers=[jobs.router, direct.router, *([testing.router] if settings.testing_endpoints else [])],
     backends={
         "structuring": settings.structuring_backend,
         "storage": "postgres" if settings.database_url else "memory",
