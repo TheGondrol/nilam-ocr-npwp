@@ -2,7 +2,7 @@
 
 UI React + backend kecil yang memerankan Orkestrasi pusat: upload foto -> orchestrator
 `/v1/extract-ocr` (menunggu maks. `PIPELINE_WAIT_SECONDS`) -> tiap tahap, tiap baris
-`pipeline_outbox`, dan tiap callback tampil live di browser, dengan timeline `t+…`.
+`nilam_pipeline_outbox`, dan tiap callback tampil live di browser, dengan timeline `t+…`.
 Event lewat Redis Streams (`ocr:events:<request_id>`), UI menerimanya lewat SSE.
 Ikut repo sebagai alat uji coba, bukan bagian dari yang di-deploy; `.env`-nya dibuat dari `.env.example`.
 
@@ -13,10 +13,10 @@ Untuk satu request, dari kiri ke kanan di layar:
 1. **Jawaban orchestrator**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
    202 `processing` (batas tunggu habis, hasil menyusul lewat callback), 422 (tahap gagal),
    400 (ditolak guardrails), plus lamanya dibanding batas tunggu.
-2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `<tahap>_jobs` DONE,
+2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `nilam_<tahap>_jobs` DONE,
    dibaca langsung dari PostgreSQL) dan *orkestrasi tahu* (callback diterima tracker, attempt ke-n).
    Selisih keduanya adalah tempat outbox bekerja.
-3. **Tabel `pipeline_outbox` request itu**: tiap baris (handoff / callback) dengan status
+3. **Tabel `nilam_pipeline_outbox` request itu**: tiap baris (handoff / callback) dengan status
    QUEUED -> CLAIMED -> DELIVERED, atau RETRY (5xx) dan DEAD (4xx / lewat umur), attempt,
    `last_error`, dan riwayat waktunya. Tombol *Lepaskan dead letter* menjalankan
    `UPDATE pipeline_outbox SET failed_at = NULL, next_attempt_at = now()`.
@@ -61,7 +61,7 @@ per request, dengan `X-Callback-Key`). Tracker menerima keduanya; untuk latihan 
 Menu **Skenario gangguan** menjalankan daftar "shit happens" secara otomatis di stack lokal: tiap skenario
 mengirim dokumen sungguhan lewat orchestrator, membuat gangguannya pada saat yang tepat (container di-`docker stop`
 = SIGTERM seperti rolling restart, `docker kill` = SIGKILL seperti OOM, Postgres dimatikan, atau cara tracker menjawab
-callback), lalu memeriksa tabel job, `pipeline_outbox`, dan callback. Hasilnya per cek: **PASS** (sesuai harapan),
+callback), lalu memeriksa tabel job, `nilam_pipeline_outbox`, dan callback. Hasilnya per cek: **PASS** (sesuai harapan),
 **WARN** (perilaku benar, tapi tim / Orkestrasi pusat harus tahu), **FAIL** (perbaiki sebelum go-live). Tiap
 request skenario bisa dibuka di menu Pipeline; gangguannya tercatat di timeline-nya. Kodenya di
 [backend/chaos.py](backend/chaos.py).

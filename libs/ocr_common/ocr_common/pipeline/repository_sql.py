@@ -1,4 +1,4 @@
-"""`JobRepository` on PostgreSQL (`<prefix>_jobs`, `<prefix>_results`), with the outcome row and the
+"""`JobRepository` on PostgreSQL (`nilam_<prefix>_jobs`, `nilam_<prefix>_results`), with the outcome row and the
 outbox written in the job's transaction.
 """
 

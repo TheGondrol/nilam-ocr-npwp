@@ -192,7 +192,7 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
         "The rest of the body is the same. The structuring rules still reject when `structuring` runs. Leaving "
         "`guardrails` out is the central orchestrator's call: the file checks above always run, and the trust "
         "model then works without a guardrails probability. A `guardrails`-only request runs no stage: its "
-        "verdict is kept in `guardrails_results`, and `GET /v1/extract-ocr/{request_id}` answers from it.\n\n"
+        "verdict is kept in `nilam_guardrails_results`, and `GET /v1/extract-ocr/{request_id}` answers from it.\n\n"
         "On 202 the result arrives by callback (sent by the pipeline stages), and can be read with "
         "`GET /v1/extract-ocr/{request_id}`. Give this call an HTTP timeout well above `PIPELINE_WAIT_SECONDS` "
         "(e.g. +15 s) to cover a slow guardrails check or hand-off.\n\n"
@@ -379,7 +379,7 @@ async def extract_ocr(
         + _CONTRACT_TABLE
         + "Use it for a request that was answered `202`, e.g. when a callback did not arrive.\n\n"
         "A request no stage has a job for is answered from its last guardrails verdict "
-        "(`guardrails_results`), as its POST was: `400` `DOWNSTREAM_VALIDATION_ERROR` with `guardrails: 1` when "
+        "(`nilam_guardrails_results`), as its POST was: `400` `DOWNSTREAM_VALIDATION_ERROR` with `guardrails: 1` when "
         "the guardrails model rejected it, `200` with the guardrails report as `data` when `guardrails` was its "
         "only service.\n\n"
         "**404** means neither: no stage has a job and no guardrails verdict is kept for this request_id. It was "

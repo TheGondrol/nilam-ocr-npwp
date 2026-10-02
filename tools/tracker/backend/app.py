@@ -23,7 +23,7 @@ Setiap event punya `type`:
     http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya, plus pipeline_last_stage
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED; GUARDRAILS SKIPPED kalau tidak ada di
               sequence), `source`: db | callback. Request berakhir di tahap terakhir sequence-nya
-    outbox    baris pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
+    outbox    baris nilam_pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n, jawaban tracker, dan duplicate
     chaos     gangguan yang terjadi selama request hidup (container di-stop / di-kill / dinyalakan, DB tak terbaca)
     pipeline  END: tidak ada lagi yang akan terjadi untuk request ini
@@ -84,7 +84,8 @@ SERVICES = {
     "SCORING": os.environ.get("SCORING_URL", "http://127.0.0.1:8033"),
 }
 PREFIXES = {"OCR": "extraction", "STRUCTURING": "structuring", "SCORING": "scoring"}
-TABLES = {"OCR": "ocr", "STRUCTURING": "structuring", "SCORING": "scoring"}
+# Awalan tabel tiap tahap (`nilam_ocr_jobs`, ...; migrasi 0013).
+TABLES = {"OCR": "nilam_ocr", "STRUCTURING": "nilam_structuring", "SCORING": "nilam_scoring"}
 JOB_PATHS = {stage: f"/v1/{prefix}/jobs" for stage, prefix in PREFIXES.items()}
 API_KEY = os.environ.get("API_KEY")  # kosong kalau service dijalankan dengan AUTH_DISABLED=true
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
@@ -250,9 +251,9 @@ async def get_pool():
     try:
         import asyncpg
 
-        # Tabel pipeline ada di schema ocr_pipeline_npwp (migrasi 0011); public tetap dicari untuk tabel orkestrasi.
+        # Tabel pipeline ada di schema nilam_ocr_npwp (migrasi 0013); public tetap dicari untuk tabel orkestrasi.
         pool = await asyncpg.create_pool(
-            DB_URL, min_size=1, max_size=3, timeout=5, server_settings={"search_path": "ocr_pipeline_npwp, public"}
+            DB_URL, min_size=1, max_size=3, timeout=5, server_settings={"search_path": "nilam_ocr_npwp, public"}
         )
         db_error = None
     except Exception as exc:  # noqa: BLE001
@@ -309,7 +310,7 @@ async def guardrails_answered(request_id: str) -> bool:
 
 
 async def watch_db(request_id: str) -> None:
-    """Baca pipeline_outbox dan <tahap>_jobs request ini tiap DB_INTERVAL, pancarkan perubahannya
+    """Baca nilam_pipeline_outbox dan nilam_<tahap>_jobs request ini tiap DB_INTERVAL, pancarkan perubahannya
     sebagai event, dan tutup request (END) ketika tidak ada lagi yang akan terjadi."""
     db = await get_pool()
     if db is None:
@@ -334,7 +335,7 @@ async def watch_db(request_id: str) -> None:
                     )
                 rows = await conn.fetch(
                     "SELECT id, stage, kind, payload, attempts, next_attempt_at, failed_at, last_error, created_at "
-                    "FROM pipeline_outbox WHERE request_id = $1 ORDER BY id",
+                    "FROM nilam_pipeline_outbox WHERE request_id = $1 ORDER BY id",
                     request_id,
                 )
         except Exception as exc:  # noqa: BLE001 - skenario Postgres mati: tunggu sampai terbaca lagi
@@ -843,7 +844,7 @@ async def release(request_id: str):
         raise HTTPException(status_code=503, detail=f"database tidak tersedia: {db_error}")
     async with db.acquire() as conn:
         released = await conn.execute(
-            "UPDATE pipeline_outbox SET failed_at = NULL, next_attempt_at = now(), updated_at = now() "
+            "UPDATE nilam_pipeline_outbox SET failed_at = NULL, next_attempt_at = now(), updated_at = now() "
             "WHERE request_id = $1 AND failed_at IS NOT NULL",
             request_id,
         )

@@ -1,4 +1,4 @@
-"""Keeps every guardrails verdict in `guardrails_results`, the rejected documents included: they never reach a
+"""Keeps every guardrails verdict in `nilam_guardrails_results`, the rejected documents included: they never reach a
 stage table, so without this a rejection left no trace here. The row also keeps the request's
 pipeline_name_sequence, so `GET /v1/extract-ocr/{request_id}` can answer for a request that never reached a
 stage (guardrails only, or rejected by guardrails).

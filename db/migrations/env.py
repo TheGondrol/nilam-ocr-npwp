@@ -9,9 +9,14 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from ocr_common.pipeline.database import PIPELINE_SCHEMA
 from ocr_common.pipeline.tables import repo_metadata
 
-VERSION_TABLE = "ocr_npwp_alembic_version"
-# Where earlier revisions kept the version table, newest first.
-OLD_VERSION_SCHEMAS = ("ocr_pipeline", "public")
+VERSION_TABLE = "nilam_ocr_npwp_alembic_version"
+# Where earlier revisions kept the version table, newest first: up to 0012 in `ocr_pipeline_npwp`, up to 0010 in
+# `ocr_pipeline`, up to 0009 in `public`, all three under the name it had before the `nilam_` prefix.
+OLD_VERSION_TABLES = (
+    ("ocr_pipeline_npwp", "ocr_npwp_alembic_version"),
+    ("ocr_pipeline", "ocr_npwp_alembic_version"),
+    ("public", "ocr_npwp_alembic_version"),
+)
 
 config = context.config
 if config.config_file_name is not None:
@@ -50,14 +55,18 @@ def configure(**kwargs) -> None:
 
 
 def move_version_table(connection) -> None:
-    """The version table lived in `public` up to revision 0009 and in `ocr_pipeline` up to 0010; Alembic now
-    reads it from `PIPELINE_SCHEMA` and would otherwise take such a database for an empty one. Idempotent,
-    committed on its own."""
+    """Earlier revisions kept the version table elsewhere and under another name (`OLD_VERSION_TABLES`); Alembic
+    now reads it as `PIPELINE_SCHEMA.VERSION_TABLE` and would otherwise take such a database for an empty one.
+    Moved and renamed with its primary key, rows kept. Idempotent, committed on its own."""
     connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PIPELINE_SCHEMA}"'))
     if not connection.execute(text(f"SELECT to_regclass('{PIPELINE_SCHEMA}.{VERSION_TABLE}')")).scalar():
-        for old_schema in OLD_VERSION_SCHEMAS:
-            if connection.execute(text(f"SELECT to_regclass('{old_schema}.{VERSION_TABLE}')")).scalar():
-                connection.execute(text(f'ALTER TABLE {old_schema}.{VERSION_TABLE} SET SCHEMA "{PIPELINE_SCHEMA}"'))
+        for old_schema, old_name in OLD_VERSION_TABLES:
+            if connection.execute(text(f"SELECT to_regclass('{old_schema}.{old_name}')")).scalar():
+                connection.execute(text(f'ALTER TABLE "{old_schema}"."{old_name}" SET SCHEMA "{PIPELINE_SCHEMA}"'))
+                connection.execute(text(f'ALTER TABLE "{PIPELINE_SCHEMA}"."{old_name}" RENAME TO "{VERSION_TABLE}"'))
+                connection.execute(
+                    text(f'ALTER INDEX IF EXISTS "{PIPELINE_SCHEMA}"."{old_name}_pkc" RENAME TO "{VERSION_TABLE}_pkc"')
+                )
                 break
     connection.commit()
 

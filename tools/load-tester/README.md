@@ -96,5 +96,5 @@ cluster, di mana k6 sebaiknya dijalankan sebagai Job di dalam cluster, bukan lew
 ## Membersihkan data uji
 
 Request uji berprefiks `LT_<run>_`. Tombol **Hapus run** di tracker menghapus catatan run di Redis
-dan, kalau pemantau database hidup, baris `LT_<run>_%` dari `*_jobs`, `*_results`,
-`pipeline_outbox`, dan `orchestration_extract_ocr`.
+dan, kalau pemantau database hidup, baris `LT_<run>_%` dari `nilam_*_jobs`, `nilam_*_results`,
+`nilam_pipeline_outbox`, dan `orchestration_extract_ocr`.

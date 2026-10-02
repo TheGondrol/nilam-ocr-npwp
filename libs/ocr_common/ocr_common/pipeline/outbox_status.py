@@ -36,8 +36,8 @@ class OutboxStatus(BaseModel):
         ...,
         description=(
             "Messages given up on (a 4xx from the receiver, or 5xx for longer than "
-            "`PIPELINE_OUTBOX_MAX_AGE_SECONDS`). They stay in `pipeline_outbox` with `failed_at` and `last_error` "
-            "for inspection and are never retried; anything above 0 needs a human"
+            "`PIPELINE_OUTBOX_MAX_AGE_SECONDS`). They stay in `nilam_pipeline_outbox` with `failed_at` and "
+            "`last_error` for inspection and are never retried; anything above 0 needs a human"
         ),
         examples=[0],
     )
@@ -69,7 +69,7 @@ OUTBOX_STATUS_SUMMARY = "Backlog of this stage's undelivered callbacks and hand-
 OUTBOX_STATUS_DESCRIPTION = (
     "Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks and hand-offs "
     "of this stage are still to be delivered, how old the oldest one is, and how many were given up on "
-    "(dead letters). No other service watches the `pipeline_outbox` table, so this is where a monitor "
+    "(dead letters). No other service watches the `nilam_pipeline_outbox` table, so this is where a monitor "
     "should look; the relay also logs a warning when the backlog is older than "
     "`PIPELINE_OUTBOX_STALE_AFTER_SECONDS` or a dead letter is waiting."
 )

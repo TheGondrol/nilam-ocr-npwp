@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
             for stage in get_stages():
                 await stage.aclose()
             get_stages.cache_clear()
-    await dispose_engines()  # the guardrails_results writer's pool, when DATABASE_URL is set
+    await dispose_engines()  # the nilam_guardrails_results writer's pool, when DATABASE_URL is set
 
 
 app = create_app(
@@ -45,14 +45,14 @@ app = create_app(
         "`PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is still running. "
         "`GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later time. The "
         "stages keep the jobs and send the result callback; this service only keeps every guardrails verdict "
-        "(`guardrails_results`, the rejected documents included) when `DATABASE_URL` is set. All endpoints "
+        "(`nilam_guardrails_results`, the rejected documents included) when `DATABASE_URL` is set. All endpoints "
         "except /health, /ready and /metrics require an X-API-Key header."
     ),
     tags=[
         {"name": "Extract OCR", "description": "Start the pipeline for a document, and read where a request is"},
     ],
     routers=[extract_ocr.router, *(testing.routers if settings.testing_endpoints else [])],
-    # Not a readiness dependency: guardrails_results is best-effort, the entry point must keep serving without it.
+    # Not a readiness dependency: nilam_guardrails_results is best-effort, the entry point must keep serving without it.
     readiness={},
     health=database_readiness(settings.database_url),
     lifespan=lifespan,

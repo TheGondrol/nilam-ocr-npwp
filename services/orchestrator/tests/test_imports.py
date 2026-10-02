@@ -1,5 +1,5 @@
 """The 0.2.0 deploy of 2026-09-23 crashed at startup because the app imported SQLAlchemy while the image did not
-install it. Since guardrails_results the orchestrator does use it, so the image must: the database drivers the
+install it. Since nilam_guardrails_results the orchestrator does use it, so the image must: the database drivers the
 app imports have to be pinned in the lock the Dockerfile installs from."""
 
 from pathlib import Path

@@ -338,7 +338,7 @@ tidak datang.
 | tidak dikenal | 404 | – | `REQUEST_ID_NOT_FOUND` |
 
 - Request yang tidak punya job di tahap mana pun dijawab dari putusan guardrails terakhirnya
-  (`guardrails_results`), sama seperti jawaban `POST`-nya: 400 kalau ditolak model guardrails, 200 dengan
+  (`nilam_guardrails_results`), sama seperti jawaban `POST`-nya: 400 kalau ditolak model guardrails, 200 dengan
   laporan guardrails kalau `[guardrails]` satu-satunya service-nya.
 - **404** berarti tidak ada job dan tidak ada putusan guardrails yang tersimpan: ditolak sebelum dinilai
   (file, `pipeline_name_sequence`, threshold), lolos guardrails tapi serah terima ke extraction gagal
@@ -628,15 +628,16 @@ juga sudah dihapus. Pakai `POST /v1/extract-ocr` di orchestrator (port 8034, bag
 ## 12. Database
 
 Pipeline menyimpan job dan hasil tiap tahap ke PostgreSQL yang sama dengan yang kalian
-pakai, database `bribrain_ocr_nilam`. Semua tabel kami ada di schema `ocr_pipeline_npwp` (sejak
-migrasi `0011`; sebelumnya di `public`), supaya terpisah dari tabel tim lain di `public`.
+pakai, database `bribrain_ocr_nilam`. Semua tabel kami ada di schema `nilam_ocr_npwp` dan namanya
+berawalan `nilam_` (sejak migrasi `0013`; sebelumnya `ocr_pipeline_npwp` tanpa awalan, dan sebelum itu
+`public`), supaya terpisah dari tabel tim lain di `public`.
 
 | Tabel | Isi |
 |---|---|
-| `ocr_pipeline_npwp.ocr_jobs`, `ocr_pipeline_npwp.ocr_results` | status dan hasil OCR mentah |
-| `ocr_pipeline_npwp.structuring_jobs`, `ocr_pipeline_npwp.structuring_results` | field hasil penataan |
-| `ocr_pipeline_npwp.scoring_jobs`, `ocr_pipeline_npwp.scoring_results` | confidence akhir |
-| `ocr_pipeline_npwp.guardrails_results` | setiap putusan guardrails, termasuk yang ditolak |
+| `nilam_ocr_npwp.nilam_ocr_jobs`, `nilam_ocr_npwp.nilam_ocr_results` | status dan hasil OCR mentah |
+| `nilam_ocr_npwp.nilam_structuring_jobs`, `nilam_ocr_npwp.nilam_structuring_results` | field hasil penataan |
+| `nilam_ocr_npwp.nilam_scoring_jobs`, `nilam_ocr_npwp.nilam_scoring_results` | confidence akhir |
+| `nilam_ocr_npwp.nilam_guardrails_results` | setiap putusan guardrails, termasuk yang ditolak |
 
 Integrasi normal **tidak perlu menyentuh database ini**; semua yang dibutuhkan sudah ada
 di callback dan di `GET /v1/extract-ocr/{request_id}`. Kami cantumkan supaya jelas tabel mana milik kami, dan

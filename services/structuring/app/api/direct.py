@@ -32,7 +32,7 @@ _REJECTED_EXAMPLE = {
         "**For testing one stage on its own (QC).** Takes the output of the previous stage, the extraction "
         "service's OCR result (`data` of its `POST /v1/extraction/extract`, or the `result` of its job), runs "
         "the same structuring rules the pipeline runs, and answers with the structured document in the body. "
-        "Nothing is recorded: no `structuring_jobs` row, no callback, no hand-off to scoring, so it never "
+        "Nothing is recorded: no `nilam_structuring_jobs` row, no callback, no hand-off to scoring, so it never "
         "touches the orchestrator's data.\n\n"
         "The answer is exactly what `GET /v1/structuring/jobs/{request_id}` reports as `result`, and what the "
         "scoring stage receives as `structuring`: paste it into `POST /v1/scoring-direct` to test the next "

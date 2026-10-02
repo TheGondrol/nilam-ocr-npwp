@@ -45,7 +45,7 @@ class ScoringJobService:
         if structuring is None and self._results is None:
             raise UnprocessableEntity(
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
-                "service has no DATABASE_URL to read structuring_results from",
+                "service has no DATABASE_URL to read nilam_structuring_results from",
             )
         work, final = self._spec(request_id, document_type, guardrails, ocr, structuring, column_thresholds)
         return await self._pipeline.submit(

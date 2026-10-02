@@ -64,9 +64,10 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "STRUCTURING", "created_at": 
     summary="Hand OCR output to the structuring stage",
     description=(
         "**Step 3 of the pipeline, asynchronous. Called by the OCR service, not by the orchestrator.**\n\n"
-        "Records the job (`structuring_jobs`, idempotent per request_id), answers **202 immediately**, then in the "
-        "background: turns the OCR lines into named fields, stores the result (`structuring_results`), POSTs the "
-        "`STRUCTURING` callback, and hands the job (guardrails + OCR + structuring results) to the scoring service.\n\n"
+        "Records the job (`nilam_structuring_jobs`, idempotent per request_id), answers **202 immediately**, then in "
+        "the background: turns the OCR lines into named fields, stores the result (`nilam_structuring_results`), "
+        "POSTs the `STRUCTURING` callback, and hands the job (guardrails + OCR + structuring results) to the scoring "
+        "service.\n\n"
         "A document that is not a lone NPWP card fails the job with a reason: an upload that also contains a "
         "KTP / KK / marriage certificate, a CAPTCHA page, a screenshot of the DJP NPWP lookup, more than 2 pages, "
         "or no text at all."

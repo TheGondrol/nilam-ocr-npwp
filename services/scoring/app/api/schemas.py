@@ -75,8 +75,8 @@ class ScoringJobRequest(BaseModel):
         None,
         description=(
             "Result of the structuring stage. Left out when the structuring service hands off by reference "
-            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `structuring_results` (and `ocr_results`) "
-            "of the shared database"
+            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_structuring_results` (and "
+            "`nilam_ocr_results`) of the shared database"
         ),
     )
     pipeline_name_sequence: list[str] | None = Field(

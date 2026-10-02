@@ -61,16 +61,17 @@ def test_testing_path():
 
 def test_testing_tables_are_migrated_with_the_live_ones():
     tables = repo_metadata().tables.values()
-    assert {table.schema for table in tables} == {"ocr_pipeline_npwp"}
+    assert {table.schema for table in tables} == {"nilam_ocr_npwp"}
     names = {table.name for table in tables}
+    assert all(name.startswith("nilam_") for name in names), names
     for stage in ("ocr", "structuring", "scoring"):
-        assert {f"testing_{stage}_jobs", f"testing_{stage}_results"} <= names
-    assert {"pipeline_outbox", "testing_pipeline_outbox"} <= names
+        assert {f"nilam_testing_{stage}_jobs", f"nilam_testing_{stage}_results"} <= names
+    assert {"nilam_pipeline_outbox", "nilam_testing_pipeline_outbox"} <= names
     index_names = {index.name for index in outbox_table(MetaData(), "testing_").indexes}
     assert index_names == {
-        "idx_testing_pipeline_outbox_due",
-        "idx_testing_pipeline_outbox_dead",
-        "idx_testing_pipeline_outbox_request_id",
+        "idx_nilam_testing_pipeline_outbox_due",
+        "idx_nilam_testing_pipeline_outbox_dead",
+        "idx_nilam_testing_pipeline_outbox_request_id",
     }
 
 
@@ -100,7 +101,7 @@ async def test_testing_pipeline_writes_only_the_testing_tables_and_sends_no_call
     pipeline = build_stage_pipeline(settings, stage=STAGE_OCR, table_prefix="ocr", testing=True)
     assert pipeline.callbacks is False
     assert pipeline.metrics_stage == "TESTING_OCR"
-    assert isinstance(pipeline.outbox, SqlOutbox) and pipeline.outbox.table.name == "testing_pipeline_outbox"
+    assert isinstance(pipeline.outbox, SqlOutbox) and pipeline.outbox.table.name == "nilam_testing_pipeline_outbox"
 
     async def work():
         return {"full_text": "NPWP"}

@@ -1,5 +1,7 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
-and the tests. They all live in the schema `PIPELINE_SCHEMA` (`ocr_pipeline_npwp`), not in `public`.
+and the tests. They all live in the schema `PIPELINE_SCHEMA` (`nilam_ocr_npwp`), not in `public`, and every name
+starts with `TABLE_PREFIX` (`nilam_`): the callers name a table without it (`ocr`, `testing_`), the prefix is put
+on here.
 `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the orchestrator owns.
 """
 
@@ -20,16 +22,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ENUM
 
-from ocr_common.pipeline.database import JSON_TYPE, PIPELINE_SCHEMA
+from ocr_common.pipeline.database import JSON_TYPE, PIPELINE_SCHEMA, TABLE_PREFIX
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
 
 
 def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table]:
-    """The `<prefix>_jobs` and `<prefix>_results` tables of one stage on `metadata`."""
+    """The `nilam_<prefix>_jobs` and `nilam_<prefix>_results` tables of one stage on `metadata`."""
+    jobs_name, results_name = f"{TABLE_PREFIX}{table_prefix}_jobs", f"{TABLE_PREFIX}{table_prefix}_results"
     jobs = Table(
-        f"{table_prefix}_jobs",
+        jobs_name,
         metadata,
         Column("request_id", Text, primary_key=True),
         Column("status", Text, nullable=False),
@@ -39,27 +42,28 @@ def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
-        Index(f"idx_{table_prefix}_jobs_status", "status"),
-        Index(f"idx_{table_prefix}_jobs_ds", "ds"),
+        Index(f"idx_{jobs_name}_status", "status"),
+        Index(f"idx_{jobs_name}_ds", "ds"),
         schema=PIPELINE_SCHEMA,
     )
     results = Table(
-        f"{table_prefix}_results",
+        results_name,
         metadata,
         Column("request_id", Text, ForeignKey(jobs.c.request_id), primary_key=True),
         Column("result", JSON_TYPE, nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("ds", Text, nullable=False),
-        Index(f"idx_{table_prefix}_results_ds", "ds"),
+        Index(f"idx_{results_name}_ds", "ds"),
         schema=PIPELINE_SCHEMA,
     )
     return jobs, results
 
 
 def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
-    """The `pipeline_outbox` table shared by the three stages (`testing_pipeline_outbox` with the testing prefix)."""
-    name = f"{table_prefix}pipeline_outbox"
+    """The `nilam_pipeline_outbox` table shared by the three stages (`nilam_testing_pipeline_outbox` with the
+    testing prefix)."""
+    name = f"{TABLE_PREFIX}{table_prefix}pipeline_outbox"
     return Table(
         name,
         metadata,
@@ -95,13 +99,13 @@ def outbox_table(metadata: MetaData, table_prefix: str = "") -> Table:
 
 
 def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
-    """`guardrails_results`: one row per guardrails verdict, written by the orchestrator NPWP, the rejected
+    """`nilam_guardrails_results`: one row per guardrails verdict, written by the orchestrator NPWP, the rejected
     documents included (they never reach a stage table). Append-only: the same request_id sent again is
     judged again. `threshold_source` says whose threshold decided: `request` (the central orchestrator's,
     sent with the request) or `service` (the guardrails service's own). `pipeline_name_sequence` is the
     request's (null: the full pipeline), so the orchestrator's GET can answer a request that never reached a
     stage: guardrails only, or rejected here."""
-    name = f"{table_prefix}guardrails_results"
+    name = f"{TABLE_PREFIX}{table_prefix}guardrails_results"
     return Table(
         name,
         metadata,

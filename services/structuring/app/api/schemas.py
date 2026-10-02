@@ -96,7 +96,7 @@ class StructuringJobRequest(BaseModel):
         None,
         description=(
             "Result of the OCR stage. Left out when the OCR service hands off by reference "
-            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `ocr_results` of the shared database"
+            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_ocr_results` of the shared database"
         ),
     )
     pipeline_name_sequence: list[str] | None = Field(

@@ -61,7 +61,7 @@ def build_stage_pipeline(
     """The `StagePipeline` of a service from its settings: callback client, outbox, repository, outcome row.
 
     `testing=True` builds the pipeline behind the `-test` endpoints: the same work on the `testing_*` tables
-    and `testing_pipeline_outbox`, with no callback and no write to the orchestrator's tables, so a load test
+    and `nilam_testing_pipeline_outbox`, with no callback and no write to the orchestrator's tables, so a load test
     never reaches the orchestrator. `next_stage` must then point at the next stage's `-test` endpoint."""
     lane_prefix = TESTING_TABLE_PREFIX if testing else ""
     outbox = None

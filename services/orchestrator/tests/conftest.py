@@ -112,7 +112,7 @@ class StubExtraction:
 
 
 class RecordingGuardrailsLog:
-    """Keeps the verdicts the service asks to record, instead of writing guardrails_results."""
+    """Keeps the verdicts the service asks to record, instead of writing nilam_guardrails_results."""
 
     def __init__(self) -> None:
         self.records: list[dict] = []

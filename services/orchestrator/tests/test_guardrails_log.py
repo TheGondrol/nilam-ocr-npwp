@@ -1,4 +1,4 @@
-"""Every guardrails verdict is kept in guardrails_results, the rejected documents included, and a write that
+"""Every guardrails verdict is kept in nilam_guardrails_results, the rejected documents included, and a write that
 fails never fails the request."""
 
 import pytest
@@ -109,7 +109,8 @@ async def test_a_write_that_fails_is_logged_and_does_not_raise(tmp_path, caplog)
 
 
 def test_the_testing_endpoints_write_their_own_table():
-    assert SqlGuardrailsLog("sqlite+aiosqlite://", table_prefix="testing_")._table.name == "testing_guardrails_results"
+    table = SqlGuardrailsLog("sqlite+aiosqlite://", table_prefix="testing_")._table
+    assert table.name == "nilam_testing_guardrails_results"
 
 
 def test_the_sequence_is_recorded_with_the_verdict(client, auth, guardrails_log):

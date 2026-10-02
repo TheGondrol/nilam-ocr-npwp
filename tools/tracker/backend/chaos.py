@@ -349,14 +349,14 @@ class Run:
 
     async def job(self, stage: str, request_id: str) -> dict[str, Any] | None:
         rows = await self._query(
-            f"SELECT status, attempts, error_message, updated_at FROM {stage.lower()}_jobs WHERE request_id = $1",
+            f"SELECT status, attempts, error_message, updated_at FROM nilam_{stage.lower()}_jobs WHERE request_id = $1",
             request_id,
         )
         return dict(rows[0]) if rows else None
 
     async def outbox(self, request_id: str) -> list[dict[str, Any]] | None:
         rows = await self._query(
-            "SELECT id, stage, kind, payload, attempts, failed_at, last_error FROM pipeline_outbox "
+            "SELECT id, stage, kind, payload, attempts, failed_at, last_error FROM nilam_pipeline_outbox "
             "WHERE request_id = $1 ORDER BY id",
             request_id,
         )

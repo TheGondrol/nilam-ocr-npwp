@@ -1,7 +1,7 @@
 """Reading what an earlier stage stored, for hand-offs by reference.
 
 With `PIPELINE_HANDOFF_BY_REFERENCE` the sender leaves the big parts (OCR blocks, structured fields)
-out of the hand-off body and the outbox row; the receiving stage reads them from `<prefix>_results`
+out of the hand-off body and the outbox row; the receiving stage reads them from `nilam_<prefix>_results`
 of the shared database instead. The payload then only carries `request_id`, `document_type` and the
 guardrails report.
 

@@ -1,7 +1,7 @@
 """Runs again the jobs a dead process left behind.
 
 A job runs as an asyncio task of the process that claimed it. When that process dies without
-cleaning up (OOM, SIGKILL, node lost), its `<stage>_jobs` rows stay `PROCESSING` with nobody working
+cleaning up (OOM, SIGKILL, node lost), its `nilam_<stage>_jobs` rows stay `PROCESSING` with nobody working
 on them. This reaper, one per process like the outbox relay, claims rows whose `updated_at` is older
 than the job lease and hands them to the service's `resume(request_id, input)`, which rebuilds the
 work from what is in the database (the stored `input` and the earlier stages' results)."""

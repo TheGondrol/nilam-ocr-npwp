@@ -195,11 +195,11 @@ paths:
         guardrails check.
 
 
-        Records the job (`ocr_jobs`, idempotent per request_id), answers **202 immediately**, then in
-        the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result
-        (`ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service, which
-        hands it to scoring. The caller does nothing more: it receives one callback per stage, and the
-        final result in the `SCORING` callback (see *Webhooks*).
+        Records the job (`nilam_ocr_jobs`, idempotent per request_id), answers **202 immediately**, then
+        in the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the
+        result (`nilam_ocr_results`), POSTs the `OCR` callback, and hands the job to the structuring service,
+        which hands it to scoring. The caller does nothing more: it receives one callback per stage, and
+        the final result in the `SCORING` callback (see *Webhooks*).
 
 
         **Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most `MAX_UPLOAD_BYTES`
@@ -441,9 +441,9 @@ paths:
       summary: Backlog of this stage's undelivered callbacks and hand-offs
       description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
         and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
-        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
-        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
-        or a dead letter is waiting.'
+        were given up on (dead letters). No other service watches the `nilam_pipeline_outbox` table, so
+        this is where a monitor should look; the relay also logs a warning when the backlog is older than
+        `PIPELINE_OUTBOX_STALE_AFTER_SECONDS` or a dead letter is waiting.'
       operationId: getExtractionOutboxStatus
       responses:
         '200':
@@ -1457,8 +1457,8 @@ components:
           type: integer
           title: Dead Letters
           description: Messages given up on (a 4xx from the receiver, or 5xx for longer than `PIPELINE_OUTBOX_MAX_AGE_SECONDS`).
-            They stay in `pipeline_outbox` with `failed_at` and `last_error` for inspection and are never
-            retried; anything above 0 needs a human
+            They stay in `nilam_pipeline_outbox` with `failed_at` and `last_error` for inspection and
+            are never retried; anything above 0 needs a human
           examples:
           - 0
       type: object

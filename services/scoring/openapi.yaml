@@ -195,10 +195,10 @@ paths:
         service, not by the orchestrator.**
 
 
-        Records the job (`scoring_jobs`, idempotent per request_id), answers **202 immediately**, then
-        in the background: builds the ML team''s scoring payload from the chained guardrails + OCR + structuring
-        results, runs the trust model, stores the result (`scoring_results`), and POSTs the `SCORING`
-        callback, which carries the **final result** of the request.
+        Records the job (`nilam_scoring_jobs`, idempotent per request_id), answers **202 immediately**,
+        then in the background: builds the ML team''s scoring payload from the chained guardrails + OCR
+        + structuring results, runs the trust model, stores the result (`nilam_scoring_results`), and
+        POSTs the `SCORING` callback, which carries the **final result** of the request.
 
 
         The outcome is two per-field confidences. There is no document-level score and no approve / reject
@@ -391,9 +391,9 @@ paths:
       summary: Backlog of this stage's undelivered callbacks and hand-offs
       description: 'Operational view of the transactional outbox (`PIPELINE_OUTBOX`): how many callbacks
         and hand-offs of this stage are still to be delivered, how old the oldest one is, and how many
-        were given up on (dead letters). No other service watches the `pipeline_outbox` table, so this
-        is where a monitor should look; the relay also logs a warning when the backlog is older than `PIPELINE_OUTBOX_STALE_AFTER_SECONDS`
-        or a dead letter is waiting.'
+        were given up on (dead letters). No other service watches the `nilam_pipeline_outbox` table, so
+        this is where a monitor should look; the relay also logs a warning when the backlog is older than
+        `PIPELINE_OUTBOX_STALE_AFTER_SECONDS` or a dead letter is waiting.'
       operationId: getScoringOutboxStatus
       responses:
         '200':
@@ -553,8 +553,8 @@ paths:
         the structuring result (`data` of `POST /v1/structuring-direct`, or the `result` of a structuring
         job) and, like the pipeline, the OCR result and the guardrails report it depends on, builds the
         ML team''s scoring payload from them, runs the trust model, and answers with the scoring result
-        in the body. Nothing is recorded: no `scoring_jobs` row, no callback, no outcome row, so it never
-        touches the orchestrator''s data.
+        in the body. Nothing is recorded: no `nilam_scoring_jobs` row, no callback, no outcome row, so
+        it never touches the orchestrator''s data.
 
 
         The answer is exactly what `GET /v1/scoring/jobs/{request_id}` reports as `result`: the two probabilities,
@@ -1475,7 +1475,7 @@ components:
       required:
       - blocks
       title: OcrPayload
-      description: Result of the OCR stage (`ocr_results`), forwarded to structuring and scoring.
+      description: Result of the OCR stage (`nilam_ocr_results`), forwarded to structuring and scoring.
     OutboxRelease:
       properties:
         stage:
@@ -1592,8 +1592,8 @@ components:
           type: integer
           title: Dead Letters
           description: Messages given up on (a 4xx from the receiver, or 5xx for longer than `PIPELINE_OUTBOX_MAX_AGE_SECONDS`).
-            They stay in `pipeline_outbox` with `failed_at` and `last_error` for inspection and are never
-            retried; anything above 0 needs a human
+            They stay in `nilam_pipeline_outbox` with `failed_at` and `last_error` for inspection and
+            are never retried; anything above 0 needs a human
           examples:
           - 0
       type: object
@@ -1840,8 +1840,8 @@ components:
           - $ref: '#/components/schemas/StructuringPayload'
           - type: 'null'
           description: 'Result of the structuring stage. Left out when the structuring service hands off
-            by reference (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `structuring_results`
-            (and `ocr_results`) of the shared database'
+            by reference (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_structuring_results`
+            (and `nilam_ocr_results`) of the shared database'
         pipeline_name_sequence:
           anyOf:
           - items:
@@ -2211,7 +2211,7 @@ components:
       required:
       - fields
       title: StructuringPayload
-      description: Result of the structuring stage (`structuring_results`), forwarded to scoring.
+      description: Result of the structuring stage (`nilam_structuring_results`), forwarded to scoring.
   securitySchemes:
     APIKeyHeader:
       type: apiKey
