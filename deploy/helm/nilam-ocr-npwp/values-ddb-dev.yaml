@@ -45,6 +45,12 @@ services:
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
+    # Request CPU 500m, bukan 1 (2 Okt 2026): tidak ada node dengan 1 CPU request kosong lagi (yang tersisa
+    # ~500-600m per node), jadi pod pengganti tidak pernah dijadwalkan dan helm --wait gagal walau pod lama
+    # sudah dimatikan. Limit tetap 2 CPU; request hanya menentukan penjadwalan.
+    resources:
+      requests:
+        cpu: 500m
 
 # Node l5uf di cluster dev rusak tetapi tetap Ready dan menerima pod (29 Sep 2026): sandbox pod baru tidak
 # pernah dibuat (FailedCreatePodSandBox DeadlineExceeded) dan pod tim lain macet Terminating di sana. Pod
