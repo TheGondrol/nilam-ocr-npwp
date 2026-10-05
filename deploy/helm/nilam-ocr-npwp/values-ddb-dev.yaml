@@ -17,10 +17,12 @@ orchestration:
   callbackFormat: result
 
 commonEnv:
-  # Double write: selain tabel job kita sendiri, keadaan akhir tiap request (COMPLETED dari scoring,
-  # FAILED dari tahap mana pun) ditambahkan sebagai baris GET_OCR_RESULT di log API Orkestrasi,
-  # karena Orkestrasi membaca hasil dari tabel itu, bukan dari GET /v1/scoring/jobs/{request_id}.
-  ORCHESTRATION_API_EVENTS_TABLE: ocr.orchestration_api_events
+  # Double write ke log API Orkestrasi dimatikan (5 Okt 2026): di mode callback Orkestrasi membaca hasil
+  # dari tabel job-nya sendiri, dan tabel lama ocr.orchestration_api_events sudah dihapus oleh migrasi
+  # mereka. Tulisan itu ada di transaksi job kita, jadi tabel yang hilang menggagalkan setiap job.
+  # Kosong, bukan dihapus: deploy.sh memakai --reset-then-reuse-values, jadi key yang dihapus tetap
+  # terbawa dari release sebelumnya.
+  ORCHESTRATION_API_EVENTS_TABLE: ""
   # Outbox transaksional: hand-off dan callback ditulis ke pipeline_outbox bersama hasil job, lalu dikirim
   # relay dengan backoff (sampai 5 menit sekali, selama 24 jam), jadi tidak hilang saat pod restart atau
   # penerima down. Dinyalakan di cluster 24 Sep 2026.
