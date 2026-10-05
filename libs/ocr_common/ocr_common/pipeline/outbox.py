@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
-from ocr_common.pipeline.callbacks import stage_callback_body
+from ocr_common.pipeline.callbacks import NOT_READY_DELAY_SECONDS, NOT_READY_RETRIES, not_ready, stage_callback_body
 from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 if TYPE_CHECKING:
@@ -31,6 +31,9 @@ KIND_HANDOFF = "handoff"
 
 DEFAULT_MAX_BACKOFF_SECONDS = 300.0
 DEFAULT_MAX_AGE_SECONDS = 24 * 3600.0
+# The central orchestrator stops waiting for a callback 300 s after its 202 (to be raised to 600 s,
+# 5 Oct 2026) and answers a later one with 409 RESULT_CONFLICT, so retrying a callback longer is useless.
+DEFAULT_CALLBACK_MAX_AGE_SECONDS = 600.0
 DEFAULT_STALE_AFTER_SECONDS = 300.0
 STOP_DELIVERY_SECONDS = 5.0
 WATCH_INTERVAL_SECONDS = 60.0
@@ -64,12 +67,20 @@ def callback_message(
     error_message: str | None = None,
     error_code: str | None = None,
     final: bool = False,
+    answer: dict[str, Any] | None = None,
 ) -> OutboxMessage:
     """The callback body for `(stage, status)` of `request_id`, as a message."""
     return OutboxMessage(
         KIND_CALLBACK,
         stage_callback_body(
-            request_id, stage, status, result=result, error_message=error_message, error_code=error_code, final=final
+            request_id,
+            stage,
+            status,
+            result=result,
+            error_message=error_message,
+            error_code=error_code,
+            final=final,
+            answer=answer,
         ),
     )
 
@@ -104,8 +115,10 @@ HandoffFailed = Callable[[str, str, str], Awaitable[None]]
 
 class OutboxRelay:
     """Delivers one stage's messages. A message is retried with exponential back-off while the receiver
-    answers 5xx or cannot be reached, until it is older than `max_age_seconds`; a 4xx, or that age,
-    turns it into a dead letter that stays in the table. A hand-off that becomes a dead letter is
+    answers 5xx or cannot be reached, until it is older than `max_age_seconds` (a callback:
+    `callback_max_age_seconds`); a 4xx, or that age, turns it into a dead letter that stays in the
+    table. The one 4xx retried is the central orchestrator's 409 RESULT_NOT_READY to a callback, every
+    `NOT_READY_DELAY_SECONDS`, `NOT_READY_RETRIES` times. A hand-off that becomes a dead letter is
     replaced by a FAILED callback on behalf of the next stage, like in direct mode."""
 
     def __init__(
@@ -123,6 +136,7 @@ class OutboxRelay:
         retry_delay_seconds: float = 1.0,
         max_backoff_seconds: float = DEFAULT_MAX_BACKOFF_SECONDS,
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+        callback_max_age_seconds: float = DEFAULT_CALLBACK_MAX_AGE_SECONDS,
         stale_after_seconds: float = DEFAULT_STALE_AFTER_SECONDS,
         watch_interval_seconds: float = WATCH_INTERVAL_SECONDS,
         metrics_stage: str | None = None,
@@ -140,6 +154,7 @@ class OutboxRelay:
         self._retry_delay = retry_delay_seconds
         self._max_backoff = max_backoff_seconds
         self._max_age = max_age_seconds
+        self._callback_max_age = callback_max_age_seconds
         self._stale_after = stale_after_seconds
         self._watch_interval = watch_interval_seconds
         self._next_watch = 0.0
@@ -238,8 +253,9 @@ class OutboxRelay:
             try:
                 await self._send(row)
             except ServiceError as exc:
-                if exc.status_code >= 500 and self._age(row) < self._max_age:
-                    await self._outbox.retry_later(row.id, self._backoff(row.attempts), exc.message)
+                delay = self._retry_in(row, exc)
+                if delay is not None:
+                    await self._outbox.retry_later(row.id, delay, exc.message)
                     metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "retry").inc()
                     continue
                 await self._give_up(row, exc.message)
@@ -255,6 +271,16 @@ class OutboxRelay:
     def _age(self, row: Row[Any]) -> float:
         created = row.created_at if row.created_at.tzinfo is not None else row.created_at.replace(tzinfo=UTC)
         return (datetime.now(UTC) - created).total_seconds()
+
+    def _retry_in(self, row: Row[Any], exc: ServiceError) -> float | None:
+        """Seconds until the next try of a message that failed with `exc`, or None to give up on it.
+        `row.attempts` counts the sends so far, this one included."""
+        if exc.status_code >= 500:
+            max_age = self._callback_max_age if row.kind == KIND_CALLBACK else self._max_age
+            return self._backoff(row.attempts) if self._age(row) < max_age else None
+        if row.kind == KIND_CALLBACK and not_ready(exc) and row.attempts <= NOT_READY_RETRIES:
+            return NOT_READY_DELAY_SECONDS
+        return None
 
     def _backoff(self, attempts: int) -> float:
         return min(self._retry_delay * 2 ** max(attempts - 1, 0), self._max_backoff)

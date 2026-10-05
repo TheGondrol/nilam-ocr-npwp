@@ -766,19 +766,21 @@ async def callback(request: Request):
 @app.post("/v1/ocr-callback")
 async def result_callback(request: Request):
     """Callback format result, yang dipakai di dev (ORCHESTRATION_CALLBACK_FORMAT=result,
-    ORCHESTRATION_CALLBACK_PATH=/v1/ocr-callback): satu per request saat berakhir,
-    {request_id, status: completed | failed, result, guardrails, error_code, error_message}. Diterjemahkan ke
-    tahap yang mengakhirinya supaya kartu dan cek skenario sama dengan format stage."""
+    ORCHESTRATION_CALLBACK_PATH=/v1/ocr-callback), sesuai kontrak Orkestrasi pusat (2 Okt 2026): satu per
+    request saat berakhir, {request_id, status: completed | failed, result, guardrails, message, error_code}.
+    Ditolak = completed dengan result null dan guardrails 1. Diterjemahkan ke tahap yang mengakhirinya supaya
+    kartu dan cek skenario sama dengan format stage."""
     body = await request.json()
     key_ok = CALLBACK_KEY is None or request.headers.get("x-callback-key") == CALLBACK_KEY
     request_id = body["request_id"]
     stages = pipeline_stages(await request_sequence(request_id)) or ["SCORING"]
-    if body.get("status") == "completed":
+    rejected = body.get("status") == "completed" and body.get("result") is None and body.get("guardrails") == 1
+    if body.get("status") == "completed" and not rejected:
         stage, status = stages[-1], "DONE"
     else:
         code = str(body.get("error_code") or "")
         failed_stage = code.removesuffix("_FAILED")
-        if code == REJECTED_CODE:
+        if rejected or code == REJECTED_CODE:
             stage = "STRUCTURING"
         elif code.endswith("_FAILED") and failed_stage in TABLES:
             stage = failed_stage
@@ -790,8 +792,8 @@ async def result_callback(request: Request):
         "stage": stage,
         "status": status,
         "result": None,  # hasil tahapnya dibaca dari service; body result-nya ikut sebagai payload
-        "error_message": body.get("error_message"),
-        "error_code": body.get("error_code"),
+        "error_message": body.get("message"),
+        "error_code": body.get("error_code") or (REJECTED_CODE if rejected else None),
         "final": True,
     }
     return await receive_callback(stage_body, fmt="result", key_ok=key_ok, payload=body)

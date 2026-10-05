@@ -67,6 +67,8 @@ URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 {{- $_ := set $env "ORCHESTRATION_CALLBACK_PATH" $root.Values.orchestration.callbackPath }}
 {{- $_ := set $env "ORCHESTRATION_TIMEOUT_SECONDS" ($root.Values.orchestration.timeoutSeconds | toString) }}
 {{- $_ := set $env "ORCHESTRATION_CALLBACK_FORMAT" ($root.Values.orchestration.callbackFormat | default "stage") }}
+{{- $_ := set $env "ORCHESTRATION_CALLBACK_ENABLED" (ternary "false" "true" (eq (toString $root.Values.orchestration.callbackEnabled) "false")) }}
+{{- $_ := set $env "ORCHESTRATION_CALLBACK_MAX_AGE_SECONDS" ($root.Values.orchestration.callbackMaxAgeSeconds | default "600" | toString) }}
 {{- end }}
 {{- range $svc.upstreams }}
 {{- $upstream := index $root.Values.services . }}

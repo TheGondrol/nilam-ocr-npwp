@@ -12,6 +12,16 @@ from ocr_common.errors import InternalError, ServiceError, UpstreamTimeout, Upst
 from ocr_common.web.request_id import REQUEST_ID_HEADER, current_request_id
 
 
+class RemoteClientError(ServiceError):
+    """A 4xx passed through from the remote (`passthrough_client_errors` / `passthrough_statuses`), with the
+    remote's own `errors` code in `remote_code` when its answer has one (e.g. the central orchestrator's
+    `RESULT_NOT_READY`). `code` stays None, so this service's own error envelope is unchanged."""
+
+    def __init__(self, status_code: int, message: str, remote_code: str | None = None):
+        super().__init__(status_code, message)
+        self.remote_code = remote_code
+
+
 class RemoteModelClient:
     """One httpx client per remote service. Timeouts become 504, connection errors 503, and an
     error status becomes 500 with the remote's message, or the same status with the remote's message
@@ -87,12 +97,22 @@ class RemoteModelClient:
             if response.status_code in self._passthrough_statuses or (
                 self._passthrough and 400 <= response.status_code < 500
             ):
-                raise ServiceError(response.status_code, detail)
+                raise RemoteClientError(response.status_code, detail, _error_code(response))
             raise InternalError(f"{self.name} error ({response.status_code}): {detail}")
         try:
             return response.json()
         except ValueError as exc:
             raise InternalError(f"{self.name} returned an invalid response") from exc
+
+
+def _error_code(response: httpx.Response) -> str | None:
+    """The `errors` code of an error answer in the standard envelope, if it has one."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    code = body.get("errors") if isinstance(body, dict) else None
+    return code if isinstance(code, str) and code else None
 
 
 def _error_detail(response: httpx.Response) -> str:

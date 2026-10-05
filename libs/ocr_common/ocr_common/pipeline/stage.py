@@ -27,7 +27,8 @@ STAGE_SCORING = "SCORING"
 Work = Callable[[], Awaitable[Mapping[str, Any]]]
 """The job itself: returns the stage result (a TypedDict of `ocr_common.types`, or any mapping)."""
 CallbackResult = Callable[[Mapping[str, Any]], Mapping[str, Any]]
-"""Derives what the callback / the orchestrator's outcome row carries from the stage result."""
+"""Derives what the callback / the orchestrator's outcome row carries from the stage result. `outcome_data`
+is the request's answer, the `data` of the extract-ocr 200, which the result callback also carries."""
 HandoffPayload = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 """Derives the body of the hand-off to the next stage from the stage result."""
 Rejection = Callable[[Mapping[str, Any]], str | None]
@@ -150,6 +151,7 @@ class StagePipeline:
     ) -> None:
         payload: dict[str, Any] | None = None
         final: dict[str, Any] | None = None
+        answer: dict[str, Any] | None = None
         reason: str | None = None
         started = time.perf_counter()
         try:
@@ -158,12 +160,13 @@ class StagePipeline:
             if reason is None:
                 payload = dict(handoff_payload(result)) if handoff_payload else None
                 final = dict(callback_result(result)) if callback_result else None
+                answer = dict(outcome_data(result)) if outcome_data else None
             await self.repository.complete(
                 request_id,
                 result,
-                outcome_data=dict(outcome_data(result)) if outcome_data and reason is None else None,
+                outcome_data=answer,
                 rejection=reason,
-                messages=self._messages(request_id, final, payload, next_stage, reason),
+                messages=self._messages(request_id, final, payload, next_stage, reason, answer),
             )
             metrics.JOB_DURATION.labels(self.metrics_stage).observe(time.perf_counter() - started)
             metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_REJECTED if reason else metrics.OUTCOME_DONE).inc()
@@ -194,7 +197,14 @@ class StagePipeline:
                 )
             elif self.callbacks:
                 # No next stage: this one ends the request (the last of its pipeline_name_sequence).
-                await self.callback.notify(request_id, self.stage, STATUS_DONE, result=final, final=next_stage is None)
+                await self.callback.notify(
+                    request_id,
+                    self.stage,
+                    STATUS_DONE,
+                    result=final,
+                    final=next_stage is None,
+                    answer=answer if next_stage is None else None,
+                )
             if payload is not None:
                 await self._hand_off(payload)
         except asyncio.CancelledError:
@@ -211,6 +221,7 @@ class StagePipeline:
         payload: dict[str, Any] | None,
         next_stage: str | None,
         reason: str | None = None,
+        answer: dict[str, Any] | None = None,
     ) -> list[OutboxMessage]:
         if self.outbox is None:
             return []
@@ -221,7 +232,14 @@ class StagePipeline:
             )
         elif self.callbacks:
             messages.append(
-                callback_message(request_id, self.stage, STATUS_DONE, result=final, final=next_stage is None)
+                callback_message(
+                    request_id,
+                    self.stage,
+                    STATUS_DONE,
+                    result=final,
+                    final=next_stage is None,
+                    answer=answer if next_stage is None else None,
+                )
             )
         if payload is not None and next_stage is not None:
             messages.append(handoff_message(next_stage, payload))

@@ -82,7 +82,7 @@ def test_the_result_callback_completes_on_the_final_stage_with_its_result_as_it_
     not_final = stage_callback_body("REQ", "OCR", "DONE", result=ocr)
 
     assert final["final"] is True and "final" not in not_final
-    assert result_callback_body(final) == {"request_id": "REQ", "status": "completed", "result": ocr, "guardrails": {}}
+    assert result_callback_body(final) == {"request_id": "REQ", "status": "completed", "result": ocr, "guardrails": 0}
     assert result_callback_body(not_final) is None
 
 
@@ -97,7 +97,7 @@ def test_a_scoring_callback_queued_before_the_final_flag_still_completes():
     completed = result_callback_body(body)
 
     assert completed is not None and completed["status"] == "completed"
-    assert completed["result"]["nomor_npwp"] == {"value": "1", "confidence": 0.9}
+    assert completed["result"]["nomor_npwp"] == {"value": "1", "confidence": 1}
 
 
 async def test_a_job_record_carries_the_sequence_it_was_submitted_with():

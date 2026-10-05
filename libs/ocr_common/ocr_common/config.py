@@ -131,6 +131,13 @@ class PipelineSettings(BaseServiceSettings):
     # failed at any stage), authenticated with `X-Callback-Key: ORCHESTRATION_CALLBACK_KEY`.
     orchestration_callback_format: Literal["stage", "result"] = "stage"
     orchestration_callback_key: str | None = None
+    # The switch: false = no callback is sent or queued even with ORCHESTRATION_URL set, e.g. while the
+    # central orchestrator has NPWP in poll mode (it then answers every callback 409 CALLBACK_NOT_EXPECTED
+    # and reads GET /v1/extract-ocr/{request_id} instead).
+    orchestration_callback_enabled: bool = True
+    # How long the outbox keeps retrying a callback (5xx / unreachable). The central orchestrator gives up on a
+    # request a fixed time after its 202 (OCR_CALLBACK_DEADLINE_SECONDS on its side) and refuses later ones.
+    orchestration_callback_max_age_seconds: float = Field(600.0, gt=0)
 
     pipeline_retry_attempts: int = 3
     pipeline_retry_delay_seconds: float = 0.5
@@ -152,27 +159,30 @@ class PipelineSettings(BaseServiceSettings):
 
     @property
     def callbacks_enabled(self) -> bool:
-        """Stage callbacks are only sent when the orchestrator exposes an endpoint for them. The other way
-        to report the outcome is the orchestrator's own tables (ORCHESTRATION_OUTCOME_TABLE,
-        ORCHESTRATION_API_EVENTS_TABLE)."""
-        return bool(self.orchestration_url)
+        """Callbacks are only sent when the orchestrator exposes an endpoint for them and the switch
+        (ORCHESTRATION_CALLBACK_ENABLED) is on. The other ways the outcome reaches the orchestrator are its
+        own tables (ORCHESTRATION_OUTCOME_TABLE, ORCHESTRATION_API_EVENTS_TABLE) and GET
+        /v1/extract-ocr/{request_id}."""
+        return self.orchestration_callback_enabled and bool(self.orchestration_url)
 
     @model_validator(mode="after")
     def _guard_pipeline(self) -> Self:
         self.require_outside_local(database_url=self.database_url)
         reports_outcome = (
-            self.orchestration_url or self.orchestration_outcome_table or self.orchestration_api_events_table
+            self.callbacks_enabled or self.orchestration_outcome_table or self.orchestration_api_events_table
         )
-        if not self.is_local and not reports_outcome:
+        # With the switch off on purpose the orchestrator polls GET /v1/extract-ocr/{request_id}.
+        if not self.is_local and self.orchestration_callback_enabled and not reports_outcome:
             raise ValueError(
                 "ORCHESTRATION_URL, ORCHESTRATION_OUTCOME_TABLE or ORCHESTRATION_API_EVENTS_TABLE must be set when "
                 f"ENVIRONMENT={self.environment}: without one, the orchestrator never learns how a request ended "
-                "(set ENVIRONMENT=local for local development)"
+                "(set ORCHESTRATION_CALLBACK_ENABLED=false when it polls instead, or ENVIRONMENT=local for local "
+                "development)"
             )
         self.reject_localhost_outside_local(orchestration_url=self.orchestration_url)
         if (
             self.orchestration_callback_format == "result"
-            and self.orchestration_url
+            and self.callbacks_enabled
             and not self.is_local
             and not self.orchestration_callback_key
         ):

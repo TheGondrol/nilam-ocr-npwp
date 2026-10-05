@@ -411,62 +411,67 @@ Tahap ini yang terakhir, dan hanya callback-nya yang membawa hasil akhir.
 ### Callback hasil (dipakai di dev sejak 24 Sep 2026)
 
 Endpoint dari tim Orkestrasi, satu POST per request saat request selesai
-(`ORCHESTRATION_CALLBACK_FORMAT=result`):
+(`ORCHESTRATION_CALLBACK_FORMAT=result`). Body dan aturan kirim ulang mengikuti kontrak mereka
+"Callback Hasil OCR" (2 Okt 2026) dan jawaban mereka tanggal 5 Okt 2026:
 
     POST http://ocr-orchestration.ocr-dev.svc.cluster.local/v1/ocr-callback
     X-Callback-Key: <ORCHESTRATION_CALLBACK_KEY>
 
-Selesai (dikirim oleh scoring):
+Callback dikirim oleh tahap-tahap pipeline sendiri (scoring, atau tahap yang berhenti), bukan oleh
+orchestrator. Tahap tidak tahu apakah orchestrator menjawab 200 atau 202 (keduanya bisa terjadi di
+sekitar `PIPELINE_WAIT_SECONDS`), jadi callback selalu dikirim; Orkestrasi menjawab callback untuk
+request yang sudah dijawab 200 dengan `200 "Result already recorded"`.
+
+Selesai: `result` sama persis dengan `data` jawaban 200 `extract-ocr` untuk request yang sama
+(dengan urutan penuh: `nomor_npwp` dan `nama` dengan confidence 0/1 hasil threshold request itu;
+`pipeline_name_sequence` yang berakhir sebelum `scoring`: hasil service terakhirnya apa adanya):
 
     {
       "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
       "status": "completed",
       "result": {
-        "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 0.9829},
-        "nama":       {"value": "BUDI SANTOSO",         "confidence": 0.9512},
-        "nama_badan": {"value": "",                     "confidence": 0.0}
+        "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 1},
+        "nama":       {"value": "BUDI SANTOSO",         "confidence": 1}
       },
-      "guardrails": {"passed": true, "reason": null, "document": {...}, "pages": [...]}
+      "guardrails": 0
     }
 
-`confidence` adalah probabilitas dari trust model bahwa nilainya benar, belum dibulatkan ke 0/1
-seperti di respons `extract-ocr`. Field yang tidak ditemukan: `value` kosong dan `confidence` 0.0.
-Probabilitas nama masuk ke `nama` atau `nama_badan`, mana pun yang berisi nama. `guardrails` adalah
-laporan model guardrails untuk dokumen itu.
-
-Callback dikirim oleh tahap-tahap pipeline sendiri (scoring, atau tahap yang berhenti), bukan oleh
-orchestrator; alamat dan key-nya tidak berubah.
-
-Selesai lebih awal (`pipeline_name_sequence` berakhir sebelum `scoring`, dikirim oleh service
-terakhirnya): `result` adalah hasil service itu apa adanya, sama dengan `data` di respons
-`extract-ocr`, dan `guardrails` kosong:
+Ditolak aturan structuring setelah 202. Orkestrasi mengenali penolakan dari `result` null dengan
+`guardrails` 1, dan meneruskan `message` ke kliennya:
 
     {
       "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
       "status": "completed",
-      "result": {"fields": {...}, "flag": false, "flag_reason": null, "reject_reason": null},
-      "guardrails": {}
+      "result": null,
+      "guardrails": 1,
+      "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
+      "error_code": "DOWNSTREAM_VALIDATION_ERROR"
     }
 
-Request `[guardrails]` saja tidak mendapat callback: jawaban `extract-ocr`-nya sudah final.
-
-Gagal atau ditolak (dikirim oleh tahap yang berhenti):
+Gagal (dikirim oleh tahap yang gagal):
 
     {
       "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",
       "status": "failed",
-      "result": null,
-      "guardrails": {},
-      "error_code": "DOWNSTREAM_VALIDATION_ERROR",
-      "error_message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
+      "error_code": "STRUCTURING_FAILED",
+      "message": "Internal error in STRUCTURING stage"
     }
 
-`error_code` bernilai `DOWNSTREAM_VALIDATION_ERROR` kalau dokumen ditolak aturan structuring, atau
-`OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` kalau tahapnya gagal. Dokumen yang ditolak
-model guardrails tidak mendapat callback, karena sudah dijawab 400 langsung di `extract-ocr`
-orchestrator.
-Jawaban 5xx dan timeout dikirim ulang (3 kali tanpa outbox, seperti di dev sekarang; sampai 24 jam
-dengan `PIPELINE_OUTBOX`), 4xx tidak dikirim ulang.
+`error_code` (`OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED`, semuanya 422 di jawaban
+sinkron) ada di luar kontrak: Orkestrasi mengabaikannya untuk sekarang dan berencana meneruskannya
+seperti jalur sinkron. Dokumen yang ditolak model guardrails dan request `[guardrails]` saja tidak
+mendapat callback: keduanya selalu dijawab langsung di `extract-ocr` orchestrator.
+
+Kirim ulang: 5xx, timeout, dan koneksi gagal dicoba ulang dengan backoff selama
+`ORCHESTRATION_CALLBACK_MAX_AGE_SECONDS` (600 detik; Orkestrasi berhenti menunggu sejumlah detik
+setelah 202 dan menjawab callback sesudahnya `409 RESULT_CONFLICT`). `409 RESULT_NOT_READY` (callback
+tiba sebelum Orkestrasi mencatat 202-nya) dicoba ulang tiap 1,5 detik, maksimal 5 kali. 4xx lain
+tidak dikirim ulang.
+
+Saklar: `ORCHESTRATION_CALLBACK_ENABLED=false` (Helm `orchestration.callbackEnabled: false`) mematikan
+callback walau `ORCHESTRATION_URL` terisi. Harus mengikuti mode NPWP di Orkestrasi: di mode `poll`
+mereka menjawab setiap callback `409 CALLBACK_NOT_EXPECTED` dan membaca
+`GET /v1/extract-ocr/{request_id}`.
 
 ### Callback per tahap (format lama, `ORCHESTRATION_CALLBACK_FORMAT=stage`)
 

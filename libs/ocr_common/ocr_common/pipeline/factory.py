@@ -109,6 +109,7 @@ def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> O
         retry_delay_seconds=settings.pipeline_retry_delay_seconds,
         max_backoff_seconds=settings.pipeline_outbox_max_backoff_seconds,
         max_age_seconds=settings.pipeline_outbox_max_age_seconds,
+        callback_max_age_seconds=settings.orchestration_callback_max_age_seconds,
         stale_after_seconds=settings.pipeline_outbox_stale_after_seconds,
         metrics_stage=pipeline.metrics_stage,
     )

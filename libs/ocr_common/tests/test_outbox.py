@@ -5,9 +5,11 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 
+from ocr_common.clients.remote import RemoteClientError
 from ocr_common.config import PipelineSettings
 from ocr_common.errors import ServiceError
 from ocr_common.pipeline import STAGE_OCR, STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline, database
+from ocr_common.pipeline.callbacks import NOT_READY_RETRIES
 from ocr_common.pipeline.outbox import KIND_CALLBACK, KIND_HANDOFF, OutboxRelay, callback_message
 from ocr_common.pipeline.outbox_sql import SqlOutbox
 from ocr_common.pipeline.outbox_status import OutboxStatusResponse, outbox_status, outbox_status_responses
@@ -422,3 +424,86 @@ async def test_the_release_handler_answers_409_without_an_outbox(pipeline):
     with pytest.raises(ServiceError) as raised:
         await outbox_release(off, None)
     assert raised.value.status_code == 409
+
+
+async def _due_now(outbox: SqlOutbox) -> None:
+    async with database.get_engine(outbox._url).begin() as conn:
+        await conn.execute(update(outbox.table).values(next_attempt_at=datetime.now(UTC)))
+
+
+async def test_a_callback_the_orchestrator_has_not_recorded_yet_is_sent_again_a_few_times(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    relay = _relay(stage, callback=Sink(RemoteClientError(409, "Job belum tercatat", "RESULT_NOT_READY")))
+
+    for _ in range(NOT_READY_RETRIES):
+        await relay.deliver_due()
+        [row] = await _rows(stage.outbox)
+        assert row["failed_at"] is None
+        assert row["next_attempt_at"] - datetime.now(UTC).replace(tzinfo=None) < timedelta(seconds=2)
+        await _due_now(stage.outbox)
+
+    await relay.deliver_due()
+    [row] = await _rows(stage.outbox)
+    assert row["failed_at"] is not None
+    assert row["attempts"] == NOT_READY_RETRIES + 1
+
+
+async def test_any_other_409_to_a_callback_is_a_dead_letter_at_once(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    relay = _relay(stage, callback=Sink(RemoteClientError(409, "Hasil sudah berbeda", "RESULT_CONFLICT")))
+
+    await relay.deliver_due()
+
+    [row] = await _rows(stage.outbox)
+    assert row["failed_at"] is not None
+
+
+async def test_a_callback_stops_being_retried_at_its_own_max_age_and_a_handoff_does_not(pipeline):
+    stage, _ = pipeline
+    await _run(stage)
+    unavailable = ServiceError(503, "unavailable")
+    relay = _relay(
+        stage,
+        callback=Sink(unavailable),
+        next_stage=Sink(unavailable),
+        max_age_seconds=3600,
+        callback_max_age_seconds=600,
+    )
+
+    await relay.deliver_due()
+    await _age_all(stage.outbox, 601)
+    await _due_now(stage.outbox)
+    await relay.deliver_due()
+
+    rows = {row["kind"]: row for row in await _rows(stage.outbox)}
+    assert rows[KIND_CALLBACK]["failed_at"] is not None
+    assert rows[KIND_HANDOFF]["failed_at"] is None
+
+
+async def test_the_final_callback_carries_the_answer_of_the_request(pipeline):
+    stage, _ = pipeline
+
+    async def work():
+        return {"full_text": "NPWP"}
+
+    await stage.submit(
+        RID,
+        work,
+        callback_result=lambda result: {"final": True},
+        outcome_data=lambda result: {"nomor_npwp": {"value": "1", "confidence": 1}},
+    )
+    await stage.runner.drain(5)
+
+    [row] = await _rows(stage.outbox)
+    assert row["payload"]["final"] is True
+    assert row["payload"]["answer"] == {"nomor_npwp": {"value": "1", "confidence": 1}}
+
+
+async def test_a_callback_that_hands_on_carries_no_answer(pipeline):
+    stage, _ = pipeline
+    await _run(stage)
+
+    callback = next(row for row in await _rows(stage.outbox) if row["kind"] == KIND_CALLBACK)
+    assert "answer" not in callback["payload"]

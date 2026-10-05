@@ -53,6 +53,14 @@ orchestration:
   # result = satu callback hasil per request saat selesai (completed dari scoring, failed dari tahap
   #          mana pun) dengan X-Callback-Key dari secretKeys.callbackKey; tanpa key, service menolak start.
   callbackFormat: stage
+  # Saklar callback: false = tidak ada callback yang dikirim maupun diantrekan walau url terisi, mis. selama
+  # Orkestrasi pusat memasang NPWP di mode poll (setiap callback dijawab 409 CALLBACK_NOT_EXPECTED; mereka
+  # membaca GET /v1/extract-ocr/{request_id}). Harus mengikuti mode di sisi mereka.
+  callbackEnabled: true
+  # Berapa lama outbox mencoba ulang callback yang gagal (5xx / tidak terjangkau). Orkestrasi pusat berhenti
+  # menunggu sejumlah detik setelah menjawab 202 (OCR_CALLBACK_DEADLINE_SECONDS di sisi mereka) dan menolak
+  # callback sesudahnya dengan 409 RESULT_CONFLICT; samakan dengan nilai itu.
+  callbackMaxAgeSeconds: "600"
 
 commonEnv:
   # Host yang boleh dipakai file_url (presigned MinIO), dipisah koma; ".example.internal" = semua subdomain.

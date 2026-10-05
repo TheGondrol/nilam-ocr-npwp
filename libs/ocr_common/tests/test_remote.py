@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from ocr_common.clients.remote import RemoteModelClient
+from ocr_common.clients.remote import RemoteClientError, RemoteModelClient
 from ocr_common.errors import ServiceError
 
 
@@ -126,6 +126,15 @@ async def test_passthrough_keeps_4xx_status_and_message():
         await _client(handler, passthrough_client_errors=True).post_json("/v1/structuring/structure", {})
     assert exc.value.status_code == 400
     assert exc.value.message == "No text lines to structure"
+
+
+async def test_a_passed_through_4xx_keeps_the_remote_errors_code_apart_from_its_own():
+    body = {"status_code": 409, "message": "Job belum tercatat", "errors": "RESULT_NOT_READY"}
+    handler = lambda request: httpx.Response(409, json=body)  # noqa: E731
+    with pytest.raises(RemoteClientError) as exc:
+        await _client(handler, passthrough_client_errors=True).post_json("/v1/ocr-callback", {})
+    assert (exc.value.status_code, exc.value.remote_code) == (409, "RESULT_NOT_READY")
+    assert exc.value.code is None, "this service's own error envelope must not take the remote's code"
 
 
 async def test_passthrough_still_maps_5xx_to_500():
