@@ -107,5 +107,19 @@ di pod baru; pesan outbox tetap di tabelnya dan dikirim relay pod baru. Query, d
 yang menyebut tabel ini dengan nama lama juga harus diubah ke `nilam_ocr_npwp.nilam_<tabel>`, dan hak akses
 (GRANT) yang pernah diberikan pada schema lama tidak ikut pindah ke schema baru.
 
+Database yang tidak terjangkau dari laptop (Cloud SQL, private IP) dimigrasi lewat Job di cluster:
+`deploy/helm/db-job.sh alembic upgrade head`.
+
+## Pindah database (Cloud SQL)
+
+[`copy_database.py`](copy_database.py) menyalin ke-16 tabel `nilam_ocr_npwp` dari `SOURCE_DATABASE_URL` ke
+`TARGET_DATABASE_URL` tanpa mengubah sumbernya (satu snapshot read-only): tabel tujuan dibuat dari
+`tables.py`, di-stamp di revisi terakhir, dicek dengan `alembic check`, dan jumlah baris tiap tabel
+dibandingkan. `--check` hanya mengecek, `--replace` membuat salinan persis. Di cluster lewat
+`deploy/helm/db-job.sh copy`; langkah lengkap di [deploy/helm/README.md](../deploy/helm/README.md#pindah-ke-cloud-sql).
+Satu beda yang disengaja: urutan fisik kolom di tujuan mengikuti `tables.py`, sedangkan di database lama
+kolom yang ditambah migrasi belakangan (`ds`, `input`, ...) ada di akhir. Kode selalu memakai nama kolom,
+jadi ini hanya terlihat di `SELECT *`.
+
 Untuk PostgreSQL lokal, `make up-db` menjalankan migrasi lebih dulu lewat service
 `migrate` di `docker-compose.db.yml`; service lain baru start setelah migrasi selesai.

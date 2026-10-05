@@ -120,6 +120,93 @@ lalu menjalankan Alembic di dalam image `db/Dockerfile`. Database yang tabelnya 
 dipasang manual sebelum ada migrasi aman dijalankan: revisi baseline memakai
 `CREATE TABLE IF NOT EXISTS`.
 
+Database yang tidak terjangkau dari laptop (Cloud SQL dengan private IP) dimigrasi lewat Job di
+cluster: `./db-job.sh alembic upgrade head` (`alembic current`, dst.).
+
+## Pindah ke Cloud SQL
+
+Tujuan: instance `edm-bribrain-dev-01:asia-southeast2:gc-bribrain-dev-sql-psql-01`, database
+`bribrain_ocr`, private IP `10.213.224.113` di shared VPC yang sama dengan cluster (laptop tidak bisa
+menjangkaunya). Database lama tidak diubah atau dihapus: dibaca saja, dan tetap ada untuk rollback.
+
+`DATABASE_URL` Cloud SQL memakai Cloud SQL Python Connector (`cloudsql_instance` di query, lihat
+`libs/ocr_common/ocr_common/pipeline/database.py`):
+
+```text
+# login IAM (tanpa password): service account lewat GKE Workload Identity
+postgresql+asyncpg://gc-bribrain-dev-sac-sql-01%40common-sec-dev-01.iam@/bribrain_ocr?cloudsql_instance=edm-bribrain-dev-01:asia-southeast2:gc-bribrain-dev-sql-psql-01
+# login user/password Cloud SQL biasa
+postgresql+asyncpg://<user>:<password>@/bribrain_ocr?cloudsql_instance=edm-bribrain-dev-01:asia-southeast2:gc-bribrain-dev-sql-psql-01
+```
+
+### 0. Prasyarat (tim platform / DBA)
+
+Per 5 Okt 2026 instance ini belum mendukung login IAM: flag `cloudsql.iam_authentication` tidak aktif
+dan semua user-nya `BUILT_IN`. Pilih salah satu:
+
+- **Login IAM.** Aktifkan flag `cloudsql.iam_authentication=on`; daftarkan
+  `gc-bribrain-dev-sac-sql-01@common-sec-dev-01.iam` sebagai user `CLOUD_IAM_SERVICE_ACCOUNT`; beri user
+  itu `CREATE` di database `bribrain_ocr`; beri `roles/iam.workloadIdentityUser` di GSA
+  `gc-bribrain-dev-sac-sql-01@common-sec-dev-01.iam.gserviceaccount.com` untuk
+  `serviceAccount:ddb-kubecluster-dev-01.svc.id.goog[nilam-ocr-npwp/nilam-ocr-npwp]`. Lalu buka komentar
+  `serviceAccount.annotations` di `values-ddb-dev.yaml`, commit ke main, dan `./deploy.sh all`.
+  Catatan: GSA ini dipakai bersama untuk instance berisi banyak database tim lain; GSA khusus NPWP
+  lebih aman.
+- **User/password.** DBA membuat satu user khusus dengan `CREATE` di database `bribrain_ocr`.
+
+Image semua service yang memakai database harus sudah berisi dukungan Cloud SQL (commit
+`feat(db): Cloud SQL ...` atau lebih baru): `./deploy.sh all` dari main sebelum cutover.
+
+### 1. Simpan URL tujuan di Secret
+
+```bash
+kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
+  -p '{"stringData":{"DATABASE_URL_CLOUDSQL":"<URL Cloud SQL di atas>"}}'
+```
+
+### 2. Cek dan salinan awal (service tetap jalan)
+
+```bash
+./db-job.sh copy --check   # koneksi, login, versi migrasi, jumlah baris; tidak mengubah apa pun
+./db-job.sh copy           # membuat schema + tabel di Cloud SQL, menyalin baris; aman diulang
+```
+
+Salinan awal boleh diulang kapan saja: baris yang sudah ada di Cloud SQL dilewati. Di akhir, jumlah
+baris tiap tabel dibandingkan dan `alembic check` memastikan strukturnya sama dengan migrasi.
+
+### 3. Cutover (pipeline berhenti beberapa menit)
+
+```bash
+NS=nilam-ocr-npwp; SEL=app.kubernetes.io/instance=nilam-ocr-npwp
+# catat replika, hentikan semua penulis (orchestrator + tahap)
+kubectl -n $NS get deploy -l $SEL -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}' > /tmp/replicas-before-cutover.txt
+kubectl -n $NS scale deploy -l $SEL --replicas=0
+# salinan final persis (tabel Cloud SQL dikosongkan dulu, lalu disalin ulang)
+./db-job.sh copy --replace
+# DATABASE_URL -> Cloud SQL; URL lama disimpan di DATABASE_URL_PREVIOUS untuk rollback
+old=$(kubectl -n $NS get secret nilam-ocr-npwp-secrets -o jsonpath='{.data.DATABASE_URL}')
+new=$(kubectl -n $NS get secret nilam-ocr-npwp-secrets -o jsonpath='{.data.DATABASE_URL_CLOUDSQL}')
+kubectl -n $NS patch secret nilam-ocr-npwp-secrets --type merge -p "{\"data\":{\"DATABASE_URL_PREVIOUS\":\"$old\",\"DATABASE_URL\":\"$new\"}}"
+# nyalakan lagi dengan replika semula
+while IFS='=' read -r name n; do kubectl -n $NS scale deploy "$name" --replicas="$n"; done < /tmp/replicas-before-cutover.txt
+```
+
+Lalu cek `GET /health` tiap service (`database: ok`) dan satu request `extract-ocr` lewat orchestrator.
+Migrasi berikutnya ke Cloud SQL: `./db-job.sh alembic upgrade head`, bukan `migrate-db.sh`.
+
+### Rollback
+
+Database lama tidak pernah diubah, jadi cukup kembalikan `DATABASE_URL` lalu restart:
+
+```bash
+prev=$(kubectl -n $NS get secret nilam-ocr-npwp-secrets -o jsonpath='{.data.DATABASE_URL_PREVIOUS}')
+kubectl -n $NS patch secret nilam-ocr-npwp-secrets --type merge -p "{\"data\":{\"DATABASE_URL\":\"$prev\"}}"
+kubectl -n $NS rollout restart deploy -l $SEL
+```
+
+Request yang masuk sesudah cutover hanya ada di Cloud SQL; salin balik dengan `copy_database.py`
+(`SOURCE_DATABASE_URL` = Cloud SQL) kalau datanya perlu.
+
 ## Deploy perubahan kode
 
 Install pertama tetap memakai perintah di bagian berikutnya. Setelah release ada, perubahan kode

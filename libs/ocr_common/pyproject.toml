@@ -17,6 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 db = ["sqlalchemy>=2.0", "greenlet>=3.0"]
+# Cloud SQL with IAM database authentication: a DATABASE_URL with `cloudsql_instance` (pipeline/database.py).
+cloudsql = ["cloud-sql-python-connector[asyncpg]>=1.22"]
 
 [tool.setuptools.packages.find]
 include = ["ocr_common*"]

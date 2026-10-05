@@ -4,9 +4,8 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from ocr_common.pipeline.database import PIPELINE_SCHEMA
+from ocr_common.pipeline.database import PIPELINE_SCHEMA, dispose_engines, get_engine
 from ocr_common.pipeline.tables import repo_metadata
 
 VERSION_TABLE = "nilam_ocr_npwp_alembic_version"
@@ -85,10 +84,10 @@ def run_migrations(connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(database_url())
-    async with engine.connect() as connection:
+    # The services' engine, so a Cloud SQL URL (`cloudsql_instance`, IAM login) works here too.
+    async with get_engine(database_url()).connect() as connection:
         await connection.run_sync(run_migrations)
-    await engine.dispose()
+    await dispose_engines()
 
 
 if context.is_offline_mode():

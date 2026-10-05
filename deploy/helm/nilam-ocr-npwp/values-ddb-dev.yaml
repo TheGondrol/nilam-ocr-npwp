@@ -31,6 +31,14 @@ commonEnv:
   # (tabel testing_*). Lihat README, "Endpoint testing".
   TESTING_ENDPOINTS: "true"
 
+# Pindah ke Cloud SQL dengan login IAM (deploy/helm/README.md, "Pindah ke Cloud SQL"): buka komentar ini
+# setelah tim platform memberi roles/iam.workloadIdentityUser di GSA ini untuk
+# serviceAccount:ddb-kubecluster-dev-01.svc.id.goog[nilam-ocr-npwp/nilam-ocr-npwp]. Tidak perlu untuk login
+# dengan user/password Cloud SQL biasa.
+# serviceAccount:
+#   annotations:
+#     iam.gke.io/gcp-service-account: gc-bribrain-dev-sac-sql-01@common-sec-dev-01.iam.gserviceaccount.com
+
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
   # network policy enforcement, jadi policy hanya terpasang, belum ditegakkan.

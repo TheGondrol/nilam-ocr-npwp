@@ -84,6 +84,8 @@ jobs:
           asyncio.run(main())
           PY
           DATABASE_URL="${DATABASE_URL%/*}/schema_move" python db/check_schema_move.py
+      - name: copy_database.py copies every table into a fresh database (the move to Cloud SQL)
+        run: python db/check_copy_database.py
       - name: The migration image builds
         run: docker build -f db/Dockerfile -t ci/migrate .
 
