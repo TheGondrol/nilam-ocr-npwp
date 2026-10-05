@@ -161,8 +161,10 @@ async def main() -> None:
     await check_head(before)
     await downgrade_to("0009_guardrails_results_sequence", "public", None, before)
     await check_head(before)
-    print(f"0010, 0011 + 0013 move every table and row to {SCHEMA} under {PREFIX}*, from public, ocr_pipeline and "
-          "ocr_pipeline_npwp, and back")
+    print(
+        f"0010, 0011 + 0013 move every table and row to {SCHEMA} under {PREFIX}*, from public, ocr_pipeline and "
+        "ocr_pipeline_npwp, and back"
+    )
 
 
 asyncio.run(main())

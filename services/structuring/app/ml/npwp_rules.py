@@ -5,8 +5,9 @@ Per page: the NPWP-shaped lines inside the card region compete on `npwp_priority
 15, then OCR score); the name is the nearest name-shaped line to the number (`extract_name`). Per
 document: the first page with a number / name wins, and every check the rules provide raises the
 document flag (`flag`, `flag_reason`), a feature of the trust model. Nine of the eleven checks also
-reject the document (`reject_reason`, see `TOLERATED`). Digit-homoglyph correction is switched off: a number
-with a misread letter is flagged (tolerated) and its `nomor_npwp` value is null, never a corrected or shortened number."""
+reject the document (`reject_reason`, see `TOLERATED`). Digit-homoglyph correction is switched off: a
+number with a misread letter is flagged (tolerated) and its `nomor_npwp` value is null, never a
+corrected or shortened number."""
 
 from typing import Any
 
