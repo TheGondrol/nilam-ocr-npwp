@@ -20,8 +20,11 @@ LOCK := $(PY) -m uv pip compile --generate-hashes --python-version 3.11 --python
 lock: $(SERVICES:%=lock-%) lock-db
 lock-orchestrator:
 	$(LOCK) services/orchestrator/requirements.txt libs/ocr_common/pyproject.toml --extra db --extra cloudsql -o services/orchestrator/requirements.lock
+# The PyTorch index also mirrors common packages, frozen at old versions (urllib3 1.26.13, certifi 2022.12.7, idna 3.4,
+# all with known CVEs): best-match takes each package's newest version from either index. torch / torchvision are
+# pinned to their +cpu builds in requirements.txt, which only the PyTorch index has.
 lock-guardrails:
-	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --emit-index-url -o services/guardrails/requirements.lock
+	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match --emit-index-url -o services/guardrails/requirements.lock
 lock-extraction lock-structuring lock-scoring: lock-%:
 	$(LOCK) services/$*/requirements.txt libs/ocr_common/pyproject.toml --extra db --extra cloudsql -o services/$*/requirements.lock
 lock-db:

@@ -46,6 +46,17 @@ class BaseServiceSettings(BaseSettings):
     # load tests on dev; off everywhere else, and then the routes do not exist.
     testing_endpoints: bool = False
 
+    # Elastic APM (ocr_common/web/apm.py): off, and the agent not even loaded, while ELASTIC_APM_SERVER_URL is unset.
+    # The service name defaults to `nilam-ocr-npwp-<service>` and the environment to ENVIRONMENT. The secret token
+    # or the API key comes from the Secret, whichever the APM server uses.
+    elastic_apm_server_url: str | None = None
+    elastic_apm_secret_token: str | None = None
+    elastic_apm_api_key: str | None = None
+    elastic_apm_service_name: str | None = None
+    elastic_apm_environment: str | None = None
+    elastic_apm_transaction_sample_rate: float = Field(1.0, ge=0, le=1)
+    elastic_apm_verify_server_cert: bool = True
+
     @property
     def is_local(self) -> bool:
         """True for `ENVIRONMENT=local`: the laptop mode where the safety guards are off."""

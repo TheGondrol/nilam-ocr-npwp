@@ -105,6 +105,33 @@ Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
 `externalSecret.enabled=true`; Secret dengan nama `existingSecret` lalu diisi dari Secret Manager
 (nama key di `externalSecret.remoteKeys`). Cluster dev tidak punya CRD ESO.
 
+## Elastic APM
+
+Kelima service sudah membawa agen Elastic APM (`libs/ocr_common/ocr_common/web/apm.py`), tapi **mati**
+selama `apm.serverUrl` kosong: agen tidak dimuat, tidak ada yang dikirim, dan tidak ada env APM di pod.
+Menyalakannya setelah server APM tersedia:
+
+```bash
+# token ATAU API key, sesuai server APM-nya (keduanya opsional di pod)
+kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
+  -p '{"stringData":{"ELASTIC_APM_SECRET_TOKEN":"<token>"}}'
+```
+
+lalu isi `apm.serverUrl` (dan kalau perlu `apm.environment`, `apm.transactionSampleRate`) di
+`values-ddb-dev.yaml`, commit ke main, dan `./deploy.sh all`.
+
+Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>`:
+
+- satu transaksi per request HTTP, dan satu transaksi `<STAGE> job` per job di latar belakang (yang berjalan
+  sesudah jawaban `202`), hasilnya `done` / `failed` / `interrupted`;
+- span panggilan ke service lain dan ke model OCR (httpx) dan ke database (asyncpg / SQLAlchemy);
+- label `request_id` di setiap transaksi, id yang sama dengan di log; log JSON membawa `trace.id` dan
+  `transaction.id` selama transaksi aktif, jadi log dan trace bisa dicocokkan;
+- metrik CPU dan memori proses.
+
+Body dan header request **tidak pernah** dikirim (`CAPTURE_BODY=off`, `CAPTURE_HEADERS=false`): dokumen, nomor
+NPWP, nama, dan API key tidak keluar ke server APM.
+
 ## Skema database
 
 Service tidak membuat tabel sendiri; tabel dipasang lewat migrasi Alembic ([db/](../../db)).

@@ -13,6 +13,8 @@ import uuid
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ocr_common.web import apm
+
 REQUEST_ID_HEADER = "X-Request-ID"
 
 _request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
@@ -24,7 +26,9 @@ def current_request_id() -> str | None:
 
 
 def bind_request_id(request_id: str | None) -> contextvars.Token:
-    """Binds `request_id` for the current context; pass the token to `reset_request_id` when done."""
+    """Binds `request_id` for the current context; pass the token to `reset_request_id` when done. Also the
+    `request_id` label of the current APM transaction, when APM is on."""
+    apm.label_request_id(request_id)
     return _request_id.set(request_id)
 
 

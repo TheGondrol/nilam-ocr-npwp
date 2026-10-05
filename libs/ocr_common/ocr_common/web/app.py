@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 
 from ocr_common.config import BaseServiceSettings
 from ocr_common.errors import ServiceError, error_code
+from ocr_common.web import apm
 from ocr_common.web.envelope import envelope
 from ocr_common.web.logging import configure_logging
 from ocr_common.web.metrics import MetricsMiddleware, metrics_response
@@ -149,6 +150,11 @@ def create_app(
 
     app.add_middleware(MetricsMiddleware, service=service_name or title)
     app.add_middleware(RequestIdMiddleware)
+    apm_client = apm.start(settings, f"{RELEASE}-{service_name}" if service_name else title)
+    if apm_client is not None:
+        from elasticapm.contrib.starlette import ElasticAPM
+
+        app.add_middleware(ElasticAPM, client=apm_client)  # added last = outermost: spans the whole request
     _register_exception_handlers(app)
     app.include_router(
         _health_router(

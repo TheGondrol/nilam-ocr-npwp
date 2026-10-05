@@ -24,6 +24,9 @@ secretKeys:
   orchestrationApiKey: ORCHESTRATION_API_KEY
   # Nilai X-Callback-Key untuk callback hasil Orkestrasi (orchestration.callbackFormat: result).
   callbackKey: ORCHESTRATION_CALLBACK_KEY
+  # Opsional: kredensial server Elastic APM, salah satu sesuai server APM-nya (lihat apm di bawah).
+  apmSecretToken: ELASTIC_APM_SECRET_TOKEN
+  apmApiKey: ELASTIC_APM_API_KEY
 
 # Buat Secret di atas dari GCP Secret Manager lewat External Secrets Operator.
 # Mati = Secret dibuat manual (lihat README). Butuh CRD ESO dan ClusterSecretStore di cluster.
@@ -61,6 +64,17 @@ orchestration:
   # menunggu sejumlah detik setelah menjawab 202 (OCR_CALLBACK_DEADLINE_SECONDS di sisi mereka) dan menolak
   # callback sesudahnya dengan 409 RESULT_CONFLICT; samakan dengan nilai itu.
   callbackMaxAgeSeconds: "600"
+
+# Elastic APM di kelima service (libs/ocr_common/ocr_common/web/apm.py). serverUrl kosong = mati: agen tidak dimuat
+# dan tidak ada yang dikirim. Token/API key dibaca dari Secret (secretKeys.apmSecretToken / apmApiKey), opsional.
+# Isi body dan header request tidak pernah dikirim (dokumen, NPWP, nama, API key).
+apm:
+  serverUrl: ""
+  # Kosong = nilai `environment` di atas.
+  environment: ""
+  # 1.0 = setiap request dan job dilacak; turunkan kalau volumenya besar.
+  transactionSampleRate: "1.0"
+  verifyServerCert: true
 
 commonEnv:
   # Host yang boleh dipakai file_url (presigned MinIO), dipisah koma; ".example.internal" = semua subdomain.

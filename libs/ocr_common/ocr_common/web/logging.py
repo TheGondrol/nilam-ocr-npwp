@@ -11,6 +11,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from ocr_common.web import apm
 from ocr_common.web.request_id import current_request_id
 
 LogFormat = Literal["json", "text"]
@@ -46,6 +47,7 @@ class JsonFormatter(logging.Formatter):
         }
         if self._service:
             entry["service"] = self._service
+        entry.update(apm.trace_fields())  # `trace.id`, `transaction.id` while an APM transaction is active
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)

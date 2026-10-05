@@ -13,6 +13,9 @@ dependencies = [
     "httpx>=0.27",
     "python-multipart>=0.0.9",
     "prometheus-client>=0.21",
+    # Elastic APM (ocr_common/web/apm.py), only loaded with ELASTIC_APM_SERVER_URL; psutil gives it CPU and memory.
+    "elastic-apm>=6.26",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

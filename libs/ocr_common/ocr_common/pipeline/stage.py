@@ -16,6 +16,7 @@ from ocr_common.pipeline.callbacks import NextStage, StageCallback
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage, OutboxRelay, callback_message, handoff_message
 from ocr_common.pipeline.repository import STATUS_DONE, STATUS_FAILED, STATUS_PROCESSING, JobRepository
 from ocr_common.pipeline.runner import BackgroundRunner
+from ocr_common.web import apm
 from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 logger = logging.getLogger(__name__)
@@ -131,13 +132,15 @@ class StagePipeline:
         outcome_data: CallbackResult | None = None,
         rejection: Rejection | None = None,
     ) -> None:
-        token = bind_request_id(request_id)  # log lines and downstream calls of this job carry its id
-        try:
-            await self._run_bound(
-                request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection
-            )
-        finally:
-            reset_request_id(token)
+        # One APM transaction per job: it runs after the 202, outside the HTTP request's transaction.
+        with apm.job_transaction(self.stage, request_id):
+            token = bind_request_id(request_id)  # log lines and downstream calls of this job carry its id
+            try:
+                await self._run_bound(
+                    request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection
+                )
+            finally:
+                reset_request_id(token)
 
     async def _run_bound(
         self,
@@ -183,6 +186,7 @@ class StagePipeline:
             return
         except Exception:
             logger.exception("%s job %s crashed", self.stage, request_id)
+            apm.job_failed(crashed=True)
             metrics.JOBS.labels(self.metrics_stage, metrics.OUTCOME_CRASHED).inc()
             await self._failed(request_id, f"Internal error in {self.stage} stage")
             return
@@ -261,6 +265,7 @@ class StagePipeline:
             await self.callback.notify(request_id, next_stage or self.stage, STATUS_FAILED, error_message=message)
 
     async def _failed(self, request_id: str, error_message: str) -> None:
+        apm.job_failed()
         reported = self.outbox is not None
         try:
             await self.repository.fail(
