@@ -108,18 +108,29 @@ Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
 ## Model dari GCS
 
 Guardrails dan scoring bisa mengunduh modelnya dari GCS saat start, alih-alih memakai file di image.
-Model ada di bucket `gc-bribrain-dev-gcs-ocr-nilam-01`, folder `nilam-ocr-npwp/`:
+Model ada di bucket `gc-bribrain-dev-gcs-ocr-nilam-01`, folder `nilam-ocr-npwp/`, satu path tetap per model:
 
-| Model | URI | SHA-256 |
-|---|---|---|
-| guardrails | `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt` | `275ec6f7ec07f091395168fa175193cd1e6e88324f98b8cc21ee370fe101727a` |
-| scoring | `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/20260923/trust_model.joblib` | `1f27c2d90d90587c910f562556d8131bcdb28af010b2f4ec0c6c722950689073` |
+- guardrails: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt`
+- scoring: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib`
 
 Login ke GCS lewat Workload Identity Federation dengan Entra ID (panduan Tim SEA): service account
-`gc-bribrain-dev-sac-gcs-01`, kredensialnya di `wif.gcs.env` (jangan di-commit). Unduhan dicek dengan MD5 GCS
-dan SHA-256 yang dipin; model yang tidak cocok atau gagal diunduh menghentikan start, jadi service tidak pernah
-jalan dengan model lain. Objek di GCS tidak pernah ditimpa: model baru diunggah ke folder tanggal baru, dan
-rollback cukup mengganti URI + SHA-256.
+`gc-bribrain-dev-sac-gcs-01`, kredensialnya di `wif.gcs.env` (jangan di-commit). Setiap unggahan mencatat SHA-256
+filenya di metadata objek; unduhan dicek dengan MD5 GCS dan SHA-256 itu (atau `*_MODEL_SHA256` kalau diisi). Unduhan
+yang gagal atau rusak menghentikan start, jadi service tidak pernah jalan dengan model setengah jadi.
+
+**Ganti model:** unggah menimpa objeknya, lalu restart pod-nya. Pod yang sudah jalan tetap memakai model lama
+sampai restart.
+
+```bash
+python scripts/upload_model.py <file baru> gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
+kubectl -n nilam-ocr-npwp rollout restart deploy/nilam-ocr-npwp-guardrails
+```
+
+**Rollback:** unggah lagi file model sebelumnya ke path yang sama, lalu restart. Simpan file model lama (misalnya
+dari tim ML) sebelum menimpanya; objek yang tertimpa tidak bisa diambil kembali dari bucket.
+
+Pod yang restart sendiri (crash, pindah node, scale up) juga mengambil model yang ada di GCS saat itu, jadi
+unggahan baru berlaku untuk semua pod paling lambat saat pod-pod itu restart; `rollout restart` menyamakannya.
 
 **Menyalakan di dev** (konfigurasinya sudah disiapkan, masih dikomentari di `values-ddb-dev.yaml`):
 
@@ -145,9 +156,7 @@ rollback cukup mengganti URI + SHA-256.
 3. Buka komentar `gcpWif` dan `env` guardrails / scoring di `values-ddb-dev.yaml`, commit ke main, `./deploy.sh all`.
    Log start memuat `model from gs://... as gc-bribrain-dev-sac-gcs-01@...`.
 
-**Model baru:** `python scripts/upload_model.py <file> gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/<service>/<tanggal>/<nama>`
-(kredensial dari `wif.gcs.env`), lalu ganti URI dan SHA-256 yang dicetaknya di values. Di laptop,
-`make weights` dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` (+ `_SHA256`) mengunduh ke `weights/`.
+Di laptop, `make weights` dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` mengunduh ke `weights/`.
 
 ## Elastic APM
 

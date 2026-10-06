@@ -2,11 +2,11 @@
 SCORING_MODEL_GCS_URI), then downloads it back and checks it.
 
     python scripts/upload_model.py services/guardrails/weights/best_model.pt \\
-        gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt
+        gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
 
 Credentials: GCP Workload Identity Federation with Entra ID (Tim SEA), the variables of `--env-file`
-(default wif.gcs.env, never committed) or of the environment. An existing object is never overwritten: a new
-model goes under a new path (e.g. a new date). Prints the SHA-256 to pin in *_MODEL_SHA256.
+(default wif.gcs.env, never committed) or of the environment. The object is overwritten: the services take
+the new model when their pods restart (kubectl rollout restart). Keep the previous file to roll back.
 """
 
 import argparse
@@ -24,7 +24,7 @@ from ocr_common.clients.gcp import credentials_from_env  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("file", type=Path, help="the model file")
-    parser.add_argument("uri", help="gs://bucket/path/to/file (a path not used before)")
+    parser.add_argument("uri", help="gs://bucket/path/to/file (overwritten when it exists)")
     parser.add_argument("--env-file", type=Path, default=ROOT / "wif.gcs.env")
     args = parser.parse_args()
     if not args.file.is_file():

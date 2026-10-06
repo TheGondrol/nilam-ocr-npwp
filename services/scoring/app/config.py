@@ -10,13 +10,14 @@ class Settings(PipelineSettings):
     port: int = 8033
 
     scoring_model_path: str = "weights/trust_model.joblib"
-    # The trust model from GCS instead (downloaded at start, see ocr_common/clients/models.py), pinned by SHA-256.
+    # The trust model from GCS instead (downloaded at start, see ocr_common/clients/models.py). SHA-256 optional:
+    # without it the download is checked against the SHA-256 recorded at upload.
     scoring_model_gcs_uri: str | None = None
     scoring_model_sha256: str | None = None
 
     @model_validator(mode="after")
     def _guard_scoring(self) -> Self:
-        self.require_model_pin("scoring_model_gcs_uri", self.scoring_model_gcs_uri, self.scoring_model_sha256)
+        self.check_model_uri("scoring_model_gcs_uri", self.scoring_model_gcs_uri)
         return self
 
 

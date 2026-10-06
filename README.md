@@ -575,12 +575,12 @@ Model ML di-deploy ML engineer sebagai service HTTP; repo ini membungkusnya di `
 
 ```bash
 # GCS lewat Entra ID workload identity (kredensial dari wif.gcs.env), MinIO (mc dengan alias), atau presigned URL
-GUARDRAILS_MODEL_GCS_URI=gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt
-GUARDRAILS_MODEL_SHA256=275ec6f7ec07f091395168fa175193cd1e6e88324f98b8cc21ee370fe101727a   # file yang tidak cocok ditolak
+GUARDRAILS_MODEL_GCS_URI=gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
+# GUARDRAILS_MODEL_SHA256=<sha256>   # opsional; tanpa itu dicek dengan SHA-256 yang dicatat saat unggah
 make weights && make build
 ```
 
-Bobot ada di GCS, bucket `gc-bribrain-dev-gcs-ocr-nilam-01` folder `nilam-ocr-npwp/<service>/<tanggal>/`, di path yang tidak pernah ditimpa, supaya rollback berarti mengganti URI. Di cluster, service bisa mengunduhnya sendiri saat start dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` + `_SHA256` (tanpa memasukkannya ke image; lihat [deploy/helm/README.md](deploy/helm/README.md#model-dari-gcs)); unggah model baru dengan `scripts/upload_model.py`. Image memasang wheel torch **CPU** dari index PyTorch dan menyetel `GUARDRAILS_DEVICE=cpu`. **Catatan validasi:** pada dataset lokal (halaman mutasi rekening, Paket 1/2) model menolak hampir semua halaman dan tidak berkorelasi dengan label manusia di sana; itu konsisten dengan model yang dilatih untuk foto NPWP, tapi belum diverifikasi dengan foto NPWP asli. Uji dengan sampel NPWP sungguhan sebelum dipakai untuk memutuskan, dan sesuaikan `GUARDRAILS_THRESHOLD` bila perlu.
+Bobot ada di GCS, bucket `gc-bribrain-dev-gcs-ocr-nilam-01` folder `nilam-ocr-npwp/<service>/`, satu path tetap per model; model baru diunggah menimpanya. Di cluster, service bisa mengunduhnya sendiri saat start dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` + `_SHA256` (tanpa memasukkannya ke image; lihat [deploy/helm/README.md](deploy/helm/README.md#model-dari-gcs)); unggah model baru dengan `scripts/upload_model.py`. Image memasang wheel torch **CPU** dari index PyTorch dan menyetel `GUARDRAILS_DEVICE=cpu`. **Catatan validasi:** pada dataset lokal (halaman mutasi rekening, Paket 1/2) model menolak hampir semua halaman dan tidak berkorelasi dengan label manusia di sana; itu konsisten dengan model yang dilatih untuk foto NPWP, tapi belum diverifikasi dengan foto NPWP asli. Uji dengan sampel NPWP sungguhan sebelum dipakai untuk memutuskan, dan sesuaikan `GUARDRAILS_THRESHOLD` bila perlu.
 
 **Guardrails, backend `remote` (sudah ada)**: klien ke service model guardrails milik ML engineer. Kontrak model:
 

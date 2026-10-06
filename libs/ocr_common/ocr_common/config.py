@@ -117,16 +117,11 @@ class BaseServiceSettings(BaseSettings):
                 f"set the real address when ENVIRONMENT={self.environment}"
             )
 
-    def require_model_pin(self, uri_name: str, uri: str | None, sha256: str | None) -> None:
-        """A model from GCS must be a `gs://bucket/object` URI and, when not local, pinned by its SHA-256: a
-        deployment always runs the file it was tested with, even if someone uploads over the bucket."""
-        if not uri:
-            return
-        if not uri.startswith("gs://") or "/" not in uri[5:]:
+    @staticmethod
+    def check_model_uri(uri_name: str, uri: str | None) -> None:
+        """A model from GCS must be a `gs://bucket/path/to/file` URI."""
+        if uri and (not uri.startswith("gs://") or "/" not in uri[5:] or uri.endswith("/")):
             raise ValueError(f"{uri_name.upper()} must be gs://bucket/path/to/file, not {uri!r}")
-        if not self.is_local and not sha256:
-            sha_name = uri_name.upper().removesuffix("_GCS_URI") + "_SHA256"
-            raise ValueError(f"{sha_name} must be set with {uri_name.upper()} when ENVIRONMENT={self.environment}")
 
     def reject_mock_backend_outside_local(self, **backends: str) -> None:
         """Raises when a backend is `mock` outside local: a mock fabricates results."""

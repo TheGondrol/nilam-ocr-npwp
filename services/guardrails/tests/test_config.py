@@ -40,23 +40,26 @@ def test_settings_of_the_pipeline_are_ignored(monkeypatch):
     assert not hasattr(settings, "pipeline_wait_seconds")
 
 
-GCS_URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt"
+GCS_URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt"
 
 
-def test_a_checkpoint_from_gcs_must_be_pinned_when_deployed():
-    with pytest.raises(ValidationError, match="GUARDRAILS_MODEL_SHA256 must be set"):
-        Settings(
-            api_key="x",
-            _env_file=None,
-            environment="production",
-            guardrails_backend="efficientnet",
-            guardrails_model_gcs_uri=GCS_URI,
-        )
-    assert Settings(
+def test_a_checkpoint_from_gcs_needs_no_pinned_sha256_when_deployed():
+    settings = Settings(
         api_key="x",
         _env_file=None,
         environment="production",
         guardrails_backend="efficientnet",
         guardrails_model_gcs_uri=GCS_URI,
-        guardrails_model_sha256="275ec6f7ec07f091395168fa175193cd1e6e88324f98b8cc21ee370fe101727a",
     )
+    assert settings.guardrails_model_sha256 is None
+
+
+def test_a_checkpoint_uri_must_name_a_gcs_object():
+    with pytest.raises(ValidationError, match="gs://bucket/path/to/file"):
+        Settings(
+            api_key="x",
+            _env_file=None,
+            environment="production",
+            guardrails_backend="efficientnet",
+            guardrails_model_gcs_uri="https://example/best_model.pt",
+        )

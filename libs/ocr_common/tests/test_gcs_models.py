@@ -10,7 +10,7 @@ from ocr_common.clients import gcs, models
 from ocr_common.clients.gcp import EntraTokenSupplier, WifConfig, wif_config
 from ocr_common.config import BaseServiceSettings
 
-URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/20260923/trust_model.joblib"
+URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib"
 CONTENT = b"the trust model"
 SHA256 = hashlib.sha256(CONTENT).hexdigest()
 MD5 = base64.b64encode(hashlib.md5(CONTENT, usedforsecurity=False).digest()).decode()
@@ -66,8 +66,6 @@ class FakeSession:
     def post(self, url, params=None, data: bytes = b"", headers=None, timeout=None):
         self.uploads.append({"params": params, "data": data, "headers": headers})
         head = json.loads(data.split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0])
-        if head["name"] in self.objects:
-            return Response(412, {"error": {"message": "precondition"}})
         return Response(200, {"name": head["name"], "metadata": head["metadata"], "md5Hash": MD5, "size": "15"})
 
 
@@ -121,19 +119,17 @@ def test_a_file_already_there_with_the_expected_sha256_is_not_downloaded_again(s
 
 def test_a_missing_object_says_which(session, tmp_path):
     with pytest.raises(gcs.GcsError, match="404"):
-        gcs.download(URI.replace("20260923", "19990101"), tmp_path / "m", credentials=None)
+        gcs.download(URI.replace("trust_model", "no_such_model"), tmp_path / "m", credentials=None)
 
 
-def test_an_upload_records_the_sha256_and_never_overwrites(session, tmp_path):
-    model = tmp_path / "best_model.pt"
+def test_an_upload_overwrites_the_object_and_records_the_sha256(session, tmp_path):
+    model = tmp_path / "trust_model.joblib"
     model.write_bytes(CONTENT)
 
-    stored = gcs.upload(model, URI.replace("scoring/20260923/trust_model.joblib", "new/m.pt"), credentials=None)
+    stored = gcs.upload(model, URI, credentials=None)  # the object already exists: replaced
 
     assert stored["metadata"] == {"sha256": SHA256}
-    assert session.uploads[-1]["params"] == {"uploadType": "multipart", "ifGenerationMatch": "0"}
-    with pytest.raises(gcs.GcsError, match="never overwritten"):
-        gcs.upload(model, URI, credentials=None)
+    assert session.uploads[-1]["params"] == {"uploadType": "multipart"}
 
 
 def test_wif_config_is_all_or_nothing():
@@ -208,11 +204,9 @@ def test_a_gcs_uri_is_downloaded_into_the_models_dir(monkeypatch, tmp_path):
     assert calls == [(URI, Path(path), SHA256)]
 
 
-def test_a_deployed_model_from_gcs_must_be_pinned():
-    production = BaseServiceSettings(api_key="k", environment="production", _env_file=None)
-    with pytest.raises(ValueError, match="SCORING_MODEL_SHA256 must be set"):
-        production.require_model_pin("scoring_model_gcs_uri", URI, None)
-    production.require_model_pin("scoring_model_gcs_uri", URI, SHA256)
-    production.require_model_pin("scoring_model_gcs_uri", None, None)
-    with pytest.raises(ValueError, match="gs://bucket"):
-        _settings().require_model_pin("scoring_model_gcs_uri", "https://x/m.joblib", SHA256)
+def test_a_model_uri_must_name_a_gcs_object():
+    BaseServiceSettings.check_model_uri("scoring_model_gcs_uri", URI)
+    BaseServiceSettings.check_model_uri("scoring_model_gcs_uri", None)
+    for bad in ("https://x/m.joblib", "gs://bucket-only", "gs://bucket/dir/"):
+        with pytest.raises(ValueError, match="SCORING_MODEL_GCS_URI must be gs://bucket"):
+            BaseServiceSettings.check_model_uri("scoring_model_gcs_uri", bad)

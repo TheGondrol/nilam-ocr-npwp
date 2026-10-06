@@ -1,9 +1,9 @@
 """Model files in Google Cloud Storage: upload once, download where a service starts, verified both ways.
 
-An object is never overwritten (`ifGenerationMatch=0`): a new model goes under a new path, so the one a
-deployment pins stays exactly what it was and a rollback is a config change. Each upload records the file's
-SHA-256 in the object's metadata; a download checks the object's MD5 (GCS's own) always, and the SHA-256 the
-caller pins (`*_MODEL_SHA256`) or, without one, the one recorded at upload.
+One fixed path per model: a new model is uploaded over the old one and the services pick it up when their pods
+restart. Each upload records the file's SHA-256 in the object's metadata; a download checks the object's MD5
+(GCS's own) always, and the SHA-256 the caller pins (`*_MODEL_SHA256`, optional) or, without one, the one
+recorded at upload.
 
 Only `google-auth[requests]` (the `gcs` extra of ocr-common): the JSON API is called directly.
 """
@@ -90,8 +90,8 @@ def metadata(uri: str, credentials: Any) -> dict[str, Any]:
 
 
 def upload(path: Path, uri: str, credentials: Any) -> dict[str, Any]:
-    """Uploads `path` as `uri`, refusing to overwrite an existing object, with its SHA-256 in the metadata;
-    checks the MD5 GCS computed against the file's. Returns the new object's metadata."""
+    """Uploads `path` as `uri`, over the object there if any, with its SHA-256 in the metadata; checks the MD5
+    GCS computed against the file's. Returns the new object's metadata."""
     obj = GcsObject.parse(uri)
     sha256, md5 = file_digests(path)
     boundary = uuid.uuid4().hex
@@ -107,13 +107,11 @@ def upload(path: Path, uri: str, credentials: Any) -> dict[str, Any]:
     )
     response = _session(credentials).post(
         f"{UPLOAD_API}/b/{obj.bucket}/o",
-        params={"uploadType": "multipart", "ifGenerationMatch": "0"},
+        params={"uploadType": "multipart"},
         data=body,
         headers={"Content-Type": f"multipart/related; boundary={boundary}"},
         timeout=300,
     )
-    if response.status_code == 412:
-        raise GcsError(f"{obj.uri} already exists: objects are never overwritten, upload under a new path")
     _check(response, "uploading", obj)
     stored = response.json()
     if stored.get("md5Hash") != md5:

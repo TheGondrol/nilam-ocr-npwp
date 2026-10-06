@@ -4,7 +4,8 @@ or, with a `gs://` URI configured, the object downloaded from GCS at start and v
 The download uses GCP Workload Identity Federation with Entra ID (ocr_common.clients.gcp): AZURE_TENANT_ID,
 AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, GCP_PROJECT_NUMBER, GCP_POOL_ID, GCP_PROVIDER_ID, GCP_SERVICE_ACCOUNT_EMAIL
 (Tim SEA's GCS identity). A URI without them, or a download that fails or does not match its SHA-256, stops the
-start: a service never runs with a model other than the one configured.
+start: a service never runs with a half-downloaded or corrupted model. The object at the URI is replaced when a
+new model is uploaded; pods take it when they restart.
 """
 
 import logging
