@@ -114,9 +114,13 @@ jobs:
             env: ""
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder weights (the checkpoint is not in git; this image is never pushed)
+      # The models are in GCS and baked in by deploy.sh; CI has no GCS credentials and these images are never pushed.
+      - name: Placeholder weights (guardrails runs with the mock backend here)
         if: matrix.service == 'guardrails'
         run: touch services/guardrails/weights/best_model.pt
+      - name: Trust model from the test fixtures (scoring loads and checks it at start)
+        if: matrix.service == 'scoring'
+        run: cp services/scoring/tests/fixtures/trust_model.joblib services/scoring/weights/
       - name: Build (hashes in requirements.lock are verified by pip --require-hashes)
         run: docker build -f services/${{ matrix.service }}/Dockerfile -t ci/${{ matrix.service }} .
       - name: Starts, then stops gracefully on SIGTERM

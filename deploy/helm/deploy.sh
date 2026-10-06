@@ -11,6 +11,8 @@ REGISTRY="${REGISTRY:-asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribr
 IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 TIMEOUT="${TIMEOUT:-10m}"
+# Python with ocr_common's dependencies (the repo's .venv), to fetch the models from GCS before a build.
+PY="${PY:-python}"
 # Revisi release yang disimpan Helm (satu Secret sh.helm.release.v1.<release>.vN per revisi), untuk rollback.
 HISTORY_MAX="${HISTORY_MAX:-5}"
 ALL_SERVICES=(orchestrator guardrails extraction structuring scoring)
@@ -22,6 +24,10 @@ Pemakaian: deploy/helm/deploy.sh [opsi] <service...|all>
 Build image service yang disebut, push ke Artifact Registry, lalu helm upgrade
 release $RELEASE dengan tag baru hanya untuk service tersebut. Tiap service adalah
 Deployment sendiri ($RELEASE-<service>), jadi hanya pod service itu yang diganti.
+
+Model guardrails dan scoring diambil dulu dari GCS (scripts/fetch_weights.py, kredensial dari wif.gcs.env
+atau Application Default Credentials) lalu ikut di dalam image; SHA-256-nya jadi label image
+nilam.model.sha256. Gagal mengambil model = build dibatalkan.
 
 Deploy (helm upgrade) hanya dari branch main yang sama persis dengan origin/main, tanpa
 perubahan yang belum di-commit. Branch lain hanya boleh --build-only atau --dry-run.
@@ -40,7 +46,7 @@ Opsi:
   -y, --yes       tanpa konfirmasi
   -h, --help      tampilkan bantuan ini
 
-Environment: DEPLOY_ENV (default ddb-dev -> values-ddb-dev.yaml), RELEASE, NAMESPACE,
+Environment: DEPLOY_ENV (default ddb-dev -> values-ddb-dev.yaml), RELEASE, NAMESPACE, PY (Python .venv),
 REGISTRY, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
 untuk rollback, default 5).
 
@@ -153,13 +159,32 @@ if [[ $ASSUME_YES -eq 0 && $DRY_RUN -eq 0 ]]; then
 fi
 
 if [[ $SKIP_BUILD -eq 0 && $DRY_RUN -eq 0 ]]; then
-  if [[ " ${SERVICES[*]} " == *" guardrails "* && ! -f services/guardrails/weights/best_model.pt ]]; then
-    die "services/guardrails/weights/best_model.pt tidak ada; jalankan 'make weights' dulu"
+  # The models are in GCS, one fixed path each, overwritten by a new model. Every guardrails / scoring build takes
+  # the current one and bakes it in, so an image tag is also a model version: rolling back an image rolls back its
+  # model. Its SHA-256 becomes the image label nilam.model.sha256 (docker inspect shows which model is inside).
+  declare -A MODEL_SHA=()
+  MODEL_SERVICES=()
+  for svc in "${SERVICES[@]}"; do
+    [[ "$svc" == guardrails || "$svc" == scoring ]] && MODEL_SERVICES+=("$svc")
+  done
+  if [[ ${#MODEL_SERVICES[@]} -gt 0 ]]; then
+    log "Model dari GCS: ${MODEL_SERVICES[*]}"
+    "$PY" -c "import google.auth" 2>/dev/null \
+      || die "$PY tidak punya google-auth: aktifkan .venv (make dev) atau set PY=<python .venv>"
+    fetched="$("$PY" scripts/fetch_weights.py "${MODEL_SERVICES[@]}")" \
+      || die "model tidak bisa diambil dari GCS (lihat pesan di atas); build dibatalkan"
+    while read -r name _ sha; do
+      MODEL_SHA[$name]="$sha"
+      echo "  $name: sha256 $sha"
+    done <<< "$fetched"
   fi
 
   for svc in "${SERVICES[@]}"; do
     log "Build $svc -> $(image_ref "$svc")"
-    docker build --platform linux/amd64 -f "services/$svc/Dockerfile" -t "$(image_ref "$svc")" .
+    labels=()
+    [[ -n "${MODEL_SHA[$svc]:-}" ]] && labels=(--label "nilam.model.sha256=${MODEL_SHA[$svc]}")
+    docker build --platform linux/amd64 ${labels[@]+"${labels[@]}"} -f "services/$svc/Dockerfile" \
+      -t "$(image_ref "$svc")" .
   done
 
   DOCKER_TMP_CONFIG="$(mktemp -d)"

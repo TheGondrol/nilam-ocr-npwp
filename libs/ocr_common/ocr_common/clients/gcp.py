@@ -6,6 +6,10 @@
 The result is an ordinary google-auth credential that renews itself (every token lives an hour), so a
 long-running service keeps working. The settings are the guide's environment variables: AZURE_TENANT_ID,
 AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, GCP_PROJECT_NUMBER, GCP_POOL_ID, GCP_PROVIDER_ID, GCP_SERVICE_ACCOUNT_EMAIL.
+
+Without them, `google_credentials` falls back to Application Default Credentials: the service account attached to
+a Compute Engine VM, GKE Workload Identity, or `gcloud auth application-default login` on a laptop. Inside GCP
+that is the better way: no client secret to keep anywhere.
 """
 
 import json
@@ -110,14 +114,35 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def credentials_from_env(env_file: Path | None = None) -> tuple[identity_pool.Credentials, str]:
-    """For scripts on a laptop: the credentials from `env_file` (when it exists) over `os.environ`, and the service
-    account they act as. `SystemExit` when neither has them."""
-    values = {**os.environ, **(read_env_file(env_file) if env_file and env_file.is_file() else {})}
+def google_credentials(values: Mapping[str, str | None]) -> tuple[Any, str]:
+    """The credentials to call Google APIs with, and whose they are: Entra ID workload identity federation when the
+    variables of `ENV_NAMES` are set in `values`, else Application Default Credentials. `RuntimeError` when there
+    are neither."""
     config = wif_config(values)
-    if config is None:
-        raise SystemExit(f"no GCP credentials: set {', '.join(ENV_NAMES.values())} (see wif.gcs.env) or --env-file")
-    return wif_credentials(config), config.service_account_email
+    if config is not None:
+        return wif_credentials(config), f"{config.service_account_email} (Entra ID workload identity federation)"
+    import google.auth
+
+    try:
+        credentials, _ = google.auth.default(scopes=[CLOUD_PLATFORM_SCOPE])
+    except exceptions.DefaultCredentialsError as exc:
+        raise RuntimeError(
+            f"no Google credentials: set {', '.join(ENV_NAMES.values())} (Tim SEA's workload identity, e.g. "
+            "wif.gcs.env), or run where Application Default Credentials exist (a VM's service account, GKE "
+            "Workload Identity, `gcloud auth application-default login`)"
+        ) from exc
+    who = getattr(credentials, "service_account_email", None) or "application default credentials"
+    return credentials, f"{who} (application default credentials)"
+
+
+def credentials_from_env(env_file: Path | None = None) -> tuple[Any, str]:
+    """For scripts: `google_credentials` from `env_file` (when it exists) over `os.environ`; `SystemExit` when there
+    are none."""
+    values = {**os.environ, **(read_env_file(env_file) if env_file and env_file.is_file() else {})}
+    try:
+        return google_credentials(values)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def wif_credentials(config: WifConfig, scopes: tuple[str, ...] = (CLOUD_PLATFORM_SCOPE,)) -> identity_pool.Credentials:

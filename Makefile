@@ -68,7 +68,7 @@ db-external:
 	$(PY) db/external/apply.py
 
 weights:
-	$(PY) scripts/fetch_weights.py || [ $$? -eq 2 ]
+	$(PY) scripts/fetch_weights.py
 
 build:
 	docker compose build

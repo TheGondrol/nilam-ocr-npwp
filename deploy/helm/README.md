@@ -107,56 +107,41 @@ Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
 
 ## Model dari GCS
 
-Guardrails dan scoring bisa mengunduh modelnya dari GCS saat start, alih-alih memakai file di image.
-Model ada di bucket `gc-bribrain-dev-gcs-ocr-nilam-01`, folder `nilam-ocr-npwp/`, satu path tetap per model:
+Model guardrails dan scoring disimpan di GCS, satu path tetap per model:
 
 - guardrails: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt`
 - scoring: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib`
 
-Login ke GCS lewat Workload Identity Federation dengan Entra ID (panduan Tim SEA): service account
-`gc-bribrain-dev-sac-gcs-01`, kredensialnya di `wif.gcs.env` (jangan di-commit). Setiap unggahan mencatat SHA-256
-filenya di metadata objek; unduhan dicek dengan MD5 GCS dan SHA-256 itu (atau `*_MODEL_SHA256` kalau diisi). Unduhan
-yang gagal atau rusak menghentikan start, jadi service tidak pernah jalan dengan model setengah jadi.
+**Model ikut ke dalam image saat build.** Setiap `./deploy.sh` yang membangun guardrails atau scoring mengambil
+model terbaru dari GCS lebih dulu (`scripts/fetch_weights.py`, dicek MD5 dan SHA-256), lalu `docker build`
+menyalinnya ke image dan memberi label `nilam.model.sha256`. Model gagal diambil = build dibatalkan. Container tidak
+butuh GCS atau kredensial apa pun saat berjalan, jadi image yang sama jalan di GKE maupun Compute Engine.
 
-**Ganti model:** unggah menimpa objeknya, lalu restart pod-nya. Pod yang sudah jalan tetap memakai model lama
-sampai restart.
+Kredensial GCS di mesin build (`ocr_common.clients.gcp.google_credentials`), salah satu:
+
+- `wif.gcs.env` di root repo (Entra ID workload identity dari Tim SEA; jangan di-commit), atau variabel
+  `AZURE_*` / `GCP_*`-nya di environment;
+- tanpa itu, Application Default Credentials: service account VM / runner CI yang punya akses ke bucket, atau
+  `gcloud auth application-default login` di laptop.
+
+`deploy.sh` butuh Python dari `.venv` repo (`make dev`); arahkan dengan `PY=...` kalau bukan `python`.
+
+**Ganti model:** unggah menimpa objeknya, lalu build dan deploy service-nya:
 
 ```bash
 python scripts/upload_model.py <file baru> gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
-kubectl -n nilam-ocr-npwp rollout restart deploy/nilam-ocr-npwp-guardrails
+./deploy.sh guardrails
 ```
 
-**Rollback:** unggah lagi file model sebelumnya ke path yang sama, lalu restart. Simpan file model lama (misalnya
-dari tim ML) sebelum menimpanya; objek yang tertimpa tidak bisa diambil kembali dari bucket.
+**Rollback:** setiap image membawa modelnya sendiri, jadi deploy image tag sebelumnya mengembalikan model lamanya
+juga: `./deploy.sh --skip-build --tag <sha commit sebelumnya> guardrails`. Model yang ada di image:
+`docker inspect --format '{{ index .Config.Labels "nilam.model.sha256" }}' <image>`. Objek GCS yang tertimpa sendiri
+tidak bisa diambil kembali; build berikutnya memakai isi GCS saat itu.
 
-Pod yang restart sendiri (crash, pindah node, scale up) juga mengambil model yang ada di GCS saat itu, jadi
-unggahan baru berlaku untuk semua pod paling lambat saat pod-pod itu restart; `rollout restart` menyamakannya.
-
-**Menyalakan di dev** (konfigurasinya sudah disiapkan, masih dikomentari di `values-ddb-dev.yaml`):
-
-1. Pastikan pod bisa menjangkau Entra ID dan Google API (panduan Tim SEA bagian 4):
-
-   ```bash
-   kubectl -n nilam-ocr-npwp exec deploy/nilam-ocr-npwp-guardrails -- python -c "
-   import socket, ssl
-   for h in ('login.microsoftonline.com', 'sts.googleapis.com', 'iamcredentials.googleapis.com', 'storage.googleapis.com'):
-       try:
-           ssl.create_default_context().wrap_socket(socket.create_connection((h, 443), timeout=8), server_hostname=h).close(); print(h, 'OK')
-       except Exception as e:
-           print(h, 'FAIL', e)"
-   ```
-
-   Ada yang `FAIL`: minta tim network membuka akses keluar HTTPS ke domain itu dulu.
-2. Simpan client secret Entra ID (nilai `AZURE_CLIENT_SECRET` di `wif.gcs.env`) di Secret:
-
-   ```bash
-   kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
-     -p '{"stringData":{"AZURE_CLIENT_SECRET":"<client secret>"}}'
-   ```
-3. Buka komentar `gcpWif` dan `env` guardrails / scoring di `values-ddb-dev.yaml`, commit ke main, `./deploy.sh all`.
-   Log start memuat `model from gs://... as gc-bribrain-dev-sac-gcs-01@...`.
-
-Di laptop, `make weights` dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` mengunduh ke `weights/`.
+**Opsi: ambil saat start alih-alih saat build.** Dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` di env,
+service mengunduh model sendiri saat start dan mengabaikan yang ada di image (ganti model cukup unggah + restart,
+tanpa build). Kredensialnya sama: `gcpWif.*` + `AZURE_CLIENT_SECRET` di Secret, atau Application Default Credentials
+(Workload Identity di GKE, service account VM di Compute Engine). Mati secara default; tidak dipakai di dev.
 
 ## Elastic APM
 

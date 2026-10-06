@@ -39,18 +39,8 @@ commonEnv:
 #   annotations:
 #     iam.gke.io/gcp-service-account: gc-bribrain-dev-sac-sql-01@common-sec-dev-01.iam.gserviceaccount.com
 
-# Model guardrails dan scoring dari GCS (bucket gc-bribrain-dev-gcs-ocr-nilam-01, folder nilam-ocr-npwp; diunggah
-# 6 Okt 2026 dengan scripts/upload_model.py; model baru menimpa objeknya, pod mengambilnya saat restart). Buka
-# komentar ini, juga GUARDRAILS_/SCORING_MODEL_GCS_URI di
-# services di bawah, setelah: (1) Secret punya AZURE_CLIENT_SECRET dari wif.gcs.env; (2) pod terbukti bisa
-# menjangkau login.microsoftonline.com dan *.googleapis.com (deploy/helm/README.md, "Model dari GCS").
-# gcpWif:
-#   tenantId: 76795979-244b-45d7-b043-ae27e60f46ee
-#   clientId: 85add4a1-bd8e-48b1-9d72-658159f734a5
-#   projectNumber: "849229018263"
-#   poolId: gc-entra-dev-idp-oidc-01
-#   providerId: entra-bri-pool-dev
-#   serviceAccountEmail: gc-bribrain-dev-sac-gcs-01@common-sec-dev-01.iam.gserviceaccount.com
+# Model guardrails dan scoring ikut di dalam image: deploy.sh mengambilnya dari GCS sebelum build
+# (deploy/helm/README.md, "Model dari GCS"). Opsi ambil-saat-start (gcpWif, *_MODEL_GCS_URI) tidak dipakai di dev.
 
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
@@ -62,8 +52,6 @@ services:
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070
   guardrails:
-    # env:
-    #   GUARDRAILS_MODEL_GCS_URI: gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
     # Cluster dev penuh (node pool di ukuran maksimum, 29 Sep 2026): pod guardrails kedua (1 CPU, 1 Gi) saat
     # surge tidak pernah dapat node, jadi helm --wait menunggu sampai timeout. Pod lama dimatikan dulu dan
     # penggantinya memakai slotnya; guardrails tidak tersedia selama pod baru menyala (~30-60 dtk).
@@ -76,9 +64,6 @@ services:
     resources:
       requests:
         cpu: 500m
-  # scoring:
-  #   env:
-  #     SCORING_MODEL_GCS_URI: gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib
 
 # Node l5uf di cluster dev rusak tetapi tetap Ready dan menerima pod (29 Sep 2026): sandbox pod baru tidak
 # pernah dibuat (FailedCreatePodSandBox DeadlineExceeded) dan pod tim lain macet Terminating di sana. Pod

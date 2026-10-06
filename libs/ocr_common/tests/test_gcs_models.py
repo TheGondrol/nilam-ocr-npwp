@@ -7,7 +7,7 @@ import pytest
 from google.auth import exceptions
 
 from ocr_common.clients import gcs, models
-from ocr_common.clients.gcp import EntraTokenSupplier, WifConfig, wif_config
+from ocr_common.clients.gcp import EntraTokenSupplier, WifConfig, google_credentials, wif_config
 from ocr_common.config import BaseServiceSettings
 
 URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib"
@@ -186,9 +186,45 @@ def test_without_a_gcs_uri_the_local_path_is_used():
     assert models.model_file("weights/m.joblib", None, None, _settings()) == "weights/m.joblib"
 
 
-def test_a_gcs_uri_without_credentials_stops_the_start():
-    with pytest.raises(RuntimeError, match="needs GCP credentials"):
+@pytest.fixture
+def no_default_credentials(monkeypatch):
+    """No Application Default Credentials, whatever the machine running the tests has."""
+
+    def default(scopes=None):
+        raise exceptions.DefaultCredentialsError("none")
+
+    monkeypatch.setattr("google.auth.default", default)
+
+
+def test_a_gcs_uri_without_credentials_stops_the_start(no_default_credentials):
+    with pytest.raises(RuntimeError, match="no Google credentials"):
         models.model_file("weights/m.joblib", URI, SHA256, _settings())
+
+
+def test_without_the_entra_variables_application_default_credentials_are_used(monkeypatch):
+    class VmServiceAccount:
+        service_account_email = "vm-sa@project.iam.gserviceaccount.com"
+
+    seen = {}
+
+    def default(scopes=None):
+        seen["scopes"] = scopes
+        return VmServiceAccount(), "project"
+
+    monkeypatch.setattr("google.auth.default", default)
+
+    credentials, who = google_credentials({})
+
+    assert isinstance(credentials, VmServiceAccount)
+    assert who == "vm-sa@project.iam.gserviceaccount.com (application default credentials)"
+    assert seen["scopes"] == ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+def test_the_entra_variables_take_precedence_over_default_credentials(no_default_credentials):
+    credentials, who = google_credentials(WIF_ENV)
+
+    assert who == "sa@project.iam.gserviceaccount.com (Entra ID workload identity federation)"
+    assert credentials.__class__.__name__ == "Credentials"
 
 
 def test_a_gcs_uri_is_downloaded_into_the_models_dir(monkeypatch, tmp_path):
