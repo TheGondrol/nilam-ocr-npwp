@@ -105,6 +105,50 @@ Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
 `externalSecret.enabled=true`; Secret dengan nama `existingSecret` lalu diisi dari Secret Manager
 (nama key di `externalSecret.remoteKeys`). Cluster dev tidak punya CRD ESO.
 
+## Model dari GCS
+
+Guardrails dan scoring bisa mengunduh modelnya dari GCS saat start, alih-alih memakai file di image.
+Model ada di bucket `gc-bribrain-dev-gcs-ocr-nilam-01`, folder `nilam-ocr-npwp/`:
+
+| Model | URI | SHA-256 |
+|---|---|---|
+| guardrails | `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt` | `275ec6f7ec07f091395168fa175193cd1e6e88324f98b8cc21ee370fe101727a` |
+| scoring | `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/20260923/trust_model.joblib` | `1f27c2d90d90587c910f562556d8131bcdb28af010b2f4ec0c6c722950689073` |
+
+Login ke GCS lewat Workload Identity Federation dengan Entra ID (panduan Tim SEA): service account
+`gc-bribrain-dev-sac-gcs-01`, kredensialnya di `wif.gcs.env` (jangan di-commit). Unduhan dicek dengan MD5 GCS
+dan SHA-256 yang dipin; model yang tidak cocok atau gagal diunduh menghentikan start, jadi service tidak pernah
+jalan dengan model lain. Objek di GCS tidak pernah ditimpa: model baru diunggah ke folder tanggal baru, dan
+rollback cukup mengganti URI + SHA-256.
+
+**Menyalakan di dev** (konfigurasinya sudah disiapkan, masih dikomentari di `values-ddb-dev.yaml`):
+
+1. Pastikan pod bisa menjangkau Entra ID dan Google API (panduan Tim SEA bagian 4):
+
+   ```bash
+   kubectl -n nilam-ocr-npwp exec deploy/nilam-ocr-npwp-guardrails -- python -c "
+   import socket, ssl
+   for h in ('login.microsoftonline.com', 'sts.googleapis.com', 'iamcredentials.googleapis.com', 'storage.googleapis.com'):
+       try:
+           ssl.create_default_context().wrap_socket(socket.create_connection((h, 443), timeout=8), server_hostname=h).close(); print(h, 'OK')
+       except Exception as e:
+           print(h, 'FAIL', e)"
+   ```
+
+   Ada yang `FAIL`: minta tim network membuka akses keluar HTTPS ke domain itu dulu.
+2. Simpan client secret Entra ID (nilai `AZURE_CLIENT_SECRET` di `wif.gcs.env`) di Secret:
+
+   ```bash
+   kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
+     -p '{"stringData":{"AZURE_CLIENT_SECRET":"<client secret>"}}'
+   ```
+3. Buka komentar `gcpWif` dan `env` guardrails / scoring di `values-ddb-dev.yaml`, commit ke main, `./deploy.sh all`.
+   Log start memuat `model from gs://... as gc-bribrain-dev-sac-gcs-01@...`.
+
+**Model baru:** `python scripts/upload_model.py <file> gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/<service>/<tanggal>/<nama>`
+(kredensial dari `wif.gcs.env`), lalu ganti URI dan SHA-256 yang dicetaknya di values. Di laptop,
+`make weights` dengan `GUARDRAILS_MODEL_GCS_URI` / `SCORING_MODEL_GCS_URI` (+ `_SHA256`) mengunduh ke `weights/`.
+
 ## Elastic APM
 
 Kelima service sudah membawa agen Elastic APM (`libs/ocr_common/ocr_common/web/apm.py`), tapi **mati**

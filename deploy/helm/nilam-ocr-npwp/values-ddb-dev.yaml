@@ -39,6 +39,18 @@ commonEnv:
 #   annotations:
 #     iam.gke.io/gcp-service-account: gc-bribrain-dev-sac-sql-01@common-sec-dev-01.iam.gserviceaccount.com
 
+# Model guardrails dan scoring dari GCS (bucket gc-bribrain-dev-gcs-ocr-nilam-01, folder nilam-ocr-npwp; diunggah
+# 6 Okt 2026 dengan scripts/upload_model.py). Buka komentar ini, juga GUARDRAILS_/SCORING_MODEL_GCS_URI di
+# services di bawah, setelah: (1) Secret punya AZURE_CLIENT_SECRET dari wif.gcs.env; (2) pod terbukti bisa
+# menjangkau login.microsoftonline.com dan *.googleapis.com (deploy/helm/README.md, "Model dari GCS").
+# gcpWif:
+#   tenantId: 76795979-244b-45d7-b043-ae27e60f46ee
+#   clientId: 85add4a1-bd8e-48b1-9d72-658159f734a5
+#   projectNumber: "849229018263"
+#   poolId: gc-entra-dev-idp-oidc-01
+#   providerId: entra-bri-pool-dev
+#   serviceAccountEmail: gc-bribrain-dev-sac-gcs-01@common-sec-dev-01.iam.gserviceaccount.com
+
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
   # network policy enforcement, jadi policy hanya terpasang, belum ditegakkan.
@@ -49,6 +61,9 @@ services:
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070
   guardrails:
+    # env:
+    #   GUARDRAILS_MODEL_GCS_URI: gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/20260923/best_model.pt
+    #   GUARDRAILS_MODEL_SHA256: 275ec6f7ec07f091395168fa175193cd1e6e88324f98b8cc21ee370fe101727a
     # Cluster dev penuh (node pool di ukuran maksimum, 29 Sep 2026): pod guardrails kedua (1 CPU, 1 Gi) saat
     # surge tidak pernah dapat node, jadi helm --wait menunggu sampai timeout. Pod lama dimatikan dulu dan
     # penggantinya memakai slotnya; guardrails tidak tersedia selama pod baru menyala (~30-60 dtk).
@@ -61,6 +76,10 @@ services:
     resources:
       requests:
         cpu: 500m
+  # scoring:
+  #   env:
+  #     SCORING_MODEL_GCS_URI: gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/20260923/trust_model.joblib
+  #     SCORING_MODEL_SHA256: 1f27c2d90d90587c910f562556d8131bcdb28af010b2f4ec0c6c722950689073
 
 # Node l5uf di cluster dev rusak tetapi tetap Ready dan menerima pod (29 Sep 2026): sandbox pod baru tidak
 # pernah dibuat (FailedCreatePodSandBox DeadlineExceeded) dan pod tim lain macet Terminating di sana. Pod

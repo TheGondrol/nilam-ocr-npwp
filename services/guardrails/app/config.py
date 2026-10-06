@@ -16,6 +16,9 @@ class Settings(BaseServiceSettings):
     guardrails_model_timeout_seconds: float = 30.0
 
     guardrails_model_path: str = "weights/best_model.pt"
+    # The checkpoint from GCS instead (downloaded at start, see ocr_common/clients/models.py), pinned by SHA-256.
+    guardrails_model_gcs_uri: str | None = None
+    guardrails_model_sha256: str | None = None
     guardrails_device: str = "cpu"
     guardrails_torch_threads: int | None = None
     guardrails_threshold: float | None = Field(None, gt=0, lt=1)
@@ -37,6 +40,7 @@ class Settings(BaseServiceSettings):
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:
         self.reject_mock_backend_outside_local(guardrails_backend=self.guardrails_backend)
+        self.require_model_pin("guardrails_model_gcs_uri", self.guardrails_model_gcs_uri, self.guardrails_model_sha256)
         self.reject_localhost_outside_local(
             guardrails_model_url=self.guardrails_model_url, guardrails_threshold_url=self.guardrails_threshold_url
         )

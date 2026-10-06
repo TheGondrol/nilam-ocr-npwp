@@ -5,6 +5,7 @@ Every `get_*` here is what the routes take through `Depends(...)` and what tests
 
 from functools import lru_cache
 
+from ocr_common.clients.models import model_file
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.registry import Factory, build_backend
 
@@ -34,7 +35,14 @@ def _build_remote(settings: Settings) -> RemoteGuardrailsModel:
 CLASSIFIER_BACKENDS: dict[str, Factory[Classifier]] = {
     "mock": lambda settings: MockPageClassifier(),
     "efficientnet": lambda settings: EfficientNetPageClassifier(
-        settings.guardrails_model_path, settings.guardrails_device, settings.guardrails_torch_threads
+        model_file(
+            settings.guardrails_model_path,
+            settings.guardrails_model_gcs_uri,
+            settings.guardrails_model_sha256,
+            settings,
+        ),
+        settings.guardrails_device,
+        settings.guardrails_torch_threads,
     ),
     "remote": _build_remote,
 }

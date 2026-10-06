@@ -27,6 +27,8 @@ secretKeys:
   # Opsional: kredensial server Elastic APM, salah satu sesuai server APM-nya (lihat apm di bawah).
   apmSecretToken: ELASTIC_APM_SECRET_TOKEN
   apmApiKey: ELASTIC_APM_API_KEY
+  # Client secret app Entra ID untuk identitas GCS (gcpWif di bawah); wajib di Secret begitu gcpWif.clientId diisi.
+  gcpWifClientSecret: AZURE_CLIENT_SECRET
 
 # Buat Secret di atas dari GCP Secret Manager lewat External Secrets Operator.
 # Mati = Secret dibuat manual (lihat README). Butuh CRD ESO dan ClusterSecretStore di cluster.
@@ -75,6 +77,17 @@ apm:
   # 1.0 = setiap request dan job dilacak; turunkan kalau volumenya besar.
   transactionSampleRate: "1.0"
   verifyServerCert: true
+
+# Identitas GCP lewat Workload Identity Federation dengan Entra ID (panduan Tim SEA, wif.gcs.env), dipakai service
+# dengan `gcsModels: true` untuk mengunduh modelnya dari GCS saat start (<SERVICE>_MODEL_GCS_URI + _SHA256 di
+# services.<nama>.env). clientId kosong = tidak dirender; client secret dari Secret (secretKeys.gcpWifClientSecret).
+gcpWif:
+  tenantId: ""
+  clientId: ""
+  projectNumber: ""
+  poolId: ""
+  providerId: ""
+  serviceAccountEmail: ""
 
 commonEnv:
   # Host yang boleh dipakai file_url (presigned MinIO), dipisah koma; ".example.internal" = semua subdomain.
@@ -135,6 +148,8 @@ services:
     port: 8031
     entrypoint: false
     pipeline: false
+    # Mengunduh checkpoint dari GCS saat start kalau GUARDRAILS_MODEL_GCS_URI diisi (lihat gcpWif).
+    gcsModels: true
     upstreams: []
     replicaCount: 1
     # Satu-satunya service CPU-bound (torch). Nyalakan di produksi; replicaCount diabaikan saat aktif.
@@ -216,6 +231,8 @@ services:
     port: 8033
     entrypoint: false
     pipeline: true
+    # Mengunduh trust model dari GCS saat start kalau SCORING_MODEL_GCS_URI diisi (lihat gcpWif).
+    gcsModels: true
     upstreams: []
     replicaCount: 1
     startupFailureThreshold: 15

@@ -75,6 +75,16 @@ URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 {{- $host := include "nilam-ocr-npwp.componentName" (dict "root" $root "name" .) }}
 {{- $_ := set $env (printf "%s_SERVICE_URL" (upper .)) (printf "http://%s:%v" $host $upstream.port) }}
 {{- end }}
+{{- if and $svc.gcsModels $root.Values.gcpWif.clientId }}
+{{- with $root.Values.gcpWif }}
+{{- $_ := set $env "AZURE_TENANT_ID" .tenantId }}
+{{- $_ := set $env "AZURE_CLIENT_ID" .clientId }}
+{{- $_ := set $env "GCP_PROJECT_NUMBER" (.projectNumber | toString) }}
+{{- $_ := set $env "GCP_POOL_ID" .poolId }}
+{{- $_ := set $env "GCP_PROVIDER_ID" .providerId }}
+{{- $_ := set $env "GCP_SERVICE_ACCOUNT_EMAIL" .serviceAccountEmail }}
+{{- end }}
+{{- end }}
 {{- with $root.Values.apm }}
 {{- if .serverUrl }}
 {{- $_ := set $env "ELASTIC_APM_SERVER_URL" .serverUrl }}

@@ -24,9 +24,9 @@ lock-orchestrator:
 # all with known CVEs): best-match takes each package's newest version from either index. torch / torchvision are
 # pinned to their +cpu builds in requirements.txt, which only the PyTorch index has.
 lock-guardrails:
-	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match --emit-index-url -o services/guardrails/requirements.lock
+	$(LOCK) services/guardrails/requirements.txt libs/ocr_common/pyproject.toml --extra gcs --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match --emit-index-url -o services/guardrails/requirements.lock
 lock-extraction lock-structuring lock-scoring: lock-%:
-	$(LOCK) services/$*/requirements.txt libs/ocr_common/pyproject.toml --extra db --extra cloudsql -o services/$*/requirements.lock
+	$(LOCK) services/$*/requirements.txt libs/ocr_common/pyproject.toml --extra db --extra cloudsql --extra gcs -o services/$*/requirements.lock
 lock-db:
 	$(LOCK) db/requirements.txt libs/ocr_common/pyproject.toml --extra cloudsql -o db/requirements.lock
 # Gagal kalau ada lock yang ketinggalan dari requirements.txt / pyproject ocr_common (lock-nya ikut diperbarui).

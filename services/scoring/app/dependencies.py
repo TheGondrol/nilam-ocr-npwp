@@ -5,6 +5,7 @@ Every `get_*` here is what the routes take through `Depends(...)` and what tests
 
 from functools import lru_cache
 
+from ocr_common.clients.models import model_file
 from ocr_common.pipeline import (
     STAGE_SCORING,
     OutboxRelay,
@@ -29,7 +30,10 @@ DB_TABLE_PREFIX = "scoring"
 
 @lru_cache
 def get_trust_model() -> TrustModel:
-    return TrustModel(get_settings().scoring_model_path)
+    settings = get_settings()
+    return TrustModel(
+        model_file(settings.scoring_model_path, settings.scoring_model_gcs_uri, settings.scoring_model_sha256, settings)
+    )
 
 
 # --- pipeline -----------------------------------------------------------------------

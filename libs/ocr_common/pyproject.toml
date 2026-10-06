@@ -22,6 +22,8 @@ dependencies = [
 db = ["sqlalchemy>=2.0", "greenlet>=3.0"]
 # Cloud SQL with IAM database authentication: a DATABASE_URL with `cloudsql_instance` (pipeline/database.py).
 cloudsql = ["cloud-sql-python-connector[asyncpg]>=1.22"]
+# Models downloaded from GCS at start (clients/gcs.py, clients/models.py) with Entra ID workload identity (clients/gcp.py).
+gcs = ["google-auth[requests]>=2.29"]
 
 [tool.setuptools.packages.find]
 include = ["ocr_common*"]
