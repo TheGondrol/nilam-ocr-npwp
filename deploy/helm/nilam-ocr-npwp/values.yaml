@@ -72,6 +72,8 @@ orchestration:
 # Isi body dan header request tidak pernah dikirim (dokumen, NPWP, nama, API key).
 apm:
   serverUrl: ""
+  # Kosong = nama per service, nilam-ocr-npwp-<service>.
+  serviceName: ""
   # Kosong = nilai `environment` di atas.
   environment: ""
   # 1.0 = setiap request dan job dilacak; turunkan kalau volumenya besar.
