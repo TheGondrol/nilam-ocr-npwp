@@ -56,7 +56,7 @@ def _build_npwp_rules(settings: Settings) -> NpwpRulesStructurer:
     from app.vendor.npwp_rules import kpp_codes, name_master, wilayah_codes
 
     for label, path in (
-        ("kode_wilayah.json", wilayah_codes.default_data_path()),
+        ("kode_wilayah_v2.json", wilayah_codes.default_data_path()),
         ("kpp_codes_v2.json", kpp_codes.default_data_path()),
         ("name_lnmast.xlsx", name_master.default_master_path()),
     ):
