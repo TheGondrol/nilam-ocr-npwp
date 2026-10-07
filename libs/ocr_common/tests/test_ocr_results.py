@@ -1,30 +1,26 @@
-"""nilam_ocr_results: the request's final answer, written by the stage the request ends at, in the job's transaction."""
+"""nilam_ocr_results logs every answer the central orchestrator gets; here the stages' part: one row per result
+callback, written once it was delivered (LoggedCallback + CallbackResultsLog)."""
 
-from datetime import datetime
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import MetaData, select
-from sqlalchemy.exc import OperationalError
 
+from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.config import PipelineSettings
-from ocr_common.pipeline import (
-    STAGE_OCR,
-    STAGE_SCORING,
-    STAGE_STRUCTURING,
-    StagePipeline,
-    build_stage_pipeline,
-    database,
+from ocr_common.errors import ServiceError
+from ocr_common.npwp import REJECTED_CODE
+from ocr_common.pipeline import STAGE_OCR, STAGE_SCORING, STAGE_STRUCTURING, build_stage_pipeline, database
+from ocr_common.pipeline.callbacks import (
+    LoggedCallback,
+    OrchestrationCallback,
+    ResultCallback,
+    stage_callback_body,
 )
-from ocr_common.pipeline.ocr_results_sql import OcrResultsOutcome
-from ocr_common.pipeline.outcomes import CompositeOutcome, OrchestrationOutcome
-from ocr_common.pipeline.repository_sql import SqlJobRepository
-from ocr_common.pipeline.tables import (
-    ocr_results_table,
-    orchestration_outcome_table,
-    pipeline_tables,
-    repo_metadata,
-)
-from ocr_common.testing import RecordingCallback
+from ocr_common.pipeline.ocr_results_sql import CallbackResultsLog, callback_row
+from ocr_common.pipeline.outbox import OutboxRelay, callback_message
+from ocr_common.pipeline.outbox_sql import SqlOutbox
+from ocr_common.pipeline.tables import ocr_results_table, pipeline_tables, repo_metadata
 
 RID = "REQ_ocr_results"
 DATA = {
@@ -32,7 +28,114 @@ DATA = {
     "nama": {"value": "BUDI SANTOSO", "confidence": 0},
 }
 REASON = "Kode provinsi pada NPWP tidak valid, mohon dicek kembali"
-NO_GUARDRAILS = {"pipeline_name_sequence": ["extraction", "structuring", "scoring"]}
+DONE = stage_callback_body(RID, STAGE_SCORING, "DONE", result={"npwp_confidence": 0.7}, final=True, answer=DATA)
+REJECTED = stage_callback_body(RID, STAGE_STRUCTURING, "FAILED", error_message=REASON, error_code=REJECTED_CODE)
+FAILED = stage_callback_body(RID, STAGE_OCR, "FAILED", error_message="file_url could not be downloaded")
+NOT_FINAL = stage_callback_body(RID, STAGE_OCR, "DONE", result={"text": "NPWP"})
+
+
+# --- the row of a callback ----------------------------------------------------------------------
+
+
+def test_a_completed_callback_is_the_200_answer_with_its_data():
+    assert callback_row(DONE) == {
+        "status_code": 200,
+        "message": "OCR extraction completed successfully",
+        "data": DATA,
+        "errors": None,
+        "guardrails": 0,
+        "pipeline_last_stage": "scoring",
+    }
+
+
+def test_a_rejection_callback_is_the_400_answer():
+    assert callback_row(REJECTED) == {
+        "status_code": 400,
+        "message": REASON,
+        "data": None,
+        "errors": REJECTED_CODE,
+        "guardrails": 1,
+        "pipeline_last_stage": "structuring",
+    }
+
+
+def test_a_failed_callback_is_the_422_answer_of_the_stage_that_failed():
+    row = callback_row(FAILED)
+    assert row is not None
+    assert (row["status_code"], row["errors"], row["message"], row["pipeline_last_stage"]) == (
+        422,
+        "OCR_FAILED",
+        "file_url could not be downloaded",
+        "extraction",
+    )
+
+
+def test_a_callback_that_does_not_end_the_request_has_no_row():
+    assert callback_row(NOT_FINAL) is None
+
+
+# --- LoggedCallback: only what was sent and ends the request -------------------------------------
+
+
+class Inner:
+    """Stands in for OrchestrationCallback / ResultCallback."""
+
+    def __init__(self, sent: bool = True, error: Exception | None = None):
+        self.sent = sent
+        self.error = error
+
+    async def notify(self, *args: Any, **kwargs: Any) -> bool:
+        return self.sent
+
+    async def send(self, body: dict[str, Any]) -> bool:
+        if self.error is not None:
+            raise self.error
+        return self.sent
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _logged(inner: Inner) -> tuple[LoggedCallback, list[dict[str, Any]]]:
+    delivered: list[dict[str, Any]] = []
+
+    async def record(body: dict[str, Any]) -> None:
+        delivered.append(body)
+
+    return LoggedCallback(cast(ResultCallback, inner), record), delivered
+
+
+async def test_a_sent_callback_that_ends_the_request_is_logged_once():
+    callback, delivered = _logged(Inner())
+    assert await callback.send(DONE) is True
+    assert delivered == [DONE]
+
+
+@pytest.mark.parametrize(("inner", "body"), [(Inner(sent=False), DONE), (Inner(), NOT_FINAL)])
+async def test_a_skipped_or_not_final_callback_is_not_logged(inner, body):
+    callback, delivered = _logged(inner)
+    await callback.send(body)
+    assert delivered == []
+
+
+async def test_a_callback_that_failed_to_send_is_not_logged_and_still_raises():
+    callback, delivered = _logged(Inner(error=ServiceError(503, "orchestration unavailable")))
+    with pytest.raises(ServiceError):
+        await callback.send(DONE)
+    assert delivered == []
+
+
+async def test_the_direct_mode_logs_what_notify_sent():
+    callback, delivered = _logged(Inner())
+    await callback.notify(RID, STAGE_STRUCTURING, "FAILED", error_message=REASON, error_code=REJECTED_CODE)
+    assert delivered == [REJECTED]
+
+    quiet, nothing = _logged(Inner(sent=False))
+    await quiet.notify(RID, STAGE_STRUCTURING, "FAILED", error_message=REASON, error_code=REJECTED_CODE)
+    assert nothing == []
+
+
+# --- CallbackResultsLog on a database ------------------------------------------------------------
 
 
 @pytest.fixture
@@ -45,209 +148,116 @@ async def url(tmp_path):
     await database.dispose_engines()
 
 
-def _repository(url: str, table_prefix: str, stage: str) -> SqlJobRepository:
+def _log(url: str, table_prefix: str = "scoring") -> CallbackResultsLog:
     jobs, _ = pipeline_tables(table_prefix, MetaData())
-    outcome = OcrResultsOutcome(ocr_results_table(MetaData()), jobs, stage=stage)
-    return SqlJobRepository(url, table_prefix, stage=stage, outcome=outcome)
+    return CallbackResultsLog(url, ocr_results_table(MetaData()), jobs)
 
 
-async def _rows(url: str, table_prefix: str = "") -> list[dict]:
-    table = ocr_results_table(MetaData(), table_prefix)
+async def _rows(url: str) -> list[dict[str, Any]]:
+    table = ocr_results_table(MetaData())
     async with database.get_engine(url).connect() as conn:
         return [dict(row) for row in (await conn.execute(select(table).order_by(table.c.id))).mappings().all()]
 
 
-async def _row(url: str) -> dict:
+async def _job(url: str, table_prefix: str, sequence: list[str] | None) -> None:
+    jobs, _ = pipeline_tables(table_prefix, MetaData())
+    async with database.get_engine(url).begin() as conn:
+        await conn.execute(
+            jobs.insert().values(
+                request_id=RID, status="DONE", input={"pipeline_name_sequence": sequence}, ds="20261007"
+            )
+        )
+
+
+async def test_a_delivered_callback_becomes_a_row(url):
+    await _log(url)(DONE)
+
     [row] = await _rows(url)
-    return row
-
-
-def _answer(row: dict) -> tuple:
-    return (
-        row["request_id"],
-        row["status_code"],
-        row["status_desc"],
-        row["message"],
-        row["data"],
-        row["errors"],
-        row["guardrails"],
-        row["pipeline_last_stage"],
-    )
-
-
-async def test_the_last_stage_writes_its_data_as_the_answer(url):
-    repo = _repository(url, "scoring", STAGE_SCORING)
-    await repo.claim(RID)
-    await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
-
-    row = await _row(url)
-    assert _answer(row) == (RID, 200, "OK", "OCR extraction completed successfully", DATA, None, 0, "scoring")
-    assert isinstance(row["created_at"], datetime) and isinstance(row["update_at"], datetime)
-
-
-async def test_an_earlier_last_stage_writes_its_result_as_it_is(url):
-    repo = _repository(url, "ocr", STAGE_OCR)
-    result = {"text": "NPWP", "blocks": []}
-    await repo.claim(RID, input={"pipeline_name_sequence": ["guardrails", "extraction"]})
-    await repo.complete(RID, result, outcome_data=result)
-
-    assert _answer(await _row(url))[1:] == (
+    assert (row["request_id"], row["status_code"], row["status_desc"], row["data"], row["guardrails"]) == (
+        RID,
         200,
         "OK",
-        "OCR extraction completed successfully",
-        result,
-        None,
+        DATA,
         0,
-        "extraction",
     )
+    assert (row["pipeline_last_stage"], row["created_at"]) == ("scoring", row["update_at"])
 
 
 async def test_guardrails_is_null_when_the_request_left_it_out(url):
-    repo = _repository(url, "scoring", STAGE_SCORING)
-    await repo.claim(RID, input=NO_GUARDRAILS)
-    await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
+    await _job(url, "scoring", ["extraction", "structuring", "scoring"])
+    await _log(url)(DONE)
 
-    assert (await _row(url))["guardrails"] is None
-
-
-async def test_a_stage_that_hands_the_job_on_writes_nothing(url):
-    repo = _repository(url, "ocr", STAGE_OCR)
-    await repo.claim(RID)
-    await repo.complete(RID, {"text": "NPWP"})
-
-    assert await _rows(url) == []
+    [row] = await _rows(url)
+    assert row["guardrails"] is None
 
 
-async def test_a_failed_stage_ends_the_request_with_422(url):
-    repo = _repository(url, "ocr", STAGE_OCR)
-    await repo.claim(RID)
-    await repo.fail(RID, "file_url could not be downloaded")
+async def test_every_delivered_callback_is_a_new_row(url):
+    log = _log(url)
+    await log(FAILED)
+    await log(DONE)
 
-    assert _answer(await _row(url))[1:] == (
-        422,
-        "Unprocessable Entity",
-        "file_url could not be downloaded",
-        None,
-        "OCR_FAILED",
-        0,
-        "extraction",
-    )
+    assert [row["status_code"] for row in await _rows(url)] == [422, 200]
 
 
-async def test_a_failed_handoff_names_the_next_stage(url):
-    repo = _repository(url, "ocr", STAGE_OCR)
-    await repo.claim(RID, input=NO_GUARDRAILS)
-    await repo.complete(RID, {"text": "NPWP"})
-    await repo.handoff_failed(RID, STAGE_STRUCTURING, "Handoff to STRUCTURING failed: unavailable")
+async def test_a_write_that_fails_does_not_fail_the_delivery(tmp_path, caplog):
+    log = _log(f"sqlite+aiosqlite:///{tmp_path / 'empty.db'}")  # no table
 
-    row = await _row(url)
-    assert (row["status_code"], row["errors"], row["message"]) == (
-        422,
-        "STRUCTURING_FAILED",
-        "Handoff to STRUCTURING failed: unavailable",
-    )
-    assert (row["guardrails"], row["pipeline_last_stage"]) == (None, "structuring")
+    await log(DONE)
+
+    assert f"callback answer of {RID} not recorded" in caplog.text
+    await database.dispose_engines()
 
 
-@pytest.mark.parametrize(("input", "guardrails"), [(None, 1), (NO_GUARDRAILS, None)])
-async def test_a_rejection_by_the_structuring_rules_ends_the_request_with_400(url, input, guardrails):
-    repo = _repository(url, "structuring", STAGE_STRUCTURING)
-    await repo.claim(RID, input=input)
-    await repo.complete(RID, {"reject_reason": REASON}, rejection=REASON)
-
-    assert _answer(await _row(url))[1:] == (
-        400,
-        "Bad Request",
-        REASON,
-        None,
-        "DOWNSTREAM_VALIDATION_ERROR",
-        guardrails,
-        "structuring",
-    )
+# --- through the outbox relay: written when a try succeeds, once -------------------------------
 
 
-async def test_a_request_id_run_again_gets_another_row_append_only(url):
-    repo = _repository(url, "scoring", STAGE_SCORING)
-    await repo.claim(RID)
-    await repo.fail(RID, "boom")
-    await repo.claim(RID)
-    await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
+class FlakyOrchestrator:
+    """The central orchestrator's callback endpoint: 503 for the first `failures` posts, then 200."""
 
-    failed, done = await _rows(url)
-    assert (failed["request_id"], failed["status_code"], failed["errors"]) == (RID, 422, "SCORING_FAILED")
-    assert (done["request_id"], done["status_code"], done["errors"], done["data"]) == (RID, 200, None, DATA)
-    assert done["id"] > failed["id"]
-    assert all(row["update_at"] == row["created_at"] for row in (failed, done))
+    def __init__(self, failures: int):
+        self.failures = failures
+        self.posts: list[dict[str, Any]] = []
 
+    async def post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.posts.append(body)
+        if len(self.posts) <= self.failures:
+            raise ServiceError(503, "orchestration unavailable")
+        return {}
 
-async def test_the_answer_is_written_in_the_job_transaction(url):
-    repo = _repository(url, "scoring", STAGE_SCORING)
-    await repo.claim(RID)
-    async with repo.engine.begin() as conn:
-        await conn.run_sync(ocr_results_table(MetaData()).drop)
-
-    with pytest.raises(OperationalError):
-        await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
-
-    record = await repo.get(RID)
-    assert record is not None and record["status"] == "PROCESSING"
+    async def aclose(self) -> None:
+        pass
 
 
-# --- wiring ----------------------------------------------------------------------------------------
+async def test_a_callback_retried_by_the_relay_is_logged_once_when_it_gets_through(url):
+    orchestrator = FlakyOrchestrator(failures=2)
+    inner = ResultCallback(cast(RemoteModelClient, orchestrator), "/v1/ocr-callback")
+    outbox = SqlOutbox(url)
+    relay = OutboxRelay(outbox, stage=STAGE_SCORING, callback=LoggedCallback(inner, _log(url)), retry_delay_seconds=0)
+    async with database.get_engine(url).begin() as conn:
+        message = callback_message(RID, STAGE_SCORING, "DONE", result={"npwp_confidence": 0.7}, final=True, answer=DATA)
+        await outbox.add(conn, RID, STAGE_SCORING, [message])
+
+    for _ in range(3):
+        await relay.deliver_due()
+        if len(orchestrator.posts) < 3:
+            assert await _rows(url) == []  # 503: not delivered, nothing logged
+
+    assert len(orchestrator.posts) == 3
+    [row] = await _rows(url)
+    assert (row["status_code"], row["data"]) == (200, DATA)
 
 
-def _settings(**values) -> PipelineSettings:
+# --- wiring -------------------------------------------------------------------------------------
+
+
+def _settings(**values: Any) -> PipelineSettings:
     return PipelineSettings(api_key="k", environment="local", _env_file=None, **values)
 
 
-async def _run_last_stage(pipeline: StagePipeline) -> None:
-    async def work():
-        return {"text": "NPWP"}
-
-    await pipeline.submit(RID, work, callback_result=dict, outcome_data=dict)
-    await pipeline.runner.drain(5)
-
-
-async def test_every_stage_with_a_database_writes_the_answer(url):
-    pipeline = build_stage_pipeline(_settings(database_url=url), stage=STAGE_OCR, table_prefix="ocr")
-    pipeline.callback = RecordingCallback()
-    await _run_last_stage(pipeline)
-
-    assert _answer(await _row(url))[1:] == (
-        200,
-        "OK",
-        "OCR extraction completed successfully",
-        {"text": "NPWP"},
-        None,
-        0,
-        "extraction",
-    )
-
-
-async def test_the_testing_pipeline_writes_the_testing_table(url):
-    pipeline = build_stage_pipeline(_settings(database_url=url), stage=STAGE_OCR, table_prefix="ocr", testing=True)
-    await _run_last_stage(pipeline)
-
-    assert await _rows(url) == []
-    [row] = await _rows(url, "testing_")
-    assert (row["request_id"], row["status_code"]) == (RID, 200)
-
-
-async def test_the_answer_goes_next_to_the_orchestrators_outcome_row(url):
-    table = "orchestration_extract_ocr"
-    async with database.get_engine(url).begin() as conn:
-        await conn.run_sync(orchestration_outcome_table(table).metadata.create_all)
-    settings = _settings(database_url=url, orchestration_outcome_table=table)
-    pipeline = build_stage_pipeline(settings, stage=STAGE_OCR, table_prefix="ocr")
-    pipeline.callback = RecordingCallback()
-    assert isinstance(pipeline.repository, SqlJobRepository)
-    writer = pipeline.repository._outcome
-    assert isinstance(writer, CompositeOutcome)
-    assert [type(w) for w in writer.writers] == [OcrResultsOutcome, OrchestrationOutcome]
-
-    await _run_last_stage(pipeline)
-
-    assert (await _row(url))["status_code"] == 200
-    async with database.get_engine(url).connect() as conn:
-        outcome = (await conn.execute(select(orchestration_outcome_table(table)))).mappings().one()
-    assert outcome["downstream_status"] == "completed"
+def test_every_stage_with_a_database_logs_its_callbacks(url):
+    live = build_stage_pipeline(_settings(database_url=url), stage=STAGE_OCR, table_prefix="ocr")
+    assert isinstance(live.callback, LoggedCallback)
+    testing = build_stage_pipeline(_settings(database_url=url), stage=STAGE_OCR, table_prefix="ocr", testing=True)
+    assert isinstance(testing.callback, OrchestrationCallback)  # the testing lane sends no callback at all
+    without_db = build_stage_pipeline(_settings(), stage=STAGE_OCR, table_prefix="ocr")
+    assert not isinstance(without_db.callback, LoggedCallback)

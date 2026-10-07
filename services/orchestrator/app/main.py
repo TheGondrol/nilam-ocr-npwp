@@ -6,10 +6,12 @@ from ocr_common.pipeline.database import dispose_engines
 from ocr_common.web.app import create_app, database_readiness
 
 from app.api import extract_ocr, testing
+from app.api.response_log import ResponseLogMiddleware
 from app.config import get_settings
 from app.dependencies import (
     get_extraction_client,
     get_guardrails_client,
+    get_response_logs,
     get_stage_status_clients,
     get_testing_extraction_client,
     get_testing_stage_status_clients,
@@ -31,7 +33,7 @@ async def lifespan(app: FastAPI):
             for stage in get_stages():
                 await stage.aclose()
             get_stages.cache_clear()
-    await dispose_engines()  # the nilam_guardrails_results writer's pool, when DATABASE_URL is set
+    await dispose_engines()  # the pool of the nilam_guardrails_results / nilam_ocr_results writers, with DATABASE_URL
 
 
 app = create_app(
@@ -45,7 +47,8 @@ app = create_app(
         "`PIPELINE_WAIT_SECONDS` for the pipeline: 200 with the final result, or 202 while it is still running. "
         "`GET /v1/extract-ocr/{request_id}` answers the same contract for a request at any later time. The "
         "stages keep the jobs and send the result callback; this service only keeps every guardrails verdict "
-        "(`nilam_guardrails_results`, the rejected documents included) when `DATABASE_URL` is set. All endpoints "
+        "(`nilam_guardrails_results`, the rejected documents included) and every answer to `POST /v1/extract-ocr` "
+        "(`nilam_ocr_results`) when `DATABASE_URL` is set. All endpoints "
         "except /health, /ready and /metrics require an X-API-Key header."
     ),
     tags=[
@@ -58,3 +61,6 @@ app = create_app(
     lifespan=lifespan,
     entrypoint=True,
 )
+# Every answer to POST /v1/extract-ocr goes to nilam_ocr_results before it is sent (best-effort).
+app.state.response_logs = get_response_logs()
+app.add_middleware(ResponseLogMiddleware)

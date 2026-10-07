@@ -3,9 +3,15 @@ composition root (app/dependencies.py) needs for the async pipeline."""
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.config import PipelineSettings
-from ocr_common.pipeline.callbacks import NextStage, NextStageClient, OrchestrationCallback, ResultCallback
+from ocr_common.pipeline.callbacks import (
+    LoggedCallback,
+    NextStage,
+    NextStageClient,
+    OrchestrationCallback,
+    ResultCallback,
+)
 from ocr_common.pipeline.outbox import OutboxRelay
-from ocr_common.pipeline.outcomes import CompositeOutcome, StageOutcome, build_stage_outcome
+from ocr_common.pipeline.outcomes import build_stage_outcome
 from ocr_common.pipeline.reaper import Resume, StaleJobReaper
 from ocr_common.pipeline.repository import build_job_repository
 from ocr_common.pipeline.results import StageResults
@@ -59,11 +65,12 @@ def build_stage_pipeline(
     testing: bool = False,
 ) -> StagePipeline:
     """The `StagePipeline` of a service from its settings: callback client, outbox, repository, outcome row.
-    With a database the request's final answer goes to `nilam_ocr_results` when it ends at this stage.
+    With a database, every result callback the orchestrator receives from this stage is logged in
+    `nilam_ocr_results` (`LoggedCallback`).
 
     `testing=True` builds the pipeline behind the `-test` endpoints: the same work on the `testing_*` tables
-    (the final answer in `nilam_testing_ocr_results`) and `nilam_testing_pipeline_outbox`, with no callback and no
-    write to the orchestrator's tables, so a load test never reaches the orchestrator. `next_stage` must then
+    and `nilam_testing_pipeline_outbox`, with no callback (so nothing in `nilam_testing_ocr_results` from here) and
+    no write to the orchestrator's tables, so a load test never reaches the orchestrator. `next_stage` must then
     point at the next stage's `-test` endpoint."""
     lane_prefix = TESTING_TABLE_PREFIX if testing else ""
     outbox = None
@@ -71,23 +78,25 @@ def build_stage_pipeline(
         from ocr_common.pipeline.outbox_sql import SqlOutbox
 
         outbox = SqlOutbox(settings.database_url, lane_prefix)
-    outcome = None if testing else build_stage_outcome(settings, stage=stage)
-    if settings.database_url:
-        outcome = _with_ocr_results(outcome, stage=stage, lane_prefix=lane_prefix, table_prefix=table_prefix)
     repository = build_job_repository(
         settings.database_url,
         f"{lane_prefix}{table_prefix}",
         lease_seconds=settings.pipeline_job_lease_seconds,
-        outcome=outcome,
+        outcome=None if testing else build_stage_outcome(settings, stage=stage),
         outbox=outbox,
         stage=stage,
     )
+    callback: OrchestrationCallback | ResultCallback | LoggedCallback
+    if testing:
+        callback = OrchestrationCallback(None, settings.orchestration_callback_path)
+    elif settings.database_url:
+        callback = LoggedCallback(build_callback(settings), _callback_log(settings.database_url, table_prefix))
+    else:
+        callback = build_callback(settings)
     return StagePipeline(
         stage=stage,
         repository=repository,
-        callback=OrchestrationCallback(None, settings.orchestration_callback_path)
-        if testing
-        else build_callback(settings),
+        callback=callback,
         next_stage_client=next_stage,
         outbox=outbox,
         callbacks=False if testing else settings.callbacks_enabled,
@@ -95,16 +104,15 @@ def build_stage_pipeline(
     )
 
 
-def _with_ocr_results(outcome: StageOutcome | None, *, stage: str, lane_prefix: str, table_prefix: str) -> StageOutcome:
-    """`outcome` plus the writer of `nilam_ocr_results` (first, so both run in the job's transaction)."""
+def _callback_log(database_url: str, table_prefix: str):
+    """The writer of the result callbacks this stage delivers, into `nilam_ocr_results`."""
     from sqlalchemy import MetaData
 
-    from ocr_common.pipeline.ocr_results_sql import OcrResultsOutcome
+    from ocr_common.pipeline.ocr_results_sql import CallbackResultsLog
     from ocr_common.pipeline.tables import ocr_results_table, pipeline_tables
 
-    jobs, _ = pipeline_tables(f"{lane_prefix}{table_prefix}", MetaData())
-    results = OcrResultsOutcome(ocr_results_table(MetaData(), lane_prefix), jobs, stage=stage)
-    return results if outcome is None else CompositeOutcome([results, outcome])
+    jobs, _ = pipeline_tables(table_prefix, MetaData())
+    return CallbackResultsLog(database_url, ocr_results_table(MetaData()), jobs)
 
 
 def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> OutboxRelay | None:

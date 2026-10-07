@@ -27,6 +27,7 @@ from app.api.extract_contract import (
     extract_body,
     extract_response,
 )
+from app.api.response_log import SEQUENCE_STATE
 from app.api.schemas import ExtractOcrResponse
 from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
@@ -313,6 +314,8 @@ async def extract_ocr(
         )
     try:
         sequence = _parse_sequence(pipeline_name_sequence)
+        # For the response log (nilam_ocr_results): guardrails is null when the sequence leaves it out.
+        setattr(request.state, SEQUENCE_STATE, sequence)
     except InvalidSequence as exc:
         response.status_code = 422
         return extract_body(

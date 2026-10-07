@@ -132,6 +132,19 @@ class RecordingGuardrailsLog:
         return {"report": mine[-1]["report"], "sequence": mine[-1]["sequence"]} if mine else None
 
 
+class RecordingResponseLog:
+    """Keeps the answers the response log middleware hands over, instead of writing nilam_ocr_results."""
+
+    def __init__(self, table_prefix: str = "") -> None:
+        self.table_prefix = table_prefix
+        self.records: list[dict] = []
+
+    async def record(self, request_id, status_code, body, *, guardrails) -> None:
+        self.records.append(
+            {"request_id": request_id, "status_code": status_code, "body": body, "guardrails": guardrails}
+        )
+
+
 class StubWaiter:
     def __init__(self) -> None:
         self.outcome = DONE
@@ -195,3 +208,13 @@ def guardrails_log():
     yield log
     app.dependency_overrides.pop(get_guardrails_log, None)
     app.dependency_overrides.pop(get_testing_guardrails_log, None)
+
+
+@pytest.fixture(autouse=True)
+def response_logs():
+    """The live (key "") and testing ("testing_") response logs, recording instead of writing."""
+    before = app.state.response_logs
+    logs = {"": RecordingResponseLog(), "testing_": RecordingResponseLog("testing_")}
+    app.state.response_logs = logs
+    yield logs
+    app.state.response_logs = before

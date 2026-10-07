@@ -331,6 +331,69 @@ class ResultCallback:
             await self._client.aclose()
 
 
+Delivered = Callable[[dict[str, Any]], Awaitable[None]]
+"""Called with the per-stage body of a callback that ended the request, once it reached the orchestrator."""
+
+
+class LoggedCallback:
+    """Wraps the callback to the orchestrator: every callback that ends a request (`result_callback_body` is not
+    None: completed, rejected or failed) and was actually sent (the orchestrator answered 2xx) is passed to
+    `delivered`, once, after the send; a skipped one (no ORCHESTRATION_URL) or a failed try is not. The same for
+    the direct mode (`notify`) and the outbox relay (`send`)."""
+
+    def __init__(self, inner: OrchestrationCallback | ResultCallback, delivered: Delivered):
+        self.inner = inner
+        self._delivered = delivered
+
+    async def notify(
+        self,
+        request_id: str,
+        stage: str,
+        status: str,
+        *,
+        result: dict[str, Any] | None = None,
+        error_message: str | None = None,
+        error_code: str | None = None,
+        final: bool = False,
+        answer: dict[str, Any] | None = None,
+    ) -> bool:
+        """`inner.notify`, then `delivered` when it sent a callback that ends the request."""
+        sent = await self.inner.notify(
+            request_id,
+            stage,
+            status,
+            result=result,
+            error_message=error_message,
+            error_code=error_code,
+            final=final,
+            answer=answer,
+        )
+        body = stage_callback_body(
+            request_id,
+            stage,
+            status,
+            result=result,
+            error_message=error_message,
+            error_code=error_code,
+            final=final,
+            answer=answer,
+        )
+        if sent and result_callback_body(body) is not None:
+            await self._delivered(body)
+        return sent
+
+    async def send(self, body: dict[str, Any]) -> bool:
+        """`inner.send` (raises on failure, so the relay retries), then `delivered` when it sent a callback that
+        ends the request."""
+        sent = await self.inner.send(body)
+        if sent and result_callback_body(body) is not None:
+            await self._delivered(body)
+        return sent
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
 class NextStageClient:
     """POSTs the hand-off body to the next stage's `/v1/<stage>/jobs`."""
 

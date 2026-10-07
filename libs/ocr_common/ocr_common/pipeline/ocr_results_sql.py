@@ -1,24 +1,33 @@
-"""`nilam_ocr_results`: the request's final answer, one row per request_id in the shape of the extract-ocr answer
-(`status_code`, `status_desc`, `message`, `data`, `errors`, `guardrails`, `pipeline_last_stage`). The service that
-ends the request writes it in the same transaction as its own result: a stage through `OcrResultsOutcome` (a
-`StageOutcome`), the orchestrator NPWP through `write_ocr_result` for guardrails.
+"""`nilam_ocr_results`: the log of every answer this pipeline gives the central orchestrator, one append-only row per
+answer, in the shape of the extract-ocr answer (`status_code`, `status_desc`, `message`, `data`, `errors`,
+`guardrails`, `pipeline_last_stage`). Two writers:
 
-A stage only writes when the request ends with it: the last service of the pipeline_name_sequence completed, the
-structuring rules rejected the document, or a stage failed (its own work, or the hand-off to the next one). The
-`processing` state is not written. The table is append-only: a request_id run again gets another row when it ends
-again, and its newest row is its state now.
+- the orchestrator NPWP, for every answer to `POST /v1/extract-ocr` (200, 202, 400, 422, 5xx), just before it
+  answers (`write_ocr_result`, from its response log);
+- the stage that ends the request, for its result callback, once it reached the orchestrator
+  (`CallbackResultsLog`, behind `callbacks.LoggedCallback`): a callback retried by the outbox is one row, written
+  when a try succeeds; one that is never sent (a dead letter, no ORCHESTRATION_URL) is none.
+
+A request answered 202 therefore has the 202 row, then the row of its callback; one answered 200 has the 200
+row and, when the stages send callbacks, the callback's. Its newest row is the last thing the orchestrator got.
 """
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Table, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE
+from ocr_common.npwp import COMPLETED_MESSAGE
+from ocr_common.pipeline.callbacks import RESULT_COMPLETED, result_callback_body
+from ocr_common.pipeline.database import get_engine
 from ocr_common.pipeline.repository import stored_sequence
 from ocr_common.pipeline.sequence import GUARDRAILS, SERVICE_OF_STAGE
 from ocr_common.web.envelope import STATUS_DESC
+
+logger = logging.getLogger(__name__)
 
 # `guardrails`, as in the extract-ocr answer: 0 passed, 1 rejected (by the guardrails model or the structuring
 # rules); null when the request left guardrails out.
@@ -38,8 +47,7 @@ async def write_ocr_result(
     guardrails: int | None = None,
     pipeline_last_stage: str | None = None,
 ) -> None:
-    """Append the final answer of `request_id` as a new row (the table is append-only; `update_at` =
-    `created_at`). `pipeline_last_stage` is the service that ended the request."""
+    """Append one answer of `request_id` as a new row (the table is append-only; `update_at` = `created_at`)."""
     now = datetime.now(UTC)
     await conn.execute(
         table.insert().values(
@@ -57,73 +65,64 @@ async def write_ocr_result(
     )
 
 
-class OcrResultsOutcome:
-    """The stage's `StageOutcome` that writes `nilam_ocr_results` when the request ends at this stage. `jobs` is
-    the stage's jobs table: the pipeline_name_sequence stored in the job's `input` says whether the request ran
-    guardrails (no sequence: the full pipeline, so it did)."""
+def callback_row(body: dict[str, Any]) -> dict[str, Any] | None:
+    """The row of a per-stage callback body that ends the request, as the extract-ocr answer of the same outcome:
+    completed 200 with the result as `data`, rejected 400 `DOWNSTREAM_VALIDATION_ERROR` (`guardrails` 1), failed
+    422 `<STAGE>_FAILED`. `pipeline_last_stage` is the service whose callback it is (on a failed hand-off, the
+    stage that never received the job). None for a body that does not end the request."""
+    sent = result_callback_body(body)
+    if sent is None:
+        return None
+    stage = str(body["stage"])
+    service = SERVICE_OF_STAGE.get(stage, stage.lower())
+    if sent["status"] == RESULT_COMPLETED and sent.get("result") is not None:
+        status_code, message, errors, guardrails = 200, COMPLETED_MESSAGE, None, GUARDRAILS_PASSED
+    elif sent["status"] == RESULT_COMPLETED:
+        status_code, message, errors, guardrails = 400, sent.get("message"), sent.get("error_code"), GUARDRAILS_REJECTED
+    else:
+        status_code, message, errors, guardrails = 422, sent.get("message"), sent.get("error_code"), GUARDRAILS_PASSED
+    return {
+        "status_code": status_code,
+        "message": message,
+        "data": sent.get("result") if status_code == 200 else None,
+        "errors": errors,
+        "guardrails": guardrails,
+        "pipeline_last_stage": service,
+    }
 
-    def __init__(self, table: Table, jobs: Table, *, stage: str):
+
+class CallbackResultsLog:
+    """`delivered` of `LoggedCallback` for one stage: appends the row of a result callback the orchestrator
+    received. `jobs` is the stage's jobs table: the pipeline_name_sequence in the job's `input` says whether the
+    request ran guardrails (no sequence: the full pipeline, so it did), else `guardrails` is null.
+
+    Best-effort, like the other logs: the callback is already delivered, so a write that fails or takes longer
+    than `timeout` is logged and does not fail the delivery (which would send the callback again)."""
+
+    def __init__(self, database_url: str, table: Table, jobs: Table, *, timeout: float = 2.0):
+        self._url = database_url
         self.table = table
         self._jobs = jobs
-        self._stage = stage
+        self._timeout = timeout
 
-    async def claimed(self, conn: AsyncConnection, request_id: str) -> None:
-        """Nothing: only the end of a request is written."""
-
-    async def completed(self, conn: AsyncConnection, request_id: str, data: dict[str, Any] | None) -> None:
-        """200 with `data` (this stage's result as it is, scoring: the contract's fields); nothing when `data` is
-        None (not the last stage of the request)."""
-        if data is None:
+    async def __call__(self, body: dict[str, Any]) -> None:
+        row = callback_row(body)
+        if row is None:
             return
-        guardrails = await self._guardrails(conn, request_id, GUARDRAILS_PASSED)
-        await write_ocr_result(
-            conn,
-            self.table,
-            request_id,
-            200,
-            COMPLETED_MESSAGE,
-            data=data,
-            guardrails=guardrails,
-            pipeline_last_stage=self._service(),
-        )
+        request_id = str(body["request_id"])
+        try:
+            await asyncio.wait_for(self._insert(request_id, row), self._timeout)
+        except Exception:  # noqa: BLE001 - best-effort, see the class docstring
+            logger.exception("nilam_ocr_results: callback answer of %s not recorded", request_id)
 
-    async def failed(
-        self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
-    ) -> None:
-        """422 `<STAGE>_FAILED`, naming `stage` when the hand-off to it failed."""
-        guardrails = await self._guardrails(conn, request_id, GUARDRAILS_PASSED)
-        await write_ocr_result(
-            conn,
-            self.table,
-            request_id,
-            422,
-            error_message,
-            errors=f"{stage or self._stage}_FAILED",
-            guardrails=guardrails,
-            pipeline_last_stage=self._service(stage),
-        )
+    async def _insert(self, request_id: str, row: dict[str, Any]) -> None:
+        async with get_engine(self._url).begin() as conn:
+            if row["guardrails"] is not None and not await self._ran_guardrails(conn, request_id):
+                row = {**row, "guardrails": None}
+            await write_ocr_result(conn, self.table, request_id, row.pop("status_code"), row.pop("message"), **row)
 
-    async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
-        """400 `DOWNSTREAM_VALIDATION_ERROR` with the rules' reason as the message."""
-        guardrails = await self._guardrails(conn, request_id, GUARDRAILS_REJECTED)
-        await write_ocr_result(
-            conn,
-            self.table,
-            request_id,
-            400,
-            reason,
-            errors=REJECTED_CODE,
-            guardrails=guardrails,
-            pipeline_last_stage=self._service(),
-        )
-
-    def _service(self, stage: str | None = None) -> str:
-        """`stage` (default: this one) as pipeline_name_sequence names it: OCR -> extraction, ..."""
-        stage = stage or self._stage
-        return SERVICE_OF_STAGE.get(stage, stage.lower())
-
-    async def _guardrails(self, conn: AsyncConnection, request_id: str, value: int) -> int | None:
-        """`value`, or None when the request's pipeline_name_sequence left guardrails out."""
-        input = (await conn.execute(select(self._jobs.c.input).where(self._jobs.c.request_id == request_id))).scalar()
+    async def _ran_guardrails(self, conn: AsyncConnection, request_id: str) -> bool:
+        jobs = self._jobs
+        input = (await conn.execute(select(jobs.c.input).where(jobs.c.request_id == request_id))).scalar()
         sequence = stored_sequence(input)
-        return value if sequence is None or GUARDRAILS in sequence else None
+        return sequence is None or GUARDRAILS in sequence

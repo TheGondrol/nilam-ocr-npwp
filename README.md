@@ -164,7 +164,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 │ INSERT nilam_pipeline_outbox (stage OCR, handoff, payload: body structuring)  │
                 └─ COMMIT ── lalu bangunkan relay proses ini ───────────────────────────────────┘
                 job gagal (file rusak, model mati, …): satu transaksi juga:
-                  UPDATE nilam_ocr_extraction_jobs FAILED + UPSERT nilam_ocr_results {422, OCR_FAILED}
+                  UPDATE nilam_ocr_extraction_jobs FAILED + INSERT outbox callback FAILED (terkirim -> INSERT nilam_ocr_results)
                   + UPSERT orchestration_extract_ocr {failed, OCR_FAILED, error_message}
 
    relay OCR:   claim baris stage=OCR yang due, FOR UPDATE SKIP LOCKED, lease 30 dtk, attempts+1
@@ -188,7 +188,6 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 trust model
                 ┌─ SATU TRANSAKSI (hasil) ──────────────────────────────────────────────────────┐
                 │ UPSERT nilam_scoring_results + UPDATE nilam_scoring_jobs DONE                 │
-                │ UPSERT nilam_ocr_results {200, data: {nomor_npwp, nama}, guardrails 0/null}   │
                 │ UPSERT orchestration_extract_ocr {status_code: 200, completed,                │
                 │        result_data: {nomor_npwp, nama} bentuk kontrak extract-ocr}            │
                 └───────────────────────────────────────────────────────────────────────────────┘
@@ -551,7 +550,7 @@ Satu database PostgreSQL; **semua tabel repo ini di schema `nilam_ocr_npwp` dan 
 
 | Tabel | Pemilik | Isi |
 |---|---|---|
-| `nilam_ocr_results` | tahap terakhir request, atau orchestrator kalau guardrails yang mengakhiri | jawaban akhir request, **append-only** (satu baris per keadaan akhir, baris terbaru per `request_id` = keadaan sekarang; migrasi `0016`): `id`, `status_code`, `status_desc`, `message`, `data` (hasil service terakhir apa adanya), `errors`, `request_id`, `guardrails` (0 lolos, 1 ditolak, null kalau guardrails tidak dijalankan), `created_at`, `update_at`, `pipeline_last_stage` (service yang mengakhiri request: `guardrails`, `extraction`, `structuring`, `scoring`; juga saat sukses, beda dengan jawaban API; migrasi `0015`). Hanya keadaan akhir (200 / 400 / 422), ditulis dalam transaksi hasil tahap itu; dijalankan ulang = baris baru (mis. FAILED lalu DONE), `update_at` = `created_at`; trigger menolak UPDATE / DELETE (migrasi `0014`, `0016`) |
+| `nilam_ocr_results` | orchestrator (jawaban POST) dan tahap terakhir (callback) | **log setiap jawaban ke Orkestrasi pusat**, append-only (satu baris per jawaban; migrasi `0014`-`0016`): `id` (PK), `status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails` (0 lolos, 1 ditolak, null kalau `pipeline_name_sequence` tidak memuat guardrails), `created_at`, `update_at` (= `created_at`, baris tidak pernah diubah), `pipeline_last_stage`. Dua penulis: **orchestrator**, untuk setiap jawaban `POST /v1/extract-ocr` (200, 202, 400, 422, 5xx, termasuk penolakan sebelum pipeline jalan) tepat sebelum jawabannya dikirim (`pipeline_last_stage` seperti di jawaban itu); dan **tahap terakhir**, untuk callback hasil ke pusat, sekali saat callback itu terkirim (pusat menjawab 2xx; retry yang gagal dan dead letter tidak dicatat; `data` = hasil service terakhir apa adanya, `pipeline_last_stage` = service pengirimnya). Jadi request di atas batas tunggu punya baris 202 lalu baris callback-nya; baris terbaru per `request_id` = jawaban terakhir yang diterima pusat. Trigger `<tabel>_append_only` menolak UPDATE / DELETE; penulisan best-effort (gagal = tercatat di log, jawaban tetap dikirim) |
 | `nilam_ocr_extraction_jobs` / `nilam_ocr_extraction_result` | extraction | status tahap OCR per `request_id` dan blok teks mentah (sebelum `0014`: `nilam_ocr_jobs` / `nilam_ocr_results`) |
 | `nilam_structuring_jobs` / `nilam_structuring_results` | structuring | status tahap structuring dan field bernama |
 | `nilam_scoring_jobs` / `nilam_scoring_results` | scoring | status tahap scoring dan skor trust model |

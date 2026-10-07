@@ -16,6 +16,7 @@ from app.config import Settings, get_settings
 from app.services.extract_service import ExtractOcrService
 from app.services.guardrails_log import GuardrailsLog, NoGuardrailsLog, SqlGuardrailsLog
 from app.services.pipeline_waiter import PipelineWaiter
+from app.services.response_log import NoResponseLog, ResponseLog, SqlResponseLog
 
 # --- HTTP clients to the other services (one per process, closed in main.lifespan) -------------
 
@@ -52,6 +53,20 @@ def _guardrails_log(table_prefix: str = "") -> GuardrailsLog:
 @lru_cache
 def get_guardrails_log() -> GuardrailsLog:
     return _guardrails_log()
+
+
+@lru_cache
+def get_response_logs() -> dict[str, ResponseLog]:
+    """The log of the answers to POST /v1/extract-ocr (nilam_ocr_results) and to its -test twin
+    (nilam_testing_ocr_results), keyed by table prefix; read by app.api.response_log.ResponseLogMiddleware."""
+    settings = get_settings()
+    if not settings.database_url:
+        return {"": NoResponseLog(), TESTING_TABLE_PREFIX: NoResponseLog()}
+    timeout = settings.guardrails_log_timeout_seconds
+    return {
+        prefix: SqlResponseLog(settings.database_url, table_prefix=prefix, timeout=timeout)
+        for prefix in ("", TESTING_TABLE_PREFIX)
+    }
 
 
 # The testing endpoints (TESTING_ENDPOINTS): the same check and wait, on the stages' `-test` endpoints

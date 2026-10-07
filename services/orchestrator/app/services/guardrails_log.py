@@ -3,9 +3,6 @@ stage table, so without this a rejection left no trace here. The row also keeps 
 pipeline_name_sequence, so `GET /v1/extract-ocr/{request_id}` can answer for a request that never reached a
 stage (guardrails only, or rejected by guardrails).
 
-When guardrails ends the request (it rejected the document, or it is the only service of the sequence), the same
-transaction writes the request's final answer to `nilam_ocr_results`, as a stage does when the request ends there.
-
 Best-effort both ways: a write or a read that fails or takes longer than `timeout` is logged, and the request
 is answered as if there were no row, because the entry point must not go down with the audit trail."""
 
@@ -17,11 +14,8 @@ from typing import Any, Protocol, TypedDict
 
 from sqlalchemy import MetaData, select
 
-from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE
-from ocr_common.pipeline import GUARDRAILS
 from ocr_common.pipeline.database import get_engine
-from ocr_common.pipeline.ocr_results_sql import GUARDRAILS_PASSED, GUARDRAILS_REJECTED, write_ocr_result
-from ocr_common.pipeline.tables import guardrails_results_table, ocr_results_table
+from ocr_common.pipeline.tables import guardrails_results_table
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +64,6 @@ class SqlGuardrailsLog:
     def __init__(self, database_url: str, *, table_prefix: str = "", timeout: float = 2.0):
         self._url = database_url
         self._table = guardrails_results_table(MetaData(), table_prefix)
-        self._results = ocr_results_table(MetaData(), table_prefix)
         self._timeout = timeout
 
     async def record(
@@ -117,28 +110,6 @@ class SqlGuardrailsLog:
                     ds=now.strftime("%Y%m%d"),
                 )
             )
-            if not report.get("passed"):
-                await write_ocr_result(
-                    conn,
-                    self._results,
-                    request_id,
-                    400,
-                    report.get("reason"),
-                    errors=REJECTED_CODE,
-                    guardrails=GUARDRAILS_REJECTED,
-                    pipeline_last_stage=GUARDRAILS,
-                )
-            elif sequence is not None and tuple(sequence) == (GUARDRAILS,):
-                await write_ocr_result(
-                    conn,
-                    self._results,
-                    request_id,
-                    200,
-                    COMPLETED_MESSAGE,
-                    data=report,
-                    guardrails=GUARDRAILS_PASSED,
-                    pipeline_last_stage=GUARDRAILS,
-                )
 
     async def _select_latest(self, request_id: str) -> GuardrailsVerdict | None:
         table = self._table
