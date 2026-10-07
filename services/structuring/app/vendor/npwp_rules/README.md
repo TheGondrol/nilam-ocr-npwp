@@ -11,7 +11,7 @@ mereka merangkai modul-modul ini.
 | `name_extraction.py` | ML engineer | dua baris import dibuat relatif |
 | `name_master.py` | ML engineer (asli, menggantikan pengganti sementara) | path data dibaca saat dipanggil (`default_master_path()`, `default_list_path()`), bukan saat import; default ke `data/` di folder ini |
 | `kpp_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kpp_codes_v2.json`; `_load_valid_kpp_codes` membaca format v2 (`kpp` + `kode_historis`) selain format lama |
-| `wilayah_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kode_wilayah.json` |
+| `wilayah_codes.py` | ML engineer | sama: `default_data_path()`, default `data/kode_wilayah_v2.json` |
 
 Alasan perubahan path: kiriman asli menghitung path dari `os.environ` saat import dengan fallback ke
 layout laptop ML engineer (`BRI/dataset/...`). Di sini nilai berasal dari `Settings` (bisa dari `.env`,
@@ -28,7 +28,7 @@ di atas). Butuh `numpy` (`poly_center`), `openpyxl` dan `rapidfuzz` (`name_maste
 
 | File | Dipakai oleh | Kalau tidak ada |
 |---|---|---|
-| `kode_wilayah.json` | `has_invalid_kecamatan_prefix` (NPWP 16 digit berbasis NIK) | pemeriksaan kecamatan tanpa sinyal (tidak pernah flag); kode provinsi 2 digit tetap diperiksa dari tabel di `npwp.py` |
+| `kode_wilayah_v2.json` | `has_invalid_kecamatan_prefix` (NPWP 16 digit berbasis NIK): kode valid = semua kunci `kecamatan`, termasuk yang `tidak_aktif` (sah sebagai tempat NIK pertama terbit) | pemeriksaan kecamatan tanpa sinyal (tidak pernah flag); kode provinsi 2 digit tetap diperiksa dari tabel di `npwp.py` |
 | `kpp_codes_v2.json` | `has_invalid_kpp_prefix` (NPWP 15 digit lama): kode valid = 352 KPP di `kpp` **plus** 6 kode lama di `kode_historis` (kantor yang dikonversi 3 Mei 2021; NPWP lama tetap memuat kodenya) | tanpa sinyal |
 | `name_lnmast.xlsx` | `is_recognized_name`: tie-break antar kandidat nama | jarak ke nomor NPWP yang menentukan, seperti sebelumnya |
 | `list_name_npwp.xlsx` | `correct_name_with_npwp_list` (koreksi nama per `file_id`) | **tidak dipakai di sini**: name matching fuzzy dilakukan di orkestrator, `extract_name` dipanggil tanpa `file_id` |

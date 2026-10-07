@@ -191,7 +191,7 @@ def test_kecamatan_check_needs_the_kode_wilayah_table(tmp_path, monkeypatch):
     monkeypatch.setenv("WILAYAH_CODES_PATH", str(tmp_path / "tidak-ada.json"))
     assert _signals(fields(_card(number))["nomor_npwp"])["invalid_kecamatan_prefix"] is False, "no table: no signal"
 
-    table = tmp_path / "kode_wilayah.json"
+    table = tmp_path / "kode_wilayah_v2.json"
     table.write_text(json.dumps({"kecamatan": {"330101": "Contoh"}}), encoding="utf-8")
     monkeypatch.setenv("WILAYAH_CODES_PATH", str(table))
     document = structure(_card(number))
@@ -227,7 +227,7 @@ def test_kpp_table_v2_counts_the_historical_codes_as_valid(tmp_path, monkeypatch
 
 
 def test_the_delivered_reference_tables_are_used_by_default():
-    """kode_wilayah.json (7230 kecamatan) and kpp_codes_v2.json (352 offices + 6 historical codes) of the ML team
+    """kode_wilayah_v2.json (8063 kecamatan, active + inactive) and kpp_codes_v2.json (352 offices + 6 historical codes) of the ML team
     live in data/."""
     assert structure(_card("3301 0130 1001 0006"))["flag"] is False
     assert structure(_card("3399 9930 1001 0006"))["flag_reason"] == npwp_rules.FLAG_INVALID_KECAMATAN

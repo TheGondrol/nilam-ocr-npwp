@@ -1,6 +1,6 @@
 """Loads the Depdagri kecamatan code table (dataset/Kode Wilayah/
-kode_wilayah.json, generated once by ocr_npwp/app/build_wilayah_codes.py
-from the source PDF) for npwp.has_invalid_kecamatan_prefix's exact-match
+kode_wilayah_v2.json from the ML team; only its "kecamatan" keys are read,
+active and inactive alike, as the file notes inactive codes stay valid for NIK validation) for npwp.has_invalid_kecamatan_prefix's exact-match
 validation of a 16-digit NIK-based NPWP's first six digits (province+
 kabupaten/kota+kecamatan).
 
@@ -28,7 +28,7 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def default_data_path() -> Path:
-    return Path(os.environ.get("WILAYAH_CODES_PATH") or str(_DATA_DIR / "kode_wilayah.json"))
+    return Path(os.environ.get("WILAYAH_CODES_PATH") or str(_DATA_DIR / "kode_wilayah_v2.json"))
 
 
 def _load_valid_kecamatan_codes(data_path: Path | None = None) -> frozenset[str] | None:
@@ -38,7 +38,7 @@ def _load_valid_kecamatan_codes(data_path: Path | None = None) -> frozenset[str]
     file can't be loaded, rather than flagging every number as invalid
     just because the lookup itself failed.
 
-    Not cached (re-reads and re-parses the ~700KB JSON on every call) -
+    Not cached (re-reads and re-parses the ~1.9MB JSON on every call) -
     measured at ~4-5ms per call, negligible next to OCR inference time, but
     revisit with @lru_cache(maxsize=1) if this ever gets called somewhere
     hotter than once or twice per request."""
