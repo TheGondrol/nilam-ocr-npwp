@@ -146,7 +146,10 @@ def ocr_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
     stage of the pipeline_name_sequence (completed, rejected by the structuring rules, or failed), or the
     orchestrator NPWP for guardrails (rejected, or the only service). `data` is the last service's result as it
     is (scoring: the contract's fields). `guardrails` is 0 passed, 1 rejected, null when the request left
-    guardrails out. A request_id run again overwrites its row (`update_at`)."""
+    guardrails out. `pipeline_last_stage` is the service that ended the request, as pipeline_name_sequence names
+    it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a success (unlike the extract-ocr answer);
+    for a failed hand-off, the stage that never received the job (0015). A request_id run again overwrites its
+    row (`update_at`)."""
     name = f"{TABLE_PREFIX}{table_prefix}ocr_results"
     return Table(
         name,
@@ -160,6 +163,7 @@ def ocr_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
         Column("guardrails", Integer, nullable=True),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Column("update_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("pipeline_last_stage", Text, nullable=True),
         schema=PIPELINE_SCHEMA,
     )
 

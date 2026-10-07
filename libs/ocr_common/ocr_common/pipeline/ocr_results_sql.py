@@ -1,7 +1,7 @@
 """`nilam_ocr_results`: the request's final answer, one row per request_id in the shape of the extract-ocr answer
-(`status_code`, `status_desc`, `message`, `data`, `errors`, `guardrails`). The service that ends the request writes
-it in the same transaction as its own result: a stage through `OcrResultsOutcome` (a `StageOutcome`), the
-orchestrator NPWP through `write_ocr_result` for guardrails.
+(`status_code`, `status_desc`, `message`, `data`, `errors`, `guardrails`, `pipeline_last_stage`). The service that
+ends the request writes it in the same transaction as its own result: a stage through `OcrResultsOutcome` (a
+`StageOutcome`), the orchestrator NPWP through `write_ocr_result` for guardrails.
 
 A stage only writes when the request ends with it: the last service of the pipeline_name_sequence completed, the
 structuring rules rejected the document, or a stage failed (its own work, or the hand-off to the next one). The
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE
 from ocr_common.pipeline.repository import stored_sequence
-from ocr_common.pipeline.sequence import GUARDRAILS
+from ocr_common.pipeline.sequence import GUARDRAILS, SERVICE_OF_STAGE
 from ocr_common.web.envelope import STATUS_DESC
 
 # `guardrails`, as in the extract-ocr answer: 0 passed, 1 rejected (by the guardrails model or the structuring
@@ -36,9 +36,10 @@ async def write_ocr_result(
     data: dict[str, Any] | None = None,
     errors: str | None = None,
     guardrails: int | None = None,
+    pipeline_last_stage: str | None = None,
 ) -> None:
     """Upsert the final answer of `request_id`; a row already there (the request_id run again) is overwritten
-    and keeps its `created_at`."""
+    and keeps its `created_at`. `pipeline_last_stage` is the service that ended the request."""
     now = datetime.now(UTC)
     values: dict[str, Any] = {
         "status_code": status_code,
@@ -47,6 +48,7 @@ async def write_ocr_result(
         "data": data,
         "errors": errors,
         "guardrails": guardrails,
+        "pipeline_last_stage": pipeline_last_stage,
         "update_at": now,
     }
     dialect = postgresql if conn.dialect.name == "postgresql" else sqlite
@@ -73,7 +75,16 @@ class OcrResultsOutcome:
         if data is None:
             return
         guardrails = await self._guardrails(conn, request_id, GUARDRAILS_PASSED)
-        await write_ocr_result(conn, self.table, request_id, 200, COMPLETED_MESSAGE, data=data, guardrails=guardrails)
+        await write_ocr_result(
+            conn,
+            self.table,
+            request_id,
+            200,
+            COMPLETED_MESSAGE,
+            data=data,
+            guardrails=guardrails,
+            pipeline_last_stage=self._service(),
+        )
 
     async def failed(
         self, conn: AsyncConnection, request_id: str, error_message: str, *, stage: str | None = None
@@ -88,12 +99,27 @@ class OcrResultsOutcome:
             error_message,
             errors=f"{stage or self._stage}_FAILED",
             guardrails=guardrails,
+            pipeline_last_stage=self._service(stage),
         )
 
     async def rejected(self, conn: AsyncConnection, request_id: str, reason: str) -> None:
         """400 `DOWNSTREAM_VALIDATION_ERROR` with the rules' reason as the message."""
         guardrails = await self._guardrails(conn, request_id, GUARDRAILS_REJECTED)
-        await write_ocr_result(conn, self.table, request_id, 400, reason, errors=REJECTED_CODE, guardrails=guardrails)
+        await write_ocr_result(
+            conn,
+            self.table,
+            request_id,
+            400,
+            reason,
+            errors=REJECTED_CODE,
+            guardrails=guardrails,
+            pipeline_last_stage=self._service(),
+        )
+
+    def _service(self, stage: str | None = None) -> str:
+        """`stage` (default: this one) as pipeline_name_sequence names it: OCR -> extraction, ..."""
+        stage = stage or self._stage
+        return SERVICE_OF_STAGE.get(stage, stage.lower())
 
     async def _guardrails(self, conn: AsyncConnection, request_id: str, value: int) -> int | None:
         """`value`, or None when the request's pipeline_name_sequence left guardrails out."""

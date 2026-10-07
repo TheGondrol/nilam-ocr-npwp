@@ -126,6 +126,7 @@ class SqlGuardrailsLog:
                     report.get("reason"),
                     errors=REJECTED_CODE,
                     guardrails=GUARDRAILS_REJECTED,
+                    pipeline_last_stage=GUARDRAILS,
                 )
             elif sequence is not None and tuple(sequence) == (GUARDRAILS,):
                 await write_ocr_result(
@@ -136,6 +137,7 @@ class SqlGuardrailsLog:
                     COMPLETED_MESSAGE,
                     data=report,
                     guardrails=GUARDRAILS_PASSED,
+                    pipeline_last_stage=GUARDRAILS,
                 )
 
     async def _select_latest(self, request_id: str) -> GuardrailsVerdict | None:

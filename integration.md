@@ -639,7 +639,7 @@ berawalan `nilam_` (sejak migrasi `0013`; sebelumnya `ocr_pipeline_npwp` tanpa a
 
 | Tabel | Isi |
 |---|---|
-| `nilam_ocr_npwp.nilam_ocr_results` | jawaban akhir tiap request, satu baris per `request_id`, dalam bentuk jawaban extract-ocr (`status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails`, `created_at`, `update_at`); `data` = hasil service terakhir apa adanya; `guardrails` null kalau guardrails tidak dijalankan (sejak migrasi `0014`) |
+| `nilam_ocr_npwp.nilam_ocr_results` | jawaban akhir tiap request, satu baris per `request_id`, dalam bentuk jawaban extract-ocr (`status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails`, `created_at`, `update_at`, `pipeline_last_stage`); `data` = hasil service terakhir apa adanya; `guardrails` null kalau guardrails tidak dijalankan (sejak migrasi `0014`) |
 | `nilam_ocr_npwp.nilam_ocr_extraction_jobs`, `nilam_ocr_npwp.nilam_ocr_extraction_result` | status dan hasil OCR mentah (sebelum `0014`: `nilam_ocr_jobs`, `nilam_ocr_results`) |
 | `nilam_ocr_npwp.nilam_structuring_jobs`, `nilam_ocr_npwp.nilam_structuring_results` | field hasil penataan |
 | `nilam_ocr_npwp.nilam_scoring_jobs`, `nilam_ocr_npwp.nilam_scoring_results` | confidence akhir |

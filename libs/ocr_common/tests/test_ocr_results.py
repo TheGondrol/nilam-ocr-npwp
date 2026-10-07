@@ -71,6 +71,7 @@ def _answer(row: dict) -> tuple:
         row["data"],
         row["errors"],
         row["guardrails"],
+        row["pipeline_last_stage"],
     )
 
 
@@ -80,7 +81,7 @@ async def test_the_last_stage_writes_its_data_as_the_answer(url):
     await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
 
     row = await _row(url)
-    assert _answer(row) == (RID, 200, "OK", "OCR extraction completed successfully", DATA, None, 0)
+    assert _answer(row) == (RID, 200, "OK", "OCR extraction completed successfully", DATA, None, 0, "scoring")
     assert isinstance(row["created_at"], datetime) and isinstance(row["update_at"], datetime)
 
 
@@ -90,7 +91,15 @@ async def test_an_earlier_last_stage_writes_its_result_as_it_is(url):
     await repo.claim(RID, input={"pipeline_name_sequence": ["guardrails", "extraction"]})
     await repo.complete(RID, result, outcome_data=result)
 
-    assert _answer(await _row(url))[1:] == (200, "OK", "OCR extraction completed successfully", result, None, 0)
+    assert _answer(await _row(url))[1:] == (
+        200,
+        "OK",
+        "OCR extraction completed successfully",
+        result,
+        None,
+        0,
+        "extraction",
+    )
 
 
 async def test_guardrails_is_null_when_the_request_left_it_out(url):
@@ -121,6 +130,7 @@ async def test_a_failed_stage_ends_the_request_with_422(url):
         None,
         "OCR_FAILED",
         0,
+        "extraction",
     )
 
 
@@ -136,7 +146,7 @@ async def test_a_failed_handoff_names_the_next_stage(url):
         "STRUCTURING_FAILED",
         "Handoff to STRUCTURING failed: unavailable",
     )
-    assert row["guardrails"] is None
+    assert (row["guardrails"], row["pipeline_last_stage"]) == (None, "structuring")
 
 
 @pytest.mark.parametrize(("input", "guardrails"), [(None, 1), (NO_GUARDRAILS, None)])
@@ -152,6 +162,7 @@ async def test_a_rejection_by_the_structuring_rules_ends_the_request_with_400(ur
         None,
         "DOWNSTREAM_VALIDATION_ERROR",
         guardrails,
+        "structuring",
     )
 
 
@@ -209,6 +220,7 @@ async def test_every_stage_with_a_database_writes_the_answer(url):
         {"text": "NPWP"},
         None,
         0,
+        "extraction",
     )
 
 

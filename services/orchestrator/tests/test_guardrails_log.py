@@ -133,6 +133,7 @@ async def test_a_rejection_writes_the_final_answer(database):
         REJECTED_REPORT["reason"],
     )
     assert (row["data"], row["errors"], row["guardrails"]) == (None, "DOWNSTREAM_VALIDATION_ERROR", 1)
+    assert row["pipeline_last_stage"] == "guardrails"
 
 
 async def test_a_guardrails_only_request_writes_the_report_as_data(database):
@@ -147,6 +148,7 @@ async def test_a_guardrails_only_request_writes_the_report_as_data(database):
         "OCR extraction completed successfully",
     )
     assert (row["data"], row["errors"], row["guardrails"]) == (ACCEPTED_REPORT, None, 0)
+    assert row["pipeline_last_stage"] == "guardrails"
 
 
 @pytest.mark.parametrize("sequence", [None, ["guardrails", "extraction"]])
