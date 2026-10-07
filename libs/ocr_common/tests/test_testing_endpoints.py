@@ -64,9 +64,11 @@ def test_testing_tables_are_migrated_with_the_live_ones():
     assert {table.schema for table in tables} == {"nilam_ocr_npwp"}
     names = {table.name for table in tables}
     assert all(name.startswith("nilam_") for name in names), names
-    for stage in ("ocr", "structuring", "scoring"):
+    for stage in ("structuring", "scoring"):
         assert {f"nilam_testing_{stage}_jobs", f"nilam_testing_{stage}_results"} <= names
+    assert {"nilam_testing_ocr_extraction_jobs", "nilam_testing_ocr_extraction_result"} <= names
     assert {"nilam_pipeline_outbox", "nilam_testing_pipeline_outbox"} <= names
+    assert {"nilam_ocr_results", "nilam_testing_ocr_results"} <= names
     index_names = {index.name for index in outbox_table(MetaData(), "testing_").indexes}
     assert index_names == {
         "idx_nilam_testing_pipeline_outbox_due",

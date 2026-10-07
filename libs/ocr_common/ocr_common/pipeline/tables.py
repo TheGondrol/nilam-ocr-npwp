@@ -1,7 +1,8 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
 and the tests. They all live in the schema `PIPELINE_SCHEMA` (`nilam_ocr_npwp`), not in `public`, and every name
 starts with `TABLE_PREFIX` (`nilam_`): the callers name a table without it (`ocr`, `testing_`), the prefix is put
-on here.
+on here. The extraction stage's tables are `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_result` (0014):
+`nilam_ocr_results` is the request's final answer, written by whichever service ends it.
 `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the orchestrator owns.
 """
 
@@ -26,11 +27,22 @@ from ocr_common.pipeline.database import JSON_TYPE, PIPELINE_SCHEMA, TABLE_PREFI
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
+# A stage whose tables are not `<prefix>_jobs` / `<prefix>_results` (the client's naming, 0014).
+STAGE_TABLE_NAMES = {"ocr": ("ocr_extraction_jobs", "ocr_extraction_result")}
+
+
+def stage_table_names(table_prefix: str) -> tuple[str, str]:
+    """The jobs and results table names of `table_prefix` (`ocr`, `testing_ocr`, `structuring`, ...)."""
+    stage = table_prefix.removeprefix(TESTING_TABLE_PREFIX)
+    lane = table_prefix[: len(table_prefix) - len(stage)]
+    jobs, results = STAGE_TABLE_NAMES.get(stage, (f"{stage}_jobs", f"{stage}_results"))
+    return f"{TABLE_PREFIX}{lane}{jobs}", f"{TABLE_PREFIX}{lane}{results}"
 
 
 def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table]:
-    """The `nilam_<prefix>_jobs` and `nilam_<prefix>_results` tables of one stage on `metadata`."""
-    jobs_name, results_name = f"{TABLE_PREFIX}{table_prefix}_jobs", f"{TABLE_PREFIX}{table_prefix}_results"
+    """The jobs and results tables of one stage on `metadata`: `nilam_<prefix>_jobs` and `nilam_<prefix>_results`,
+    `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_result` for the extraction stage (`ocr`)."""
+    jobs_name, results_name = stage_table_names(table_prefix)
     jobs = Table(
         jobs_name,
         metadata,
@@ -128,6 +140,30 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
     )
 
 
+def ocr_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
+    """`nilam_ocr_results`: the request's final answer, one row per request_id, in the shape of the extract-ocr
+    answer. Written by the service that ends the request, in the same transaction as its own result: the last
+    stage of the pipeline_name_sequence (completed, rejected by the structuring rules, or failed), or the
+    orchestrator NPWP for guardrails (rejected, or the only service). `data` is the last service's result as it
+    is (scoring: the contract's fields). `guardrails` is 0 passed, 1 rejected, null when the request left
+    guardrails out. A request_id run again overwrites its row (`update_at`)."""
+    name = f"{TABLE_PREFIX}{table_prefix}ocr_results"
+    return Table(
+        name,
+        metadata,
+        Column("status_code", Integer, nullable=False),
+        Column("status_desc", Text, nullable=False),
+        Column("message", Text, nullable=True),
+        Column("data", JSON_TYPE, nullable=True),
+        Column("errors", Text, nullable=True),
+        Column("request_id", Text, primary_key=True),
+        Column("guardrails", Integer, nullable=True),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("update_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        schema=PIPELINE_SCHEMA,
+    )
+
+
 def orchestration_outcome_table(name: str) -> Table:
     """The orchestrator's outcome table (`ORCHESTRATION_OUTCOME_TABLE`) as this code needs it; owned by them."""
     return Table(
@@ -183,11 +219,13 @@ def orchestration_api_events_table(name: str) -> Table:
 
 def repo_metadata() -> MetaData:
     """Every table this repository migrates, for Alembic's autogenerate and `alembic check`: the stage tables
-    the outbox and the guardrails verdicts, again with the `testing_` prefix for the testing endpoints."""
+    the outbox, the guardrails verdicts and the final answers, again with the `testing_` prefix for the testing
+    endpoints."""
     metadata = MetaData()
     for lane_prefix in ("", TESTING_TABLE_PREFIX):
         for table_prefix in PIPELINE_TABLE_PREFIXES:
             pipeline_tables(f"{lane_prefix}{table_prefix}", metadata)
         outbox_table(metadata, lane_prefix)
         guardrails_results_table(metadata, lane_prefix)
+        ocr_results_table(metadata, lane_prefix)
     return metadata

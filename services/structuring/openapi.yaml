@@ -1185,7 +1185,8 @@ components:
       required:
       - blocks
       title: OcrPayload
-      description: Result of the OCR stage (`nilam_ocr_results`), forwarded to structuring and scoring.
+      description: Result of the OCR stage (`nilam_ocr_extraction_result`), forwarded to structuring and
+        scoring.
     OutboxRelease:
       properties:
         stage:
@@ -1654,8 +1655,8 @@ components:
           - $ref: '#/components/schemas/OcrPayload'
           - type: 'null'
           description: 'Result of the OCR stage. Left out when the OCR service hands off by reference
-            (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_ocr_results` of the shared
-            database'
+            (`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_ocr_extraction_result` of
+            the shared database'
         pipeline_name_sequence:
           anyOf:
           - items:

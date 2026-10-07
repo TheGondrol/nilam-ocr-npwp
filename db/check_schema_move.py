@@ -1,6 +1,7 @@
-"""CI check of migrations 0010, 0011 and 0013: a database at 0009, with its rows and its version table in `public`,
-ends up with every table and every row in `nilam_ocr_npwp` under the `nilam_` names, keeps counting its ids where it
-left off, gets there from 0012 (the version table in `ocr_pipeline_npwp`, as on dev) and from 0010 (in
+"""CI check of migrations 0010, 0011, 0013 and 0014: a database at 0009, with its rows and its version table in
+`public`, ends up with every table and every row in `nilam_ocr_npwp` under the `nilam_` names (the extraction tables
+as `nilam_ocr_extraction_jobs` / `_result`, next to the new, empty `nilam_ocr_results`), keeps counting its ids where
+it left off, gets there from 0012 (the version table in `ocr_pipeline_npwp`, as on dev) and from 0010 (in
 `ocr_pipeline`) too, and survives downgrades and upgrades again.
 
     DATABASE_URL=postgresql+asyncpg://... python db/check_schema_move.py   # an EMPTY database: it is rebuilt
@@ -29,7 +30,19 @@ TABLES = [
         "guardrails_results",
     )
 ]
-NEW_TABLES = [f"{PREFIX}{table}" for table in TABLES]
+# 0014 renames the extraction tables and gives `ocr_results` to a new table, the request's final answer.
+RENAMED_0014 = {"ocr_jobs": "ocr_extraction_jobs", "ocr_results": "ocr_extraction_result"}
+NEW_0014 = [f"{PREFIX}{lane}ocr_results" for lane in ("", "testing_")]
+
+
+def head_name(table: str) -> str:
+    """The name at head of the table called `table` before 0013."""
+    lane = "testing_" if table.startswith("testing_") else ""
+    name = table.removeprefix(lane)
+    return f"{PREFIX}{lane}{RENAMED_0014.get(name, name)}"
+
+
+NEW_TABLES = [head_name(table) for table in TABLES]
 
 
 def alembic(*args: str) -> None:
@@ -74,9 +87,13 @@ async def seed(conn: asyncpg.Connection) -> None:
         )
 
 
-async def counts(conn: asyncpg.Connection, schema: str, prefix: str = "") -> dict[str, int]:
-    """Rows per table, keyed by the name before 0013 whatever the table is called in `schema`."""
-    return {table: int(await conn.fetchval(f'SELECT count(*) FROM "{schema}"."{prefix}{table}"')) for table in TABLES}
+async def counts(conn: asyncpg.Connection, schema: str, *, head: bool = False) -> dict[str, int]:
+    """Rows per table, keyed by the name before 0013 whatever the table is called in `schema` (`head`: the names at
+    head)."""
+    return {
+        table: int(await conn.fetchval(f'SELECT count(*) FROM "{schema}"."{head_name(table) if head else table}"'))
+        for table in TABLES
+    }
 
 
 async def check_head(before: dict[str, int]) -> None:
@@ -88,8 +105,10 @@ async def check_head(before: dict[str, int]) -> None:
         assert not old_names & await tables_in(conn, "public"), "tables left in public"
         for schema in OLD_SCHEMAS:
             assert not await conn.fetchval("SELECT 1 FROM pg_namespace WHERE nspname = $1", schema), f"{schema} left"
-        assert await tables_in(conn, SCHEMA) == set(NEW_TABLES) | {VERSION_TABLE}
-        assert await counts(conn, SCHEMA, PREFIX) == before, "rows lost in the move"
+        assert await tables_in(conn, SCHEMA) == set(NEW_TABLES) | set(NEW_0014) | {VERSION_TABLE}
+        assert await counts(conn, SCHEMA, head=True) == before, "rows lost in the move"
+        for table in NEW_0014:
+            assert not await conn.fetchval(f"SELECT count(*) FROM {SCHEMA}.{table}"), f"{table} is not new"
         # The id sequences moved and were renamed with their tables, and carry on after the rows already there.
         sequence = await conn.fetchval(f"SELECT pg_get_serial_sequence('{SCHEMA}.{PREFIX}pipeline_outbox', 'id')")
         assert sequence == f"{SCHEMA}.{PREFIX}pipeline_outbox_id_seq", sequence
@@ -117,12 +136,13 @@ async def check_head(before: dict[str, int]) -> None:
         # The foreign key moved too: a result without its job is still refused.
         try:
             await conn.execute(
-                f"INSERT INTO {SCHEMA}.{PREFIX}ocr_results (request_id, result, ds) VALUES ('NOPE', '{{}}', '')"
+                f"INSERT INTO {SCHEMA}.{PREFIX}ocr_extraction_result (request_id, result, ds) "
+                "VALUES ('NOPE', '{}', '')"
             )
         except asyncpg.ForeignKeyViolationError:
             pass
         else:
-            raise AssertionError("nilam_ocr_results lost its foreign key to nilam_ocr_jobs")
+            raise AssertionError("nilam_ocr_extraction_result lost its foreign key to nilam_ocr_extraction_jobs")
     finally:
         await conn.close()
 
@@ -162,7 +182,7 @@ async def main() -> None:
     await downgrade_to("0009_guardrails_results_sequence", "public", None, before)
     await check_head(before)
     print(
-        f"0010, 0011 + 0013 move every table and row to {SCHEMA} under {PREFIX}*, from public, ocr_pipeline and "
+        f"0010, 0011, 0013 + 0014 move every table and row to {SCHEMA} under {PREFIX}*, from public, ocr_pipeline and "
         "ocr_pipeline_npwp, and back"
     )
 

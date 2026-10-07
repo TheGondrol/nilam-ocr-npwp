@@ -1,13 +1,12 @@
 from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.npwp import REJECTED_CODE, contract_fields
+from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE, contract_fields
 from ocr_common.pipeline import EXTRACTION, GUARDRAILS, SERVICE_OF_STAGE, STAGE_SCORING, STATUS_DONE, STATUS_FAILED
 from ocr_common.web.envelope import envelope
 
 from app.services.pipeline_waiter import STATUS_REJECTED
 
-COMPLETED_MESSAGE = "OCR extraction completed successfully"
 PROCESSING_MESSAGE = "OCR job accepted; still processing"
 
 

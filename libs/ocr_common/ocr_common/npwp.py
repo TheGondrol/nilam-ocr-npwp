@@ -12,6 +12,8 @@ DOCUMENT_TYPE = "npwp"
 # `errors` of a 400 for a document that is not accepted: by the guardrails model, or by a rejecting
 # check of the structuring rules.
 REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
+# `message` of the extract-ocr 200, also kept in `nilam_ocr_results`.
+COMPLETED_MESSAGE = "OCR extraction completed successfully"
 NPWP_FIELDS = ("nomor_npwp", "nama", "nama_badan")
 TRUST_SCORES = ("npwp_confidence", "name_confidence")
 # The fields of the `extract-ocr` contract's `data`, the keys of a per-field threshold.

@@ -32,6 +32,9 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, HTTPException
 
+# Tabel jobs tahap OCR sejak migrasi 0014; tahap lain `nilam_<tahap>_jobs`.
+JOB_TABLES = {"OCR": "nilam_ocr_extraction_jobs"}
+
 log = logging.getLogger("tracker.chaos")
 router = APIRouter()
 ctx: dict[str, Any] = {}
@@ -348,8 +351,9 @@ class Run:
     # -- membaca keadaan --
 
     async def job(self, stage: str, request_id: str) -> dict[str, Any] | None:
+        table = JOB_TABLES.get(stage, f"nilam_{stage.lower()}_jobs")
         rows = await self._query(
-            f"SELECT status, attempts, error_message, updated_at FROM nilam_{stage.lower()}_jobs WHERE request_id = $1",
+            f"SELECT status, attempts, error_message, updated_at FROM {table} WHERE request_id = $1",
             request_id,
         )
         return dict(rows[0]) if rows else None

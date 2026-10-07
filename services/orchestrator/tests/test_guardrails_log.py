@@ -1,11 +1,11 @@
 """Every guardrails verdict is kept in nilam_guardrails_results, the rejected documents included, and a write that
-fails never fails the request."""
+fails never fails the request. When guardrails ends the request, its final answer goes to nilam_ocr_results."""
 
 import pytest
 from sqlalchemy import MetaData, select
 
 from ocr_common.pipeline.database import dispose_engines, get_engine
-from ocr_common.pipeline.tables import guardrails_results_table
+from ocr_common.pipeline.tables import guardrails_results_table, ocr_results_table
 
 from app.services.guardrails_log import SqlGuardrailsLog
 from tests.conftest import ACCEPTED_REPORT, JPEG, REJECTED_REPORT
@@ -57,6 +57,7 @@ async def database(tmp_path):
     url = f"sqlite+aiosqlite:///{tmp_path / 'guardrails.db'}"
     metadata = MetaData()
     table = guardrails_results_table(metadata)
+    ocr_results_table(metadata)
     async with get_engine(url).begin() as conn:
         await conn.run_sync(metadata.create_all)
     yield url, table
@@ -109,8 +110,52 @@ async def test_a_write_that_fails_is_logged_and_does_not_raise(tmp_path, caplog)
 
 
 def test_the_testing_endpoints_write_their_own_table():
-    table = SqlGuardrailsLog("sqlite+aiosqlite://", table_prefix="testing_")._table
-    assert table.name == "nilam_testing_guardrails_results"
+    log = SqlGuardrailsLog("sqlite+aiosqlite://", table_prefix="testing_")
+    assert (log._table.name, log._results.name) == ("nilam_testing_guardrails_results", "nilam_testing_ocr_results")
+
+
+async def _answers(url):
+    table = ocr_results_table(MetaData())
+    async with get_engine(url).connect() as conn:
+        return [dict(row) for row in (await conn.execute(select(table))).mappings().all()]
+
+
+async def test_a_rejection_writes_the_final_answer(database):
+    url, _ = database
+
+    await SqlGuardrailsLog(url).record(RID, REJECTED_REPORT, threshold_from_request=False, sequence=["guardrails"])
+
+    [row] = await _answers(url)
+    assert (row["request_id"], row["status_code"], row["status_desc"], row["message"]) == (
+        RID,
+        400,
+        "Bad Request",
+        REJECTED_REPORT["reason"],
+    )
+    assert (row["data"], row["errors"], row["guardrails"]) == (None, "DOWNSTREAM_VALIDATION_ERROR", 1)
+
+
+async def test_a_guardrails_only_request_writes_the_report_as_data(database):
+    url, _ = database
+
+    await SqlGuardrailsLog(url).record(RID, ACCEPTED_REPORT, threshold_from_request=False, sequence=["guardrails"])
+
+    [row] = await _answers(url)
+    assert (row["status_code"], row["status_desc"], row["message"]) == (
+        200,
+        "OK",
+        "OCR extraction completed successfully",
+    )
+    assert (row["data"], row["errors"], row["guardrails"]) == (ACCEPTED_REPORT, None, 0)
+
+
+@pytest.mark.parametrize("sequence", [None, ["guardrails", "extraction"]])
+async def test_a_document_that_goes_on_to_the_stages_writes_no_answer_here(database, sequence):
+    url, _ = database
+
+    await SqlGuardrailsLog(url).record(RID, ACCEPTED_REPORT, threshold_from_request=False, sequence=sequence)
+
+    assert await _answers(url) == []
 
 
 def test_the_sequence_is_recorded_with_the_verdict(client, auth, guardrails_log):

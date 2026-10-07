@@ -84,8 +84,8 @@ SERVICES = {
     "SCORING": os.environ.get("SCORING_URL", "http://127.0.0.1:8033"),
 }
 PREFIXES = {"OCR": "extraction", "STRUCTURING": "structuring", "SCORING": "scoring"}
-# Awalan tabel tiap tahap (`nilam_ocr_jobs`, ...; migrasi 0013).
-TABLES = {"OCR": "nilam_ocr", "STRUCTURING": "nilam_structuring", "SCORING": "nilam_scoring"}
+# Tabel jobs tiap tahap (`nilam_ocr_extraction_jobs` sejak migrasi 0014).
+TABLES = {"OCR": "nilam_ocr_extraction", "STRUCTURING": "nilam_structuring", "SCORING": "nilam_scoring"}
 JOB_PATHS = {stage: f"/v1/{prefix}/jobs" for stage, prefix in PREFIXES.items()}
 API_KEY = os.environ.get("API_KEY")  # kosong kalau service dijalankan dengan AUTH_DISABLED=true
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")

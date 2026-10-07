@@ -8,6 +8,10 @@ klien), termasuk tabel versi Alembic (`nilam_ocr_npwp_alembic_version`). Migrasi
 memindahkannya dari `public` ke `ocr_pipeline`, `0011_ocr_pipeline_npwp_schema` ke `ocr_pipeline_npwp`, lalu
 `0013_nilam_naming` ke `nilam_ocr_npwp` sambil memberi awalan `nilam_` (`ocr_jobs` → `nilam_ocr_jobs`,
 `testing_ocr_jobs` → `nilam_testing_ocr_jobs`); `0011` dan `0013` membuang schema lama yang sudah kosong.
+`0014_ocr_extraction_tables` mengganti nama tabel tahap extraction atas permintaan klien
+(`nilam_ocr_jobs` → `nilam_ocr_extraction_jobs`, `nilam_ocr_results` → `nilam_ocr_extraction_result`,
+kembarannya `nilam_testing_` juga) beserta index/PK/FK-nya, lalu memakai nama `nilam_ocr_results` untuk
+tabel baru: jawaban akhir request.
 Semuanya memakai `ALTER TABLE ... SET SCHEMA` (dan `RENAME` di `0013`): tabelnya sendiri yang pindah (baris,
 index, constraint, sequence `id`), tanpa salin data, dalam satu transaksi; jumlah baris tiap tabel dicatat di
 log job migrasi. `0013` juga mengganti nama index, primary key, foreign key, dan sequence `id` mengikuti nama
@@ -16,7 +20,7 @@ namanya lebih dulu oleh [`env.py`](migrations/env.py) (dari `ocr_pipeline_npwp`,
 dengan nama lamanya `ocr_npwp_alembic_version`), karena Alembic membacanya sebelum revisi mana pun jalan.
 Migrasi `0001`–`0009` tetap membuat tabelnya di `public` (search path bawaan) dan `0010`/`0011`/`0013` yang
 memindahkan, jadi database kosong dan database lama berakhir sama. Query manual:
-`nilam_ocr_npwp.nilam_ocr_jobs`, atau `SET search_path = nilam_ocr_npwp, public`. Di kode, nama schema ada di
+`nilam_ocr_npwp.nilam_ocr_extraction_jobs`, atau `SET search_path = nilam_ocr_npwp, public`. Di kode, nama schema ada di
 `PIPELINE_SCHEMA` dan awalannya di `TABLE_PREFIX`
 ([`ocr_common/pipeline/database.py`](../libs/ocr_common/ocr_common/pipeline/database.py)); test SQLite
 memakai tabel yang sama tanpa schema.
@@ -25,19 +29,20 @@ memakai tabel yang sama tanpa schema.
 
 | Tabel | Pemilik schema | Ditulis | Dibaca | Isi |
 |---|---|---|---|---|
-| `nilam_ocr_jobs`, `nilam_ocr_results` | **repo ini** | extraction | extraction (`GET /v1/extraction/jobs/{request_id}`), orchestrator lewat API itu | status dan hasil tahap OCR |
+| `nilam_ocr_extraction_jobs`, `nilam_ocr_extraction_result` | **repo ini** | extraction | extraction (`GET /v1/extraction/jobs/{request_id}`), orchestrator lewat API itu | status dan hasil tahap OCR |
 | `nilam_structuring_jobs`, `nilam_structuring_results` | **repo ini** | structuring | structuring lewat API-nya (orchestrator) | status dan field hasil structuring |
 | `nilam_scoring_jobs`, `nilam_scoring_results` | **repo ini** | scoring | scoring lewat API-nya (orchestrator) | status dan skor trust model |
+| `nilam_ocr_results` | **repo ini** | tahap terakhir request (extraction / structuring / scoring), atau orchestrator kalau guardrails yang mengakhiri | tidak ada service; untuk Orkestrasi pusat, audit dan analisis | jawaban akhir request, **satu baris per `request_id`** dalam bentuk jawaban extract-ocr: `status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails`, `created_at`, `update_at`. Ditulis oleh service yang mengakhiri request, dalam transaksi yang sama dengan hasilnya sendiri: selesai (200, `data` = hasil service terakhir apa adanya: laporan guardrails, hasil OCR, hasil structuring, atau field kontrak setelah scoring), ditolak aturan structuring atau model guardrails (400 `DOWNSTREAM_VALIDATION_ERROR`, `guardrails: 1`), atau gagal (422 `<TAHAP>_FAILED`). `guardrails` 0 lolos, 1 ditolak, **null kalau `pipeline_name_sequence` tidak memuat guardrails**. Status 202 tidak ditulis; `request_id` yang dijalankan ulang menimpa barisnya (`update_at`). Penolakan sebelum pipeline jalan (file, sequence, threshold) dan 5xx saat memanggil guardrails/extraction tidak dicatat (migrasi `0014`) |
 | `nilam_guardrails_results` | **repo ini** | orchestrator | tidak ada service; untuk audit dan analisis | setiap putusan guardrails, termasuk dokumen yang ditolak, dengan threshold yang memutuskan dan asalnya (`threshold_source`: `request` dari Orkestrasi pusat, `service` milik guardrails), dan laporan lengkapnya. Append-only (migrasi `0008`; kolom `threshold_target` dibuang di `0012`, ambang guardrails kini satu sisi) |
 | `ocr_npwp_requests` | — | tidak ada | tidak ada | tabel kontrak lama sinkron (`generate-request-id` → `extract-ocr` → `get-ocr-result`) yang sudah dihapus dari extraction; **dihapus oleh migrasi `0007_drop_ocr_npwp_requests`**. Jumlah barisnya dicatat di log job migrasi sebelum di-drop; `downgrade` membuat ulang tabel kosong, isinya tidak kembali |
 | `nilam_pipeline_outbox` | **repo ini** | ketiga tahap (dalam transaksi job), relay | relay tiap service, `GET /v1/<tahap>/outbox` | callback dan handoff yang belum terkirim (`PIPELINE_OUTBOX`). Baris dihapus setelah terkirim; yang gagal permanen (4xx, atau 5xx lebih lama dari `PIPELINE_OUTBOX_MAX_AGE_SECONDS`) tetap ada sebagai dead letter dengan `failed_at` + `last_error`, tidak pernah diambil lagi oleh relay, dan dilepas manual dengan `failed_at = NULL, next_attempt_at = now()`. `ds` dipakai untuk membersihkan dead letter lama |
-| `nilam_testing_ocr_jobs`/`_results`, `nilam_testing_structuring_jobs`/`_results`, `nilam_testing_scoring_jobs`/`_results`, `nilam_testing_pipeline_outbox`, `nilam_testing_guardrails_results` | **repo ini** | ketiga tahap (dan orchestrator untuk putusan guardrails) lewat endpoint `-test` (`TESTING_ENDPOINTS`) | tahap itu sendiri, orchestrator lewat `GET /v1/<tahap>/jobs-test/{request_id}` | salinan persis tabel tahap dan outbox untuk load test tim ML (migrasi `0006`). Tidak pernah dibaca Orkestrasi; boleh di-`TRUNCATE` kapan saja setelah tes. Lihat README, "Endpoint Testing" |
+| `nilam_testing_ocr_extraction_jobs`/`_result`, `nilam_testing_ocr_results`, `nilam_testing_structuring_jobs`/`_results`, `nilam_testing_scoring_jobs`/`_results`, `nilam_testing_pipeline_outbox`, `nilam_testing_guardrails_results` | **repo ini** | ketiga tahap (dan orchestrator untuk putusan guardrails) lewat endpoint `-test` (`TESTING_ENDPOINTS`) | tahap itu sendiri, orchestrator lewat `GET /v1/<tahap>/jobs-test/{request_id}` | salinan persis tabel tahap dan outbox untuk load test tim ML (migrasi `0006`). Tidak pernah dibaca Orkestrasi; boleh di-`TRUNCATE` kapan saja setelah tes. Lihat README, "Endpoint Testing" |
 | `nilam_ocr_npwp_alembic_version` | **repo ini** | Alembic | Alembic | versi migrasi repo ini (di `nilam_ocr_npwp`; sebelum `0013` bernama `ocr_npwp_alembic_version`: sampai `0009` di `public`, di `0010` di `ocr_pipeline`, sampai `0012` di `ocr_pipeline_npwp`); namanya sengaja tidak `alembic_version` supaya tidak bentrok dengan migrasi tim lain (`public.alembic_version`) |
 | `ocr.orchestration_api_events` | **orkestrasi** | orkestrasi; ketiga tahap menambah baris keadaan akhir kalau `ORCHESTRATION_API_EVENTS_TABLE` diisi | orkestrasi | log API orkestrasi, append-only. Lihat bagian di bawah tabel ini |
 | `orchestration_*` lainnya, `auth_*`, `datahub_lookup_log` (schema `ocr`) | **orkestrasi** | orkestrasi | orkestrasi | di luar repo ini. Migrasi di sini tidak pernah membuat atau mengubahnya |
 | `ocr.*`, `structuring.*`, `scoring.*` (schema terpisah) | — | tidak ada | tidak ada | sisa desain lama sebelum tabel pindah ke schema `public` (dan sejak `0013` ke `nilam_ocr_npwp`); **dihapus oleh migrasi `0005_drop_legacy_schemas`**. Migrasi itu hanya membuang schema yang isinya persis `jobs` + `results`; kalau ada tabel atau view lain di dalamnya, migrasi berhenti dengan pesan supaya diperiksa dulu. Jumlah baris yang dibuang dicatat di log Alembic |
 
-Orchestrator membaca status tahap lewat API, bukan lewat database; satu-satunya tabel yang ditulisnya adalah `nilam_guardrails_results` (best-effort). Guardrails tidak punya tabel.
+Orchestrator membaca status tahap lewat API, bukan lewat database; tabel yang ditulisnya hanya `nilam_guardrails_results` dan, kalau guardrails mengakhiri request, `nilam_ocr_results` (satu transaksi, best-effort). Guardrails tidak punya tabel.
 
 Ketiga tahap juga bisa menulis status request ke `orchestration_extract_ocr` di transaksi
 yang sama dengan penyimpanan hasilnya, kalau `ORCHESTRATION_OUTCOME_TABLE` diisi (default

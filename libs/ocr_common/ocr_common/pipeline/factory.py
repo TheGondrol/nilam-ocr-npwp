@@ -5,7 +5,7 @@ from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.config import PipelineSettings
 from ocr_common.pipeline.callbacks import NextStage, NextStageClient, OrchestrationCallback, ResultCallback
 from ocr_common.pipeline.outbox import OutboxRelay
-from ocr_common.pipeline.outcomes import build_stage_outcome
+from ocr_common.pipeline.outcomes import CompositeOutcome, StageOutcome, build_stage_outcome
 from ocr_common.pipeline.reaper import Resume, StaleJobReaper
 from ocr_common.pipeline.repository import build_job_repository
 from ocr_common.pipeline.results import StageResults
@@ -59,21 +59,26 @@ def build_stage_pipeline(
     testing: bool = False,
 ) -> StagePipeline:
     """The `StagePipeline` of a service from its settings: callback client, outbox, repository, outcome row.
+    With a database the request's final answer goes to `nilam_ocr_results` when it ends at this stage.
 
     `testing=True` builds the pipeline behind the `-test` endpoints: the same work on the `testing_*` tables
-    and `nilam_testing_pipeline_outbox`, with no callback and no write to the orchestrator's tables, so a load test
-    never reaches the orchestrator. `next_stage` must then point at the next stage's `-test` endpoint."""
+    (the final answer in `nilam_testing_ocr_results`) and `nilam_testing_pipeline_outbox`, with no callback and no
+    write to the orchestrator's tables, so a load test never reaches the orchestrator. `next_stage` must then
+    point at the next stage's `-test` endpoint."""
     lane_prefix = TESTING_TABLE_PREFIX if testing else ""
     outbox = None
     if settings.pipeline_outbox and settings.database_url:
         from ocr_common.pipeline.outbox_sql import SqlOutbox
 
         outbox = SqlOutbox(settings.database_url, lane_prefix)
+    outcome = None if testing else build_stage_outcome(settings, stage=stage)
+    if settings.database_url:
+        outcome = _with_ocr_results(outcome, stage=stage, lane_prefix=lane_prefix, table_prefix=table_prefix)
     repository = build_job_repository(
         settings.database_url,
         f"{lane_prefix}{table_prefix}",
         lease_seconds=settings.pipeline_job_lease_seconds,
-        outcome=None if testing else build_stage_outcome(settings, stage=stage),
+        outcome=outcome,
         outbox=outbox,
         stage=stage,
     )
@@ -88,6 +93,18 @@ def build_stage_pipeline(
         callbacks=False if testing else settings.callbacks_enabled,
         metrics_stage=testing_metrics_stage(stage) if testing else None,
     )
+
+
+def _with_ocr_results(outcome: StageOutcome | None, *, stage: str, lane_prefix: str, table_prefix: str) -> StageOutcome:
+    """`outcome` plus the writer of `nilam_ocr_results` (first, so both run in the job's transaction)."""
+    from sqlalchemy import MetaData
+
+    from ocr_common.pipeline.ocr_results_sql import OcrResultsOutcome
+    from ocr_common.pipeline.tables import ocr_results_table, pipeline_tables
+
+    jobs, _ = pipeline_tables(f"{lane_prefix}{table_prefix}", MetaData())
+    results = OcrResultsOutcome(ocr_results_table(MetaData(), lane_prefix), jobs, stage=stage)
+    return results if outcome is None else CompositeOutcome([results, outcome])
 
 
 def build_outbox_relay(settings: PipelineSettings, pipeline: StagePipeline) -> OutboxRelay | None:

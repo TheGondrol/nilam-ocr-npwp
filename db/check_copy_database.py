@@ -50,21 +50,29 @@ async def execute(url: str, *queries: str) -> None:
         await conn.close()
 
 
+# The jobs and results tables of each stage (the extraction stage's since 0014).
+STAGE_TABLES = {
+    "ocr": ("ocr_extraction_jobs", "ocr_extraction_result"),
+    "structuring": ("structuring_jobs", "structuring_results"),
+    "scoring": ("scoring_jobs", "scoring_results"),
+}
+
+
 async def seed() -> None:
     conn = await asyncpg.connect(plain(SOURCE))
     try:
         for lane in ("", "testing_"):
-            for stage in ("ocr", "structuring", "scoring"):
+            for stage, (jobs, results) in STAGE_TABLES.items():
                 for n in range(1200 if (lane, stage) == ("", "ocr") else 3):  # more than one batch of 1000
                     rid = f"REQ_{lane}{stage}_{n:05d}"
                     await conn.execute(
-                        f'INSERT INTO {SCHEMA}."nilam_{lane}{stage}_jobs" (request_id, status, input, ds) '
+                        f'INSERT INTO {SCHEMA}."nilam_{lane}{jobs}" (request_id, status, input, ds) '
                         "VALUES ($1, 'DONE', $2, '20261005')",
                         rid,
                         json.dumps({"n": n}),
                     )
                     await conn.execute(
-                        f'INSERT INTO {SCHEMA}."nilam_{lane}{stage}_results" (request_id, result, ds) '
+                        f'INSERT INTO {SCHEMA}."nilam_{lane}{results}" (request_id, result, ds) '
                         "VALUES ($1, $2, '20261005')",
                         rid,
                         json.dumps({"fields": {"nomor_npwp": {"value": str(n)}}}),
@@ -78,6 +86,11 @@ async def seed() -> None:
                 await conn.execute(
                     f'INSERT INTO {SCHEMA}."nilam_{lane}guardrails_results" '
                     "(request_id, passed, threshold_source, report, ds) VALUES ($1, true, 'service', '{}', '20261005')",
+                    f"REQ_{n}",
+                )
+                await conn.execute(
+                    f'INSERT INTO {SCHEMA}."nilam_{lane}ocr_results" (status_code, status_desc, data, request_id) '
+                    "VALUES (200, 'OK', '{}', $1)",
                     f"REQ_{n}",
                 )
     finally:

@@ -1,7 +1,7 @@
 """Names of the testing endpoints (`TESTING_ENDPOINTS`), shared by the services.
 
 Each endpoint of the pipeline has a `-test` twin that runs the same code on copies of the stage tables
-(`nilam_testing_ocr_jobs`, ..., `nilam_testing_pipeline_outbox`), without callbacks and without writes to the
+(`nilam_testing_ocr_extraction_jobs`, ..., `nilam_testing_pipeline_outbox`), without callbacks and without writes to the
 orchestrator's tables. The ML team uses them for load tests on dev. No dependency beyond the standard
 library: the orchestrator imports it without SQLAlchemy.
 """
