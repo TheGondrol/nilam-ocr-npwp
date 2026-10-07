@@ -3,7 +3,12 @@
 
 `request_id` comes from the contextvar that `RequestIdMiddleware` binds for the duration of a request
 and that the pipeline binds for the duration of a background job, so a log line written deep inside a
-model client still says which request it was for."""
+model client still says which request it was for.
+
+Deployed, the lines go to stderr only: the cluster's Filebeat DaemonSet collects every container's output and
+ships it to Elasticsearch (deploy/helm/README.md, "Log ke Elasticsearch"), so no service talks to Elasticsearch
+itself. A record may carry structured fields for it (`log_event`), e.g. one event per outbox delivery; the access
+log of the probes (`/health`, `/ready`, `/metrics`, every few seconds per pod) is left out unless it failed."""
 
 import json
 import logging
@@ -19,6 +24,27 @@ LogFormat = Literal["json", "text"]
 TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s"
 _MARK = "_ocr_common_handler"
 _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+# Paths the kubelet and Prometheus call every few seconds; a successful call is not worth a log line.
+PROBE_PATHS = frozenset({"/health", "/ready", "/metrics"})
+# The record attribute `log_event` puts its fields on.
+_FIELDS = "event_fields"
+
+
+def log_event(logger: logging.Logger, level: int, message: str, /, **fields: Any) -> None:
+    """Logs `message` with structured `fields` that the JSON format puts on the line as they are (nested objects
+    stay objects, e.g. `event={"dataset": "outbox", "action": "delivered"}`), so they can be searched in
+    Elasticsearch; the text format shows only the message. Never put document data (NPWP, names) in them."""
+    logger.log(level, message, extra={_FIELDS: fields})
+
+
+class ProbeAccessFilter(logging.Filter):
+    """Drops uvicorn's access line of a successful probe call (`PROBE_PATHS`); a failed one is kept."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "uvicorn.access" or not isinstance(record.args, tuple) or len(record.args) < 5:
+            return True
+        path, status = record.args[2], record.args[4]
+        return not (str(path).split("?", 1)[0] in PROBE_PATHS and isinstance(status, int) and status < 400)
 
 
 class RequestIdFilter(logging.Filter):
@@ -31,16 +57,20 @@ class RequestIdFilter(logging.Filter):
 
 
 class JsonFormatter(logging.Formatter):
-    """One JSON object per line. `severity` and `message` are the field names Cloud Logging reads."""
+    """One JSON object per line. `severity` and `message` are the field names Cloud Logging reads; `@timestamp`
+    and `log.level` the ones Elasticsearch (ECS) reads."""
 
     def __init__(self, service: str | None) -> None:
         super().__init__()
         self._service = service
 
     def format(self, record: logging.LogRecord) -> str:
+        time = datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds")
         entry: dict[str, Any] = {
-            "time": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
+            "@timestamp": time,
+            "time": time,
             "severity": record.levelname,
+            "log.level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
             "request_id": getattr(record, "request_id", None) or "-",
@@ -48,6 +78,10 @@ class JsonFormatter(logging.Formatter):
         if self._service:
             entry["service"] = self._service
         entry.update(apm.trace_fields())  # `trace.id`, `transaction.id` while an APM transaction is active
+        fields = getattr(record, _FIELDS, None)
+        if isinstance(fields, dict):
+            # Never over the fixed fields: a search on `message` or `request_id` must mean the same everywhere.
+            entry.update({key: value for key, value in fields.items() if key not in entry})
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
@@ -60,6 +94,7 @@ def configure_logging(*, fmt: LogFormat, level: str, service: str | None = None)
     handler = logging.StreamHandler(sys.stderr)
     setattr(handler, _MARK, True)
     handler.addFilter(RequestIdFilter())
+    handler.addFilter(ProbeAccessFilter())
     handler.setFormatter(JsonFormatter(service) if fmt == "json" else logging.Formatter(TEXT_FORMAT))
 
     root = logging.getLogger()

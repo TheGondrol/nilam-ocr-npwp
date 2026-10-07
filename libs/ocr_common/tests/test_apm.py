@@ -52,6 +52,7 @@ def test_with_a_server_url_the_agent_never_captures_bodies_or_headers(monkeypatc
     assert seen["SERVICE_NAME"] == "nilam-ocr-npwp-scoring"
     assert seen["ENVIRONMENT"] == "local"
     assert (seen["CAPTURE_BODY"], seen["CAPTURE_HEADERS"]) == ("off", False)
+    assert seen["TRANSACTION_IGNORE_URLS"] == "/health,/ready,/metrics", "no transaction per probe"
     assert (seen["SECRET_TOKEN"], seen["API_KEY"]) == ("t", "a")
     assert seen["SANITIZE_FIELD_NAMES"] == "password,*token"
 

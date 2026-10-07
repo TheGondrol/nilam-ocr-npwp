@@ -23,6 +23,7 @@ from ocr_common.pipeline.callbacks import (
     stage_callback_body,
 )
 from ocr_common.web import apm
+from ocr_common.web.logging import log_event
 from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 if TYPE_CHECKING:
@@ -294,15 +295,56 @@ class OutboxRelay:
                         await self._outbox.retry_later(row.id, delay, exc.message)
                         result = apm.RETRY
                     else:
-                        await self._give_up(row, exc.message)
                         result = apm.DEAD
+                    self._log_delivery(row, result, target, error=exc, retry_in=delay)
+                    if result == apm.DEAD:
+                        await self._give_up(row, exc.message)
                 else:
                     await self._outbox.done(row.id)
                     result = apm.DELIVERED if sent else apm.SKIPPED
+                    self._log_delivery(row, result, target)
                 apm.delivery_result(result)
                 return result
         finally:
             reset_request_id(token)
+
+    def _log_delivery(
+        self,
+        row: Row[Any],
+        result: str,
+        target: str | None,
+        *,
+        error: ServiceError | None = None,
+        retry_in: float | None = None,
+    ) -> None:
+        """One log event per delivery (`event.dataset: outbox`, searchable in Elasticsearch): what was sent where,
+        which attempt, and what came of it. Never the payload: it carries the document's fields."""
+        to = target or "orchestration"
+        message = f"outbox {row.kind} {row.stage} -> {to}: {result} (attempt {row.attempts})"
+        if error is not None:
+            message += f": {error.message}"
+        outbox: dict[str, Any] = {
+            "id": row.id,
+            "kind": row.kind,
+            "stage": row.stage,
+            "target": to,
+            "attempt": row.attempts,
+            "age_seconds": round(self._age(row), 1),
+        }
+        if error is not None:
+            outbox["error"] = error.message
+            outbox["status_code"] = error.status_code
+        if retry_in is not None:
+            outbox["retry_in_seconds"] = round(retry_in, 1)
+        failed = result in (apm.RETRY, apm.DEAD)
+        level = logging.ERROR if result == apm.DEAD else logging.WARNING if failed else logging.INFO
+        log_event(
+            logger,
+            level,
+            message,
+            event={"dataset": "outbox", "action": result, "outcome": "failure" if failed else "success"},
+            outbox=outbox,
+        )
 
     def _age(self, row: Row[Any]) -> float:
         created = row.created_at if row.created_at.tzinfo is not None else row.created_at.replace(tzinfo=UTC)
@@ -331,14 +373,7 @@ class OutboxRelay:
         return True
 
     async def _give_up(self, row: Row[Any], reason: str) -> None:
-        logger.error(
-            "outbox gave up on %s %s of %s after %d attempts: %s",
-            row.kind,
-            row.stage,
-            row.request_id,
-            row.attempts,
-            reason,
-        )
+        """Turn the message into a dead letter (logged as a `dead` delivery by `_deliver`)."""
         replacement = None
         if row.kind == KIND_HANDOFF:
             next_stage = row.payload["next_stage"]

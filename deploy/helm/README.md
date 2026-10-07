@@ -180,6 +180,43 @@ Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>` (atau `apm.
 Body dan header request **tidak pernah** dikirim (`CAPTURE_BODY=off`, `CAPTURE_HEADERS=false`): dokumen, nomor
 NPWP, nama, dan API key tidak keluar ke server APM.
 
+## Log ke Elasticsearch
+
+Service tidak mengirim log ke Elasticsearch sendiri. Setiap service menulis satu baris JSON per log ke stderr,
+dan **Filebeat 7.17 milik cluster** (DaemonSet `filebeat` di `kube-system`, dikelola tim platform, bukan chart
+ini) mengambil output semua container di setiap node (`/var/log/containers/*.log`), menambahkan metadata
+Kubernetes (`kubernetes.namespace`, `kubernetes.pod.name`, `kubernetes.container.name`, ...), lalu mengirimnya ke
+Logstash `10.213.128.12:5040`, yang meneruskannya ke Elasticsearch. Tidak ada yang perlu dipasang atau
+dinyalakan di chart ini.
+
+Field tiap baris (`libs/ocr_common/ocr_common/web/logging.py`):
+
+| Field | Isi |
+|---|---|
+| `@timestamp`, `log.level` | waktu dan level (ECS); `time` dan `severity` sama, untuk Cloud Logging |
+| `message`, `logger`, `exception` | pesan, nama logger, stack trace kalau ada |
+| `service`, `request_id` | service asal dan request / job yang sedang dikerjakan (`-` di luar request) |
+| `trace.id`, `transaction.id` | trace Elastic APM yang aktif, untuk melompat dari log ke trace dan sebaliknya |
+| `event.dataset: outbox`, `event.action`, `event.outcome` | satu event per pengiriman outbox: `delivered`, `skipped`, `retry`, `dead`, atau `released` (dead letter dilepas) |
+| `outbox.*` | `id`, `kind` (callback / handoff), `stage`, `target` (tahap berikutnya / `orchestration`), `attempt`, `age_seconds`, dan saat gagal `error`, `status_code`, `retry_in_seconds` |
+
+Isi dokumen (payload callback / hand-off, NPWP, nama) tidak pernah masuk log. Akses log probe yang berhasil
+(`/health`, `/ready`, `/metrics`, beberapa detik sekali per pod) tidak ditulis, dan juga tidak menjadi transaksi APM.
+
+Contoh pencarian di Kibana (KQL):
+
+```text
+kubernetes.namespace : "nilam-ocr-npwp" and request_id : "OCR_9cb01af2-..."     # semua log satu request
+event.dataset : "outbox" and event.outcome : "failure"                          # callback / hand-off yang gagal
+event.dataset : "outbox" and event.action : "dead"                              # dead letter, perlu dilepas
+event.dataset : "outbox" and outbox.target : "orchestration" and outbox.status_code >= 400
+```
+
+**Perlu dipastikan dengan tim platform** (belum diverifikasi dari sisi repo ini): index tempat Logstash menulis
+log namespace `nilam-ocr-npwp`, dan apakah Logstash mem-parse JSON di field `message`. Kalau tidak, field di atas
+ada sebagai teks di dalam `message`, bukan field yang bisa dicari; minta filter `json { source => "message" }`
+untuk namespace ini di pipeline Logstash (atau processor `decode_json_fields` di Filebeat).
+
 ## Skema database
 
 Service tidak membuat tabel sendiri; tabel dipasang lewat migrasi Alembic ([db/](../../db)).

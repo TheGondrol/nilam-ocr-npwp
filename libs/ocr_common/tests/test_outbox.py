@@ -544,3 +544,56 @@ async def test_a_callback_with_nothing_to_send_is_done_and_marked_skipped(pipeli
 
     assert orchestration.transactions[0].result == apm.SKIPPED
     assert await _rows(stage.outbox) == []
+
+
+def _events(caplog) -> list[dict]:
+    """The structured fields of every outbox event logged."""
+    return [
+        {"level": r.levelname, "message": r.getMessage(), **r.event_fields}
+        for r in caplog.records
+        if getattr(r, "event_fields", {}).get("event", {}).get("dataset") == "outbox"
+    ]
+
+
+async def test_every_delivery_is_one_structured_log_event_without_the_payload(pipeline, caplog):
+    stage, _ = pipeline
+    await _run(stage)
+    relay = _relay(stage, callback=Sink(ServiceError(503, "orchestration is unavailable")))
+
+    with caplog.at_level("INFO", logger="ocr_common.pipeline.outbox"):
+        await relay.deliver_due()
+
+    handoff, callback = _events(caplog)
+    assert handoff["event"] == {"dataset": "outbox", "action": "delivered", "outcome": "success"}
+    assert {k: handoff["outbox"][k] for k in ("kind", "stage", "target", "attempt")} == {
+        "kind": KIND_HANDOFF,
+        "stage": STAGE_OCR,
+        "target": STAGE_STRUCTURING,
+        "attempt": 1,
+    }
+    assert (handoff["level"], handoff["message"]) == (
+        "INFO",
+        "outbox handoff OCR -> STRUCTURING: delivered (attempt 1)",
+    )
+    assert callback["level"] == "WARNING"
+    assert callback["event"] == {"dataset": "outbox", "action": "retry", "outcome": "failure"}
+    assert (callback["outbox"]["target"], callback["outbox"]["status_code"]) == ("orchestration", 503)
+    assert callback["outbox"]["error"] == "orchestration is unavailable"
+    assert callback["outbox"]["retry_in_seconds"] > 0
+    assert "NPWP" not in str(_events(caplog)), "the payload never goes into a log line"
+
+
+async def test_a_dead_letter_is_an_error_event_and_a_release_is_logged_too(pipeline, caplog):
+    stage, _ = pipeline
+    await _run(stage)
+    relay = _relay(stage, callback=Sink(ServiceError(422, "invalid callback")))
+
+    with caplog.at_level("INFO", logger="ocr_common.pipeline"):
+        await relay.deliver_due()
+        assert await stage.outbox.release(STAGE_OCR, RID) == 1
+
+    dead = next(e for e in _events(caplog) if e["event"]["action"] == "dead")
+    assert dead["level"] == "ERROR"
+    assert dead["outbox"]["status_code"] == 422
+    released = next(e for e in _events(caplog) if e["event"]["action"] == "released")
+    assert released["outbox"] == {"stage": STAGE_OCR, "released": 1, "of_request_id": RID}

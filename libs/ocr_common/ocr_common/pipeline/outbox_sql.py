@@ -2,6 +2,7 @@
 that a service without a database (guardrails) can import the relay and the message helpers."""
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from ocr_common.pipeline.database import get_engine
 from ocr_common.pipeline.outbox import OutboxMessage, OutboxStats
 from ocr_common.pipeline.tables import outbox_table
+from ocr_common.web.logging import log_event
+
+logger = logging.getLogger(__name__)
 
 
 def _aware(value: datetime) -> datetime:
@@ -129,6 +133,13 @@ class SqlOutbox:
             released = (await conn.execute(statement)).rowcount
         if released:
             self.wake()
+            log_event(
+                logger,
+                logging.WARNING,
+                f"outbox {stage}: {released} dead letter(s) released{f' of {request_id}' if request_id else ''}",
+                event={"dataset": "outbox", "action": "released", "outcome": "success"},
+                outbox={"stage": stage, "released": released, "of_request_id": request_id},
+            )
         return released
 
     async def stats(self, stage: str) -> OutboxStats:

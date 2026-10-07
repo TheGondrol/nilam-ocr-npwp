@@ -43,6 +43,8 @@ def start(settings: BaseServiceSettings, service_name: str) -> Any | None:
         "VERIFY_SERVER_CERT": settings.elastic_apm_verify_server_cert,
         "CAPTURE_BODY": "off",
         "CAPTURE_HEADERS": False,
+        # The probes: a transaction every few seconds per pod would drown the real requests.
+        "TRANSACTION_IGNORE_URLS": "/health,/ready,/metrics",
     }
     if settings.elastic_apm_secret_token:
         config["SECRET_TOKEN"] = settings.elastic_apm_secret_token
