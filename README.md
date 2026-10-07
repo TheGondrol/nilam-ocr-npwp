@@ -159,7 +159,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                 file_url? unduh dari MinIO : pakai file dari payload
                 OCR (paddle / remote / mock)
                 ┌─ SATU TRANSAKSI (hasil) ──────────────────────────────────────────────────────┐
-                │ UPSERT nilam_ocr_extraction_result                                            │
+                │ UPSERT nilam_ocr_extraction_results                                            │
                 │ UPDATE nilam_ocr_extraction_jobs DONE                                         │
                 │ INSERT nilam_pipeline_outbox (stage OCR, handoff, payload: body structuring)  │
                 └─ COMMIT ── lalu bangunkan relay proses ini ───────────────────────────────────┘
@@ -176,7 +176,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                                       + UPSERT orchestration_extract_ocr {failed, STRUCTURING_FAILED}
 
    structuring: [transaksi klaim: INSERT nilam_structuring_jobs + orkestrasi {processing, STRUCTURING}]
-                ocr tidak di body? SELECT nilam_ocr_extraction_result
+                ocr tidak di body? SELECT nilam_ocr_extraction_results
                 aturan npwp_rules ML engineer: nomor + nama per posisi, flag lunak (tidak pernah menolak)
                 [transaksi hasil: UPSERT nilam_structuring_results + DONE + outbox handoff scoring]
    relay STRUCTURING:
@@ -184,7 +184,7 @@ Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-
                      (request_id, guardrails [+ ocr, structuring])
 
    scoring:     [transaksi klaim: INSERT nilam_scoring_jobs + orkestrasi {processing, SCORING}]
-                structuring tidak di body? SELECT nilam_structuring_results + nilam_ocr_extraction_result
+                structuring tidak di body? SELECT nilam_structuring_results + nilam_ocr_extraction_results
                 trust model
                 ┌─ SATU TRANSAKSI (hasil) ──────────────────────────────────────────────────────┐
                 │ UPSERT nilam_scoring_results + UPDATE nilam_scoring_jobs DONE                 │
@@ -332,7 +332,7 @@ extraction, structuring, scoring (`ocr_common.config.PipelineSettings`, pipeline
 | `PIPELINE_OUTBOX_LEASE_SECONDS` | Tidak | `30.0` | Lama sebuah pesan "dipegang" satu relay sebelum relay lain boleh mencobanya lagi |
 | `PIPELINE_OUTBOX_MAX_BACKOFF_SECONDS` | Tidak | `300.0` | Batas atas jeda retry sebuah pesan (backoff ×2 mulai dari `PIPELINE_RETRY_DELAY_SECONDS`) |
 | `PIPELINE_OUTBOX_MAX_AGE_SECONDS` | Tidak | `86400.0` | Pesan yang masih gagal 5xx setelah berumur segini menjadi dead letter: berhenti dicoba, tetap di tabel dengan `failed_at` dan `last_error`. Pesan yang dijawab 4xx langsung menjadi dead letter |
-| `PIPELINE_HANDOFF_BY_REFERENCE` | Tidak | `false` | `true` = handoff ke tahap berikutnya hanya membawa `request_id` dan laporan guardrails; blok OCR dan field structuring **tidak** ikut, tahap berikutnya membacanya dari `nilam_ocr_extraction_result` / `nilam_structuring_results` di database yang sama. Butuh `DATABASE_URL`, dan database itu harus sama di ketiga service. Menyusutkan payload handoff dan baris `nilam_pipeline_outbox` untuk PDF banyak halaman. Penerima selalu menerima kedua bentuk: kalau `ocr` / `structuring` ada di body, itu yang dipakai |
+| `PIPELINE_HANDOFF_BY_REFERENCE` | Tidak | `false` | `true` = handoff ke tahap berikutnya hanya membawa `request_id` dan laporan guardrails; blok OCR dan field structuring **tidak** ikut, tahap berikutnya membacanya dari `nilam_ocr_extraction_results` / `nilam_structuring_results` di database yang sama. Butuh `DATABASE_URL`, dan database itu harus sama di ketiga service. Menyusutkan payload handoff dan baris `nilam_pipeline_outbox` untuk PDF banyak halaman. Penerima selalu menerima kedua bentuk: kalau `ocr` / `structuring` ada di body, itu yang dipakai |
 | `PIPELINE_OUTBOX_STALE_AFTER_SECONDS` | Tidak | `300.0` | Relay menulis log `WARNING` tiap menit selama pesan tertua yang belum terkirim lebih tua dari ini (atau ada dead letter) |
 | `ORCHESTRATION_OUTCOME_TABLE` | Salah satu dengan `ORCHESTRATION_URL` | – | Nama tabel milik orkestrasi yang ikut ditulis di transaksi job (mis. `orchestration_extract_ocr`). Kosong = tidak menulis. Tabelnya wajib punya `request_id` unik plus kolom `downstream_status`, `downstream_stage`, `status_code`, `error_code`, `error_message`, `result_data`, `ds`; DDL yang dibutuhkan ada di [db/external/](db/external) |
 
@@ -401,7 +401,7 @@ Semua response memakai envelope `ocr-*`: `{status_code, status_desc, message, da
 | orchestrator | GET | `/v1/extract-ocr/{request_id}` | Kontrak yang sama, **tanpa menunggu**: status tiap tahap dibaca sekali, berurutan. 200 / 202 / 400 (ditolak aturan structuring) / 422, `params: null`; 404 kalau tidak ada tahap yang punya job (ditolak model guardrails, atau belum dikirim); 503/504 kalau sebuah tahap tidak terjangkau. Hand-off yang mati permanen (dead letter) tetap terbaca 202: keadaan finalnya ada di callback / tabel Orkestrasi |
 | guardrails | POST | `/v1/guardrails/check` | **Internal, dipanggil orchestrator untuk tiap dokumen; hanya menilai, selalu 200.** `file` / `file_url` → `passed`, `reason`, `document` {verdict, confidence, n_pages, n_approve, n_reject}, `pages[]`. Tidak memulai apa pun; untuk debugging |
 | extraction | POST | `/v1/extraction/jobs` | **202.** Dipanggil orchestrator. form: `request_id`, `guardrails` (JSON object, laporan guardrails), + tepat satu dari `file` / `file_url` |
-| structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}`; `ocr` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `nilam_ocr_extraction_result`) |
+| structuring | POST | `/v1/structuring/jobs` | **202.** JSON `{"request_id", "guardrails", "ocr": {"blocks": [{"text", "confidence", ...}], ...}}`; `ocr` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `nilam_ocr_extraction_results`) |
 | scoring | POST | `/v1/scoring/jobs` | **202.** JSON `{"request_id", "guardrails", "ocr", "structuring": {"fields": {...}}, "column_confidence_threshold": {"nomor_npwp": 0.9, "nama": 0.5}}` (ambang opsional per field, field lain 422); `ocr` dan `structuring` boleh dihilangkan kalau pengirim handoff by reference (dibaca dari `nilam_*_results`) |
 | ketiganya | GET | `/v1/<tahap>/jobs/{request_id}` | – → `{request_id, stage, status: PROCESSING\|DONE\|FAILED, result, error_message, created_at, updated_at}`; untuk debug/rekonsiliasi, sumber status resmi tetap Orkestrasi |
 | ketiganya | GET | `/v1/<tahap>/outbox` | – → `{enabled, stage, pending, retrying, oldest_pending_seconds, dead_letters}`: backlog outbox tahap ini (`PIPELINE_OUTBOX`) |
@@ -519,7 +519,7 @@ Setelah selesai, kosongkan tabelnya (isinya tidak dipakai apa pun):
 
 ```sql
 SET search_path = nilam_ocr_npwp;
-TRUNCATE nilam_testing_ocr_results, nilam_testing_ocr_extraction_result, nilam_testing_ocr_extraction_jobs,
+TRUNCATE nilam_testing_ocr_results, nilam_testing_ocr_extraction_results, nilam_testing_ocr_extraction_jobs,
          nilam_testing_structuring_results,
          nilam_testing_structuring_jobs, nilam_testing_scoring_results, nilam_testing_scoring_jobs,
          nilam_testing_pipeline_outbox, nilam_testing_guardrails_results;
@@ -551,12 +551,12 @@ Satu database PostgreSQL; **semua tabel repo ini di schema `nilam_ocr_npwp` dan 
 | Tabel | Pemilik | Isi |
 |---|---|---|
 | `nilam_ocr_results` | orchestrator (jawaban POST) dan tahap terakhir (callback) | **log setiap jawaban ke Orkestrasi pusat**, append-only (satu baris per jawaban; migrasi `0014`-`0016`): `id` (PK), `status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails` (0 lolos, 1 ditolak, null kalau `pipeline_name_sequence` tidak memuat guardrails), `created_at`, `update_at` (= `created_at`, baris tidak pernah diubah), `pipeline_last_stage`. Dua penulis: **orchestrator**, untuk setiap jawaban `POST /v1/extract-ocr` (200, 202, 400, 422, 5xx, termasuk penolakan sebelum pipeline jalan) tepat sebelum jawabannya dikirim (`pipeline_last_stage` seperti di jawaban itu); dan **tahap terakhir**, untuk callback hasil ke pusat, sekali saat callback itu terkirim (pusat menjawab 2xx; retry yang gagal dan dead letter tidak dicatat; `data` = hasil service terakhir apa adanya, `pipeline_last_stage` = service pengirimnya). Jadi request di atas batas tunggu punya baris 202 lalu baris callback-nya; baris terbaru per `request_id` = jawaban terakhir yang diterima pusat. Trigger `<tabel>_append_only` menolak UPDATE / DELETE; penulisan best-effort (gagal = tercatat di log, jawaban tetap dikirim) |
-| `nilam_ocr_extraction_jobs` / `nilam_ocr_extraction_result` | extraction | status tahap OCR per `request_id` dan blok teks mentah (sebelum `0014`: `nilam_ocr_jobs` / `nilam_ocr_results`) |
+| `nilam_ocr_extraction_jobs` / `nilam_ocr_extraction_results` | extraction | status tahap OCR per `request_id` dan blok teks mentah (sebelum `0014`: `nilam_ocr_jobs` / `nilam_ocr_results`) |
 | `nilam_structuring_jobs` / `nilam_structuring_results` | structuring | status tahap structuring dan field bernama |
 | `nilam_scoring_jobs` / `nilam_scoring_results` | scoring | status tahap scoring dan skor trust model |
 | `nilam_guardrails_results` | orchestrator | setiap putusan guardrails, **termasuk dokumen yang ditolak**: `passed`, `verdict`, `confidence`, `threshold`, `threshold_source` (`request` = dari Orkestrasi pusat, `service` = milik guardrails), `n_pages`, `reason`, `pipeline_name_sequence`, `report` (JSONB, dengan probabilitas per halaman). `GET /v1/extract-ocr/{request_id}` membacanya untuk request yang tidak punya job tahap: ditolak guardrails (400) atau `[guardrails]` saja (200). Append-only: `request_id` yang dikirim ulang dinilai ulang (migrasi `0008`) |
 
-`nilam_*_jobs` (dan `nilam_ocr_extraction_jobs`): `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `input` (JSONB: laporan guardrails, `file_url`; dipakai pengambil job basi untuk mengulang job), `created_at`, `updated_at`, `ds`. `nilam_*_results` (dan `nilam_ocr_extraction_result`): `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Orchestrator membaca status tahap lewat API, bukan lewat database; tabelnya hanya `nilam_guardrails_results` (plus `nilam_ocr_results` kalau guardrails mengakhiri request), ditulis best-effort (timeout `GUARDRAILS_LOG_TIMEOUT_SECONDS`, 2 dtk): kalau gagal hanya tercatat di log dan jawaban ke Orkestrasi pusat tidak terpengaruh. Tanpa `DATABASE_URL` orchestrator tidak mencatat apa pun. Guardrails tidak punya tabel.
+`nilam_*_jobs` (dan `nilam_ocr_extraction_jobs`): `request_id` (PK), `status` (`PROCESSING` → `DONE` \| `FAILED`), `error_message`, `attempts`, `input` (JSONB: laporan guardrails, `file_url`; dipakai pengambil job basi untuk mengulang job), `created_at`, `updated_at`, `ds`. `nilam_*_results` (dan `nilam_ocr_extraction_results`): `request_id` (PK, FK ke `jobs`), `result` JSONB, timestamp, `ds`. Orchestrator membaca status tahap lewat API, bukan lewat database; tabelnya hanya `nilam_guardrails_results` (plus `nilam_ocr_results` kalau guardrails mengakhiri request), ditulis best-effort (timeout `GUARDRAILS_LOG_TIMEOUT_SECONDS`, 2 dtk): kalau gagal hanya tercatat di log dan jawaban ke Orkestrasi pusat tidak terpengaruh. Tanpa `DATABASE_URL` orchestrator tidak mencatat apa pun. Guardrails tidak punya tabel.
 
 Kolom didefinisikan **sekali** di [`ocr_common/pipeline/tables.py`](libs/ocr_common/ocr_common/pipeline/tables.py). Migrasi Alembic di [db/](db/) dan `create_all` di test memakai definisi yang sama, dan `make db-check` gagal kalau keduanya menyimpang.
 

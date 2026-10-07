@@ -33,7 +33,7 @@ class OcrEngineResult(TypedDict):
 
 
 class OcrResult(OcrEngineResult):
-    """The stored result of the OCR stage (`nilam_ocr_extraction_result.result`), forwarded to structuring and
+    """The stored result of the OCR stage (`nilam_ocr_extraction_results.result`), forwarded to structuring and
     scoring."""
 
     engine: str

@@ -13,7 +13,7 @@ class SqlStageResults:
 
     def __init__(self, database_url: str, table_prefix: str = ""):
         """`table_prefix` is put before every stage's prefix: `testing_` reads
-        `nilam_testing_ocr_extraction_result`, ..."""
+        `nilam_testing_ocr_extraction_results`, ..."""
         self._url = database_url
         self._table_prefix = table_prefix
         self._tables: dict[str, Table] = {}

@@ -52,7 +52,7 @@ async def execute(url: str, *queries: str) -> None:
 
 # The jobs and results tables of each stage (the extraction stage's since 0014).
 STAGE_TABLES = {
-    "ocr": ("ocr_extraction_jobs", "ocr_extraction_result"),
+    "ocr": ("ocr_extraction_jobs", "ocr_extraction_results"),
     "structuring": ("structuring_jobs", "structuring_results"),
     "scoring": ("scoring_jobs", "scoring_results"),
 }

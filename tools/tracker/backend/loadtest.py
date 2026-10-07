@@ -611,10 +611,8 @@ async def _cleanup_db(run: str) -> dict[str, int] | None:
     if pool is None:
         return None
     pattern = f"LT_{run}\\_%"
-    # Tabel hasil tahap OCR sejak migrasi 0014: nilam_ocr_extraction_result (tunggal). nilam_ocr_results sengaja
-    # tidak dibersihkan: append-only (0016), trigger-nya menolak DELETE.
-    results = [f"{t}_result" if t == "nilam_ocr_extraction" else f"{t}_results" for t in ctx["tables"].values()]
-    tables = [f"{t}_jobs" for t in ctx["tables"].values()] + results
+    # nilam_ocr_results sengaja tidak dibersihkan: append-only (0016), trigger-nya menolak DELETE.
+    tables = [f"{t}_jobs" for t in ctx["tables"].values()] + [f"{t}_results" for t in ctx["tables"].values()]
     tables += ["nilam_pipeline_outbox", "orchestration_extract_ocr"]
     deleted: dict[str, int] = {}
     async with pool.acquire() as conn:

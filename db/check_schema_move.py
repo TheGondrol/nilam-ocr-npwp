@@ -30,8 +30,8 @@ TABLES = [
         "guardrails_results",
     )
 ]
-# 0014 renames the extraction tables and gives `ocr_results` to a new table, the request's final answer.
-RENAMED_0014 = {"ocr_jobs": "ocr_extraction_jobs", "ocr_results": "ocr_extraction_result"}
+# 0014 (+ 0017: plural results) renames the extraction tables and gives `ocr_results` to a new table.
+RENAMED_0014 = {"ocr_jobs": "ocr_extraction_jobs", "ocr_results": "ocr_extraction_results"}
 NEW_0014 = [f"{PREFIX}{lane}ocr_results" for lane in ("", "testing_")]
 
 
@@ -136,13 +136,13 @@ async def check_head(before: dict[str, int]) -> None:
         # The foreign key moved too: a result without its job is still refused.
         try:
             await conn.execute(
-                f"INSERT INTO {SCHEMA}.{PREFIX}ocr_extraction_result (request_id, result, ds) "
+                f"INSERT INTO {SCHEMA}.{PREFIX}ocr_extraction_results (request_id, result, ds) "
                 "VALUES ('NOPE', '{}', '')"
             )
         except asyncpg.ForeignKeyViolationError:
             pass
         else:
-            raise AssertionError("nilam_ocr_extraction_result lost its foreign key to nilam_ocr_extraction_jobs")
+            raise AssertionError("nilam_ocr_extraction_results lost its foreign key to nilam_ocr_extraction_jobs")
     finally:
         await conn.close()
 

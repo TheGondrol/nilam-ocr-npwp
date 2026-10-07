@@ -94,7 +94,7 @@ class StructuringJobRequest(BaseModel):
         None,
         description=(
             "Result of the OCR stage. Left out when the OCR service hands off by reference "
-            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_ocr_extraction_result` of the shared "
+            "(`PIPELINE_HANDOFF_BY_REFERENCE`): this service then reads `nilam_ocr_extraction_results` of the shared "
             "database"
         ),
     )

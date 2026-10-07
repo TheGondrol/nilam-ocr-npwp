@@ -1,8 +1,8 @@
 """The tables of this repository, defined once here and used by the services, the Alembic migrations
 and the tests. They all live in the schema `PIPELINE_SCHEMA` (`nilam_ocr_npwp`), not in `public`, and every name
 starts with `TABLE_PREFIX` (`nilam_`): the callers name a table without it (`ocr`, `testing_`), the prefix is put
-on here. The extraction stage's tables are `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_result` (0014):
-`nilam_ocr_results` is the request's final answer, written by whichever service ends it.
+on here. The extraction stage's tables are `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_results` (0014,
+0017); `nilam_ocr_results` is the log of every answer to the central orchestrator.
 `orchestration_outcome_table` and `orchestration_api_events_table` describe tables the orchestrator owns.
 """
 
@@ -29,8 +29,8 @@ from ocr_common.pipeline.database import JSON_TYPE, PIPELINE_SCHEMA, TABLE_PREFI
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 PIPELINE_TABLE_PREFIXES = ("ocr", "structuring", "scoring")
-# A stage whose tables are not `<prefix>_jobs` / `<prefix>_results` (the client's naming, 0014).
-STAGE_TABLE_NAMES = {"ocr": ("ocr_extraction_jobs", "ocr_extraction_result")}
+# A stage whose tables are not `<prefix>_jobs` / `<prefix>_results` (the client's naming, 0014 + 0017).
+STAGE_TABLE_NAMES = {"ocr": ("ocr_extraction_jobs", "ocr_extraction_results")}
 
 
 def stage_table_names(table_prefix: str) -> tuple[str, str]:
@@ -43,7 +43,7 @@ def stage_table_names(table_prefix: str) -> tuple[str, str]:
 
 def pipeline_tables(table_prefix: str, metadata: MetaData) -> tuple[Table, Table]:
     """The jobs and results tables of one stage on `metadata`: `nilam_<prefix>_jobs` and `nilam_<prefix>_results`,
-    `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_result` for the extraction stage (`ocr`)."""
+    `nilam_ocr_extraction_jobs` and `nilam_ocr_extraction_results` for the extraction stage (`ocr`)."""
     jobs_name, results_name = stage_table_names(table_prefix)
     jobs = Table(
         jobs_name,

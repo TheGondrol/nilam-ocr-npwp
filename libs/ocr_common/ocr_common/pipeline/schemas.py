@@ -93,7 +93,7 @@ class OcrPayload(_Forwarded):
     model_config = ConfigDict(
         json_schema_extra={
             "description": (
-                "Result of the OCR stage (`nilam_ocr_extraction_result`), forwarded to structuring and scoring."
+                "Result of the OCR stage (`nilam_ocr_extraction_results`), forwarded to structuring and scoring."
             )
         }
     )

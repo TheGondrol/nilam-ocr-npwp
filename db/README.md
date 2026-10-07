@@ -11,7 +11,8 @@ memindahkannya dari `public` ke `ocr_pipeline`, `0011_ocr_pipeline_npwp_schema` 
 `0014_ocr_extraction_tables` mengganti nama tabel tahap extraction atas permintaan klien
 (`nilam_ocr_jobs` → `nilam_ocr_extraction_jobs`, `nilam_ocr_results` → `nilam_ocr_extraction_result`,
 kembarannya `nilam_testing_` juga) beserta index/PK/FK-nya, lalu memakai nama `nilam_ocr_results` untuk
-tabel baru: jawaban akhir request.
+tabel baru: log jawaban ke Orkestrasi pusat. `0017_ocr_extraction_results` membetulkan
+`nilam_ocr_extraction_result` menjadi `nilam_ocr_extraction_results` (jamak, seperti tabel hasil tahap lain).
 Semuanya memakai `ALTER TABLE ... SET SCHEMA` (dan `RENAME` di `0013`): tabelnya sendiri yang pindah (baris,
 index, constraint, sequence `id`), tanpa salin data, dalam satu transaksi; jumlah baris tiap tabel dicatat di
 log job migrasi. `0013` juga mengganti nama index, primary key, foreign key, dan sequence `id` mengikuti nama
@@ -29,7 +30,7 @@ memakai tabel yang sama tanpa schema.
 
 | Tabel | Pemilik schema | Ditulis | Dibaca | Isi |
 |---|---|---|---|---|
-| `nilam_ocr_extraction_jobs`, `nilam_ocr_extraction_result` | **repo ini** | extraction | extraction (`GET /v1/extraction/jobs/{request_id}`), orchestrator lewat API itu | status dan hasil tahap OCR |
+| `nilam_ocr_extraction_jobs`, `nilam_ocr_extraction_results` | **repo ini** | extraction | extraction (`GET /v1/extraction/jobs/{request_id}`), orchestrator lewat API itu | status dan hasil tahap OCR |
 | `nilam_structuring_jobs`, `nilam_structuring_results` | **repo ini** | structuring | structuring lewat API-nya (orchestrator) | status dan field hasil structuring |
 | `nilam_scoring_jobs`, `nilam_scoring_results` | **repo ini** | scoring | scoring lewat API-nya (orchestrator) | status dan skor trust model |
 | `nilam_ocr_results` | **repo ini** | orchestrator (setiap jawaban `POST /v1/extract-ocr`) dan tahap terakhir (callback hasil yang terkirim) | tidak ada service; untuk Orkestrasi pusat, audit dan analisis | **log setiap jawaban ke Orkestrasi pusat**, append-only (satu baris per jawaban; migrasi `0014`-`0016`): `id` (PK), `status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails` (0 lolos, 1 ditolak, null kalau `pipeline_name_sequence` tidak memuat guardrails), `created_at`, `update_at` (= `created_at`, baris tidak pernah diubah), `pipeline_last_stage`. Dua penulis: **orchestrator**, untuk setiap jawaban `POST /v1/extract-ocr` (200, 202, 400, 422, 5xx, termasuk penolakan sebelum pipeline jalan) tepat sebelum jawabannya dikirim (`pipeline_last_stage` seperti di jawaban itu); dan **tahap terakhir**, untuk callback hasil ke pusat, sekali saat callback itu terkirim (pusat menjawab 2xx; retry yang gagal dan dead letter tidak dicatat; `data` = hasil service terakhir apa adanya, `pipeline_last_stage` = service pengirimnya). Jadi request di atas batas tunggu punya baris 202 lalu baris callback-nya; baris terbaru per `request_id` = jawaban terakhir yang diterima pusat. Trigger `<tabel>_append_only` menolak UPDATE / DELETE; penulisan best-effort (gagal = tercatat di log, jawaban tetap dikirim) |

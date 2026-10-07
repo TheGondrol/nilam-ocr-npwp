@@ -45,7 +45,7 @@ class StructuringJobService:
         if ocr is None and self._results is None:
             raise UnprocessableEntity(
                 "ocr is missing: the request refers to the OCR result by request_id, but this service has no "
-                "DATABASE_URL to read nilam_ocr_extraction_result from",
+                "DATABASE_URL to read nilam_ocr_extraction_results from",
             )
         work, handoff = self._spec(request_id, guardrails, ocr, sequence, column_thresholds)
         return await self._pipeline.submit(

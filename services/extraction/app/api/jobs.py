@@ -89,7 +89,7 @@ def _parse_sequence(raw: str | None) -> list[str] | None:
         "document; the central orchestrator does not call it. Calling it directly skips the guardrails check.\n\n"
         "Records the job (`nilam_ocr_extraction_jobs`, idempotent per request_id), answers **202 immediately**, "
         "then in the background: reads the document (`file`, or downloads `file_url`), runs OCR, stores the result "
-        "(`nilam_ocr_extraction_result`), POSTs the `OCR` callback, and hands the job to the structuring service, "
+        "(`nilam_ocr_extraction_results`), POSTs the `OCR` callback, and hands the job to the structuring service, "
         "which hands it to scoring. The caller does nothing more: it receives one callback per stage, and the final result in "
         "the `SCORING` callback (see *Webhooks*).\n\n"
         "**Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most "
