@@ -15,7 +15,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
-from ocr_common.pipeline.callbacks import NOT_READY_DELAY_SECONDS, NOT_READY_RETRIES, not_ready, stage_callback_body
+from ocr_common.pipeline.callbacks import (
+    NOT_READY_DELAY_SECONDS,
+    NOT_READY_RETRIES,
+    TRACE_PARENT_KEY,
+    not_ready,
+    stage_callback_body,
+)
+from ocr_common.web import apm
 from ocr_common.web.request_id import bind_request_id, reset_request_id
 
 if TYPE_CHECKING:
@@ -72,22 +79,30 @@ def callback_message(
     """The callback body for `(stage, status)` of `request_id`, as a message."""
     return OutboxMessage(
         KIND_CALLBACK,
-        stage_callback_body(
-            request_id,
-            stage,
-            status,
-            result=result,
-            error_message=error_message,
-            error_code=error_code,
-            final=final,
-            answer=answer,
+        _traced(
+            stage_callback_body(
+                request_id,
+                stage,
+                status,
+                result=result,
+                error_message=error_message,
+                error_code=error_code,
+                final=final,
+                answer=answer,
+            )
         ),
     )
 
 
 def handoff_message(next_stage: str, body: dict[str, Any]) -> OutboxMessage:
     """The hand-off to `next_stage` with `body`, as a message."""
-    return OutboxMessage(KIND_HANDOFF, {"next_stage": next_stage, "body": body})
+    return OutboxMessage(KIND_HANDOFF, _traced({"next_stage": next_stage, "body": body}))
+
+
+def _traced(payload: dict[str, Any]) -> dict[str, Any]:
+    """`payload` with the `traceparent` of the job writing it, while APM is on; the senders leave it out."""
+    parent = apm.trace_parent()
+    return {**payload, TRACE_PARENT_KEY: parent} if parent else payload
 
 
 class Outbox(Protocol):
@@ -105,8 +120,8 @@ class Outbox(Protocol):
 class Sender(Protocol):
     """Anything that can send one message body: the orchestrator callback or the next-stage client."""
 
-    async def send(self, body: dict[str, Any], /) -> None:
-        """Send `body` once; raise `ServiceError` on failure."""
+    async def send(self, body: dict[str, Any], /) -> bool | None:
+        """Send `body` once; False when there was nothing to send. Raise `ServiceError` on failure."""
         ...
 
 
@@ -249,24 +264,45 @@ class OutboxRelay:
         rows = await self._outbox.claim(self._stage, self._batch, self._lease)
         delivered = 0
         for row in sorted(rows, key=lambda row: (row.kind != KIND_HANDOFF, row.id)):
-            token = bind_request_id(row.request_id)
-            try:
-                await self._send(row)
-            except ServiceError as exc:
-                delay = self._retry_in(row, exc)
-                if delay is not None:
-                    await self._outbox.retry_later(row.id, delay, exc.message)
-                    metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "retry").inc()
-                    continue
-                await self._give_up(row, exc.message)
-                metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "dead").inc()
-                continue
-            finally:
-                reset_request_id(token)
-            await self._outbox.done(row.id)
-            metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, "delivered").inc()
-            delivered += 1
+            result = await self._deliver(row)
+            # Nothing to send is still a delivery for the metrics: the row is done.
+            outcome = apm.DELIVERED if result == apm.SKIPPED else result
+            metrics.OUTBOX_DELIVERIES.labels(self._metrics_stage, row.kind, outcome).inc()
+            if outcome == apm.DELIVERED:
+                delivered += 1
         return delivered
+
+    async def _deliver(self, row: Row[Any]) -> str:
+        """Send one message and record what happened to it: `delivered`, `skipped`, `retry` or `dead`. One APM
+        transaction per delivery, in the trace of the job that queued it."""
+        token = bind_request_id(row.request_id)
+        target = row.payload.get("next_stage") if row.kind == KIND_HANDOFF else None
+        try:
+            with apm.delivery_transaction(
+                row.stage,
+                row.kind,
+                row.request_id,
+                row.payload.get(TRACE_PARENT_KEY),
+                attempt=row.attempts,
+                target=target,
+            ):
+                try:
+                    sent = await self._send(row)
+                except ServiceError as exc:
+                    delay = self._retry_in(row, exc)
+                    if delay is not None:
+                        await self._outbox.retry_later(row.id, delay, exc.message)
+                        result = apm.RETRY
+                    else:
+                        await self._give_up(row, exc.message)
+                        result = apm.DEAD
+                else:
+                    await self._outbox.done(row.id)
+                    result = apm.DELIVERED if sent else apm.SKIPPED
+                apm.delivery_result(result)
+                return result
+        finally:
+            reset_request_id(token)
 
     def _age(self, row: Row[Any]) -> float:
         created = row.created_at if row.created_at.tzinfo is not None else row.created_at.replace(tzinfo=UTC)
@@ -285,13 +321,14 @@ class OutboxRelay:
     def _backoff(self, attempts: int) -> float:
         return min(self._retry_delay * 2 ** max(attempts - 1, 0), self._max_backoff)
 
-    async def _send(self, row: Row[Any]) -> None:
+    async def _send(self, row: Row[Any]) -> bool:
+        """Send the message; False when there was nothing to send."""
         if row.kind == KIND_CALLBACK:
-            await self._callback.send(row.payload)
-            return
+            return await self._callback.send(row.payload) is not False
         if self._next_stage is None:
             raise InternalError(f"{row.stage} has no next stage to hand off to")
         await self._next_stage.send(row.payload["body"])
+        return True
 
     async def _give_up(self, row: Row[Any], reason: str) -> None:
         logger.error(

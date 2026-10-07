@@ -11,6 +11,7 @@ from ocr_common.errors import ServiceError
 from ocr_common.npwp import final_result
 from ocr_common.pipeline import callbacks
 from ocr_common.pipeline.callbacks import (
+    TRACE_PARENT_KEY,
     OrchestrationCallback,
     ResultCallback,
     not_ready,
@@ -117,14 +118,34 @@ def test_a_stage_that_does_not_end_the_request_sends_nothing(stage):
     assert result_callback_body(stage_callback_body(RID, stage, "DONE", result={"blocks": []})) is None
 
 
-async def test_the_stage_callback_never_sends_the_answer():
+async def test_the_stage_callback_never_sends_the_answer_or_the_trace_parent():
     seen: list[httpx.Request] = []
     callback = OrchestrationCallback(_recording_client(seen), "/v1/callbacks/stage")
+    body = stage_callback_body(RID, "SCORING", "DONE", result={"x": 1}, final=True, answer=ANSWER)
 
-    await callback.send(stage_callback_body(RID, "SCORING", "DONE", result={"x": 1}, final=True, answer=ANSWER))
+    assert await callback.send({**body, TRACE_PARENT_KEY: "00-ab-cd-01"}) is True
 
     [request] = seen
-    assert "answer" not in json.loads(request.content)
+    assert {"answer", TRACE_PARENT_KEY}.isdisjoint(json.loads(request.content))
+
+
+async def test_the_result_callback_sends_only_the_end_of_a_request_and_never_the_trace_parent():
+    seen: list[httpx.Request] = []
+    callback = ResultCallback(_recording_client(seen), PATH, attempts=1, delay=0)
+    trace = {TRACE_PARENT_KEY: "00-ab-cd-01"}
+
+    assert await callback.send({**stage_callback_body(RID, "OCR", "DONE", result={"blocks": []}), **trace}) is False
+    body = stage_callback_body(RID, "SCORING", "DONE", final=True, answer=ANSWER)
+    assert await callback.send({**body, **trace}) is True
+
+    [request] = seen
+    assert json.loads(request.content) == {"request_id": RID, "status": "completed", "result": ANSWER, "guardrails": 0}
+
+
+async def test_without_an_orchestration_url_nothing_is_sent():
+    body = stage_callback_body(RID, "SCORING", "DONE", final=True, answer=ANSWER)
+    assert await ResultCallback(None, PATH).send(body) is False
+    assert await OrchestrationCallback(None, PATH).send(body) is False
 
 
 def _recording_client(seen: list[httpx.Request], statuses: list[tuple[int, dict]] | None = None) -> RemoteModelClient:

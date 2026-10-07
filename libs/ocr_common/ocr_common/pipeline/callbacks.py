@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 RESULT_NOT_READY = "RESULT_NOT_READY"
 NOT_READY_RETRIES = 5
 NOT_READY_DELAY_SECONDS = 1.5
+# Set by the outbox on a stored message (the job's W3C traceparent, ocr_common/web/apm.py) so its delivery joins
+# the job's trace; never sent.
+TRACE_PARENT_KEY = "traceparent"
 
 
 def not_ready(exc: ServiceError) -> bool:
@@ -58,8 +61,9 @@ class StageCallback(Protocol):
         """Direct mode: build and send the callback with retries; returns False when it was skipped or gave up."""
         ...
 
-    async def send(self, body: dict[str, Any]) -> None:
-        """Outbox mode: send an already-built callback body once; raises `ServiceError` on failure."""
+    async def send(self, body: dict[str, Any]) -> bool | None:
+        """Outbox mode: send an already-built callback body once; False when there was nothing to send.
+        Raises `ServiceError` on failure."""
         ...
 
     async def aclose(self) -> None:
@@ -118,8 +122,9 @@ def stage_callback_body(
     return body
 
 
-def _without_answer(body: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in body.items() if key != "answer"}
+def _sendable(body: dict[str, Any]) -> dict[str, Any]:
+    """A stored stage body without what is kept for us only: the result callback's `answer`, the trace parent."""
+    return {key: value for key, value in body.items() if key not in ("answer", TRACE_PARENT_KEY)}
 
 
 class OrchestrationCallback:
@@ -159,12 +164,13 @@ class OrchestrationCallback:
             return False
         return True
 
-    async def send(self, body: dict[str, Any]) -> None:
-        """Send one callback body without retries (the outbox relay retries)."""
+    async def send(self, body: dict[str, Any]) -> bool:
+        """Send one callback body without retries (the outbox relay retries); False without ORCHESTRATION_URL."""
         if self._client is None:
             logger.info("callback skipped (ORCHESTRATION_URL not set): %s", body.get("request_id"))
-            return
-        await self._client.post_json(self._path, _without_answer(body))
+            return False
+        await self._client.post_json(self._path, _sendable(body))
+        return True
 
     async def aclose(self) -> None:
         """Close the HTTP client, if any."""
@@ -307,16 +313,17 @@ class ResultCallback:
             return False
         return True
 
-    async def send(self, body: dict[str, Any]) -> None:
-        """Outbox mode: turn a stored per-stage body into the result callback and send it once; nothing for
-        an event that does not end the request."""
+    async def send(self, body: dict[str, Any]) -> bool:
+        """Outbox mode: turn a stored per-stage body into the result callback and send it once; nothing (False)
+        for an event that does not end the request, or without ORCHESTRATION_URL."""
         result_body = result_callback_body(body)
         if result_body is None:
-            return
+            return False
         if self._client is None:
             logger.info("result callback skipped (ORCHESTRATION_URL not set): %s", body.get("request_id"))
-            return
+            return False
         await self._client.post_json(self._path, result_body)
+        return True
 
     async def aclose(self) -> None:
         """Close the HTTP client, if any."""

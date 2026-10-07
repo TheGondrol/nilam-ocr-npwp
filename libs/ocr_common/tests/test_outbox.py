@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from elasticapm.traces import execution_context
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 
@@ -9,12 +10,13 @@ from ocr_common.clients.remote import RemoteClientError
 from ocr_common.config import PipelineSettings
 from ocr_common.errors import ServiceError
 from ocr_common.pipeline import STAGE_OCR, STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline, database
-from ocr_common.pipeline.callbacks import NOT_READY_RETRIES
+from ocr_common.pipeline.callbacks import NOT_READY_RETRIES, TRACE_PARENT_KEY
 from ocr_common.pipeline.outbox import KIND_CALLBACK, KIND_HANDOFF, OutboxRelay, callback_message
 from ocr_common.pipeline.outbox_sql import SqlOutbox
 from ocr_common.pipeline.outbox_status import OutboxStatusResponse, outbox_status, outbox_status_responses
 from ocr_common.pipeline.repository_sql import SqlJobRepository
 from ocr_common.testing import RecordingCallback, make_client
+from ocr_common.web import apm
 from ocr_common.web.app import create_app
 from ocr_common.web.envelope import envelope
 from ocr_common.web.security import verify_api_key
@@ -24,14 +26,18 @@ PAYLOAD = {"request_id": RID, "ocr": {"full_text": "NPWP"}}
 
 
 class Sink:
-    def __init__(self, error: Exception | None = None):
+    def __init__(self, error: Exception | None = None, *, sends: bool = True):
         self.bodies: list[dict] = []
         self.error = error
+        self.sends = sends
+        self.transactions: list = []  # the APM transaction active during each send
 
-    async def send(self, body: dict) -> None:
+    async def send(self, body: dict) -> bool:
+        self.transactions.append(execution_context.get_transaction())
         if self.error is not None:
             raise self.error
         self.bodies.append(body)
+        return self.sends
 
 
 @pytest.fixture
@@ -507,3 +513,34 @@ async def test_a_callback_that_hands_on_carries_no_answer(pipeline):
 
     callback = next(row for row in await _rows(stage.outbox) if row["kind"] == KIND_CALLBACK)
     assert "answer" not in callback["payload"]
+
+
+async def test_each_delivery_is_an_apm_transaction_in_the_trace_of_the_request(pipeline, apm_client):
+    stage, _ = pipeline
+    request = apm_client.begin_transaction("request")  # the request that queued the job
+    try:
+        await _run(stage)
+    finally:
+        apm_client.end_transaction("POST /v1/ocr/jobs")
+    rows = await _rows(stage.outbox)
+    assert {row["payload"][TRACE_PARENT_KEY].split("-")[1] for row in rows} == {request.trace_parent.trace_id}
+    orchestration, next_stage = Sink(ServiceError(503, "orchestration is unavailable")), Sink()
+
+    assert await _relay(stage, callback=orchestration, next_stage=next_stage).deliver_due() == 1
+
+    [handoff], [callback] = next_stage.transactions, orchestration.transactions
+    assert (handoff.name, handoff.result, handoff.labels["target"]) == ("OCR handoff", apm.DELIVERED, STAGE_STRUCTURING)
+    assert (callback.name, callback.result, callback.outcome) == ("OCR callback", apm.RETRY, "failure")
+    assert {handoff.trace_parent.trace_id, callback.trace_parent.trace_id} == {request.trace_parent.trace_id}
+    assert TRACE_PARENT_KEY not in next_stage.bodies[0], "the trace parent is ours, not the next stage's"
+
+
+async def test_a_callback_with_nothing_to_send_is_done_and_marked_skipped(pipeline, apm_client):
+    stage, _ = pipeline
+    await _run(stage)
+    orchestration = Sink(sends=False)
+
+    assert await _relay(stage, callback=orchestration).deliver_due() == 2
+
+    assert orchestration.transactions[0].result == apm.SKIPPED
+    assert await _rows(stage.outbox) == []
