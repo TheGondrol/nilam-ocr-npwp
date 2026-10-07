@@ -13,6 +13,10 @@ Untuk satu request, dari kiri ke kanan di layar:
 1. **Jawaban orchestrator**: HTTP 200 `completed` + data (pipeline selesai di dalam batas tunggu),
    202 `processing` (batas tunggu habis, hasil menyusul lewat callback), 422 (tahap gagal),
    400 (ditolak guardrails), plus lamanya dibanding batas tunggu.
+   Tepat di bawahnya, panel **Callback ke Orkestrasi**: status callback akhir (menunggu / diterima / belum,
+   berapa detik setelah jawaban 202, dari tahap mana, attempt ke berapa) dan tabel setiap kedatangan callback
+   (endpoint, jawaban tracker, duplikat, cek kontrak dengan body JSON-nya). Di mode GKE panel ini hanya
+   menjelaskan bahwa callback dikirim pod langsung ke pusat.
 2. **Kartu tiap tahap** dengan dua fakta terpisah: *hasil di DB* (baris `nilam_<tahap>_jobs` DONE,
    dibaca langsung dari PostgreSQL) dan *orkestrasi tahu* (callback diterima tracker, attempt ke-n).
    Selisih keduanya adalah tempat outbox bekerja.
