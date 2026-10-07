@@ -32,7 +32,6 @@ class StructuredField(BaseModel):
 
 
 class StructuredDocument(BaseModel):
-    document_type: str = Field(..., description="Document type the fields were read as", examples=["npwp"])
     fields: dict[str, StructuredField] = Field(
         ...,
         description=(
@@ -88,7 +87,6 @@ class StructuringJobRequest(BaseModel):
     request_id: str = Field(
         ..., min_length=1, description="request_id of the pipeline run", examples=[REQUEST_ID_EXAMPLE]
     )
-    document_type: str = Field("npwp", description="Only `npwp` is supported", examples=["npwp"])
     guardrails: GuardrailsResult | None = Field(
         None, description="Guardrails result submitted with the OCR job; only forwarded to the next stage"
     )
@@ -144,7 +142,6 @@ class StructuringDirectRequest(BaseModel):
         description="Echoed in the response; optional, nothing is recorded under it",
         examples=[REQUEST_ID_EXAMPLE],
     )
-    document_type: str = Field("npwp", description="Only `npwp` is supported; anything else is 400", examples=["npwp"])
     ocr: OcrPayload = Field(
         ...,
         description=(

@@ -4,7 +4,6 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import UnprocessableEntity
-from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.pipeline import STRUCTURING, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import StructuringResult
@@ -36,7 +35,6 @@ class StructuringJobService:
     async def submit(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         sequence: Sequence[str] | None = None,
@@ -49,14 +47,13 @@ class StructuringJobService:
                 "ocr is missing: the request refers to the OCR result by request_id, but this service has no "
                 "DATABASE_URL to read nilam_ocr_extraction_result from",
             )
-        work, handoff = self._spec(request_id, document_type, guardrails, ocr, sequence, column_thresholds)
+        work, handoff = self._spec(request_id, guardrails, ocr, sequence, column_thresholds)
         return await self._pipeline.submit(
             request_id,
             work,
             **chain(sequence, STRUCTURING, handoff),
             rejection=_rejection,
             input={
-                "document_type": document_type,
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
                 "column_confidence_threshold": dict(column_thresholds) if column_thresholds else None,
@@ -70,7 +67,6 @@ class StructuringJobService:
         sequence = input.get("pipeline_name_sequence")
         work, handoff = self._spec(
             request_id,
-            input.get("document_type") or DOCUMENT_TYPE,
             input.get("guardrails"),
             None,
             sequence,
@@ -84,7 +80,6 @@ class StructuringJobService:
     def _spec(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         sequence: Sequence[str] | None = None,
@@ -98,7 +93,7 @@ class StructuringJobService:
             return await run_in_threadpool(self._structuring.structure, lines)
 
         def handoff(structuring: Mapping[str, Any]) -> dict[str, Any]:
-            body: dict[str, Any] = {"request_id": request_id, "document_type": document_type, "guardrails": guardrails}
+            body: dict[str, Any] = {"request_id": request_id, "guardrails": guardrails}
             if sequence:
                 body["pipeline_name_sequence"] = stored(sequence)
             if column_thresholds:

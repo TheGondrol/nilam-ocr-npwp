@@ -41,7 +41,7 @@ def _final(nama=None, nama_badan=None, npwp="09.254.294.3-407.000", npwp_confide
         "flag_reason": None,
     }
     scoring = {"npwp_confidence": npwp_confidence, "name_confidence": name_confidence}
-    return dict(final_result("npwp", GUARDRAILS, structuring, scoring))
+    return dict(final_result(GUARDRAILS, structuring, scoring))
 
 
 def test_scoring_done_carries_exactly_the_200_data_and_guardrails_0():

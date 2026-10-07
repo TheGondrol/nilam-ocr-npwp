@@ -137,9 +137,6 @@ def _parse_sequence(raw: str | None) -> list[str] | None:
 )
 async def submit_job(
     request_id: str = Form(..., description="request_id minted by the orchestrator", examples=[REQUEST_ID_EXAMPLE]),
-    document_type: str = Form(
-        "npwp", description="Document type chosen by the client. Only `npwp` is supported", examples=["npwp"]
-    ),
     guardrails: str | None = Form(
         None,
         description=(
@@ -178,7 +175,7 @@ async def submit_job(
         source = url
     sequence = _parse_sequence(pipeline_name_sequence)
     columns = _parse_column_thresholds(column_confidence_threshold)
-    data = await service.submit(request_id, document_type, _parse_guardrails(guardrails), source, sequence, columns)
+    data = await service.submit(request_id, _parse_guardrails(guardrails), source, sequence, columns)
     return envelope(202, "Accepted", data, request_id)
 
 

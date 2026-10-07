@@ -4,7 +4,6 @@ from typing import Any
 
 from ocr_common.clients.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, fetch
 from ocr_common.errors import BadRequest
-from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.pipeline import EXTRACTION, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.simulation import simulated_delay_seconds
 from ocr_common.types import OcrResult
@@ -42,7 +41,6 @@ class ExtractionJobService:
     async def submit(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         source: Source,
         sequence: Sequence[str] | None = None,
@@ -51,13 +49,12 @@ class ExtractionJobService:
         """`sequence` (pipeline_name_sequence, None = the full pipeline) decides whether the job is handed to
         structuring or ends here with the OCR result as the answer. `column_thresholds` (the central
         orchestrator's column_confidence_threshold) is only carried on, for scoring."""
-        work, handoff = self._spec(request_id, document_type, guardrails, source, sequence, column_thresholds)
+        work, handoff = self._spec(request_id, guardrails, source, sequence, column_thresholds)
         return await self._pipeline.submit(
             request_id,
             work,
             **chain(sequence, EXTRACTION, handoff),
             input={
-                "document_type": document_type,
                 "guardrails": guardrails,
                 "file_url": source if isinstance(source, str) else None,
                 "pipeline_name_sequence": stored(sequence),
@@ -80,7 +77,6 @@ class ExtractionJobService:
         sequence = input.get("pipeline_name_sequence")
         work, handoff = self._spec(
             request_id,
-            input.get("document_type") or DOCUMENT_TYPE,
             input.get("guardrails"),
             file_url,
             sequence,
@@ -94,7 +90,6 @@ class ExtractionJobService:
     def _spec(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         source: Source,
         sequence: Sequence[str] | None = None,
@@ -108,7 +103,7 @@ class ExtractionJobService:
             return await self._extraction.extract(filename, content_type, content)
 
         def handoff(ocr: Mapping[str, Any]) -> dict[str, Any]:
-            body: dict[str, Any] = {"request_id": request_id, "document_type": document_type, "guardrails": guardrails}
+            body: dict[str, Any] = {"request_id": request_id, "guardrails": guardrails}
             if sequence:
                 body["pipeline_name_sequence"] = stored(sequence)
             if column_thresholds:

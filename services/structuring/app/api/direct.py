@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from ocr_common.errors import BadRequest
-from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.web.envelope import envelope
 from ocr_common.web.request_id import get_request_id
 from ocr_common.web.schemas import REQUEST_ID_EXAMPLE, UNAUTHORIZED, error, success_examples
@@ -49,7 +47,7 @@ _REJECTED_EXAMPLE = {
                 envelope(200, "Success", _REJECTED_EXAMPLE, REQUEST_ID_EXAMPLE),
             ),
         ),
-        400: error(400, "No text lines to structure, or an unsupported `document_type`", "No text lines to structure"),
+        400: error(400, "No text lines to structure", "No text lines to structure"),
         401: UNAUTHORIZED,
         422: error(422, "Validation Error", "body.ocr: Field required", errors="VALIDATION_ERROR"),
     },
@@ -59,8 +57,6 @@ async def structure_direct(
     body: StructuringDirectRequest,
     service: StructuringService = Depends(get_structuring_service),
 ):
-    if body.document_type != DOCUMENT_TYPE:
-        raise BadRequest(f"Unsupported document_type: {body.document_type}. Supported: ['{DOCUMENT_TYPE}']")
     lines = StructuringService.lines_from_ocr(body.ocr.model_dump(exclude_unset=True))
     data = await run_in_threadpool(service.structure, lines)
     return envelope(200, "Success", data, body.request_id or get_request_id(request))

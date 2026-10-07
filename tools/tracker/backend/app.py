@@ -493,7 +493,6 @@ async def run_request(
     filename: str,
     content_type: str,
     *,
-    document_type: str = "npwp",
     slow_seconds: int = 0,
     sequence: list[str] | None = None,
     source: str = "upload",
@@ -522,7 +521,6 @@ async def run_request(
         type="client",
         filename=filename,
         size=len(content),
-        document_type=document_type,
         slow=slow_seconds,
         sequence=sequence,
         source=source,
@@ -534,7 +532,7 @@ async def run_request(
     if stages:
         start_watcher(request_id)
 
-    fields = {"request_id": request_id, "document_type": document_type}
+    fields = {"request_id": request_id}
     if sequence is not None:
         fields["pipeline_name_sequence"] = json.dumps(sequence)
     upload = None
@@ -627,7 +625,6 @@ async def run_request(
 @app.post("/api/requests")
 async def submit(
     file: UploadFile = File(...),
-    document_type: str = Form("npwp"),
     slow_seconds: int = Form(0),
     pipeline_name_sequence: str = Form(""),
     source: str = Form("upload"),
@@ -644,7 +641,6 @@ async def submit(
         content,
         file.filename or "upload",
         file.content_type or "image/jpeg",
-        document_type=document_type,
         slow_seconds=slow_seconds,
         sequence=parse_sequence(pipeline_name_sequence),
         source=source,

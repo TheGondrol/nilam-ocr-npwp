@@ -176,7 +176,6 @@ def _field(field: Mapping[str, Any] | None, score: float | None, threshold: floa
 
 
 def final_result(
-    document_type: str,
     guardrails: dict[str, Any] | None,
     structuring: Mapping[str, Any],
     scoring: Mapping[str, Any],
@@ -188,7 +187,6 @@ def final_result(
         for name, field in (structuring.get("fields") or {}).items()
     }
     return {
-        "document_type": document_type,
         "fields": fields,
         "scoring": {"npwp_confidence": scoring["npwp_confidence"], "name_confidence": scoring["name_confidence"]},
         "guardrails": guardrails,

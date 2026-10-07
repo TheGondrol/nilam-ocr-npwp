@@ -78,7 +78,6 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
     structuring = body.structuring.model_dump() if body.structuring is not None else None
     data = await service.submit(
         body.request_id,
-        body.document_type,
         guardrails,
         ocr,
         structuring,
@@ -133,7 +132,7 @@ async def submit_job(body: ScoringJobRequest, service: ScoringJobService = Depen
                     {
                         **_JOB,
                         "status": "FAILED",
-                        "error_message": "Unsupported document_type: ktp. Supported: ['npwp']",
+                        "error_message": "scoring trust model is unavailable",
                         "result": None,
                         "updated_at": "2026-09-18T04:00:01+00:00",
                     },

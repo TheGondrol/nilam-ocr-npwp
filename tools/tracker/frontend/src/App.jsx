@@ -1150,7 +1150,6 @@ function Pipeline({ nav, overview: sharedOverview, focus }) {
     setError(null)
     const form = new FormData()
     form.append('file', file)
-    form.append('document_type', 'npwp')
     form.append('slow_seconds', slow ? String(slowSeconds) : '0')
     const sent = sequenceToSend(sendNames)
     form.append('pipeline_name_sequence', sent ? JSON.stringify(sent) : '')

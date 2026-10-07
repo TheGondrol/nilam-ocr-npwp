@@ -27,7 +27,7 @@ def harness():
 
 
 def _submit(client, auth, request_id, **kwargs):
-    data = {"request_id": request_id, "document_type": "npwp", "guardrails": json.dumps(GUARDRAILS)}
+    data = {"request_id": request_id, "guardrails": json.dumps(GUARDRAILS)}
     return client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"), **kwargs)
 
 
@@ -46,9 +46,7 @@ def test_submit_returns_202_then_runs_ocr_callback_and_handoff(harness, auth):
     assert job["result"]["blocks"]
 
     assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("OCR", "DONE", None)]
-    assert next_stage.payloads == [
-        {"request_id": "REQ_1", "document_type": "npwp", "guardrails": GUARDRAILS, "ocr": job["result"]}
-    ]
+    assert next_stage.payloads == [{"request_id": "REQ_1", "guardrails": GUARDRAILS, "ocr": job["result"]}]
 
 
 def test_same_request_id_is_not_processed_twice(harness, auth):
@@ -145,7 +143,7 @@ def test_requires_api_key(harness):
 
 def test_a_delay_token_in_the_file_name_holds_the_job_back_in_local_mode(harness, auth):
     client, _, _ = harness
-    data = {"request_id": "REQ_slow", "document_type": "npwp", "guardrails": json.dumps(GUARDRAILS)}
+    data = {"request_id": "REQ_slow", "guardrails": json.dumps(GUARDRAILS)}
     client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("delay1s-npwp.jpg"))
 
     assert wait_for_job(client, "/v1/extraction/jobs/REQ_slow", timeout=0.3)["status"] == "PROCESSING"
@@ -169,7 +167,7 @@ def test_handoff_by_reference_leaves_the_ocr_result_out_of_the_payload(auth):
         app.dependency_overrides.pop(get_job_service, None)
 
     assert job["status"] == "DONE"
-    assert next_stage.payloads == [{"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}]
+    assert next_stage.payloads == [{"request_id": "REQ_ref", "guardrails": GUARDRAILS}]
 
 
 def _stale_service():
@@ -182,7 +180,7 @@ def _stale_service():
 
 async def test_a_stale_job_sent_as_file_url_is_fetched_and_run_again(monkeypatch):
     service, pipeline, callback, next_stage = _stale_service()
-    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS, "file_url": "http://minio:9000/b/npwp.jpg"}
+    stored_input = {"guardrails": GUARDRAILS, "file_url": "http://minio:9000/b/npwp.jpg"}
     await pipeline.repository.claim("REQ_stale", input=stored_input)
 
     async def fake_fetch(url, *, limit, timeout=10.0, policy):
@@ -200,9 +198,9 @@ async def test_a_stale_job_sent_as_file_url_is_fetched_and_run_again(monkeypatch
 
 async def test_a_stale_job_of_an_inline_upload_fails_with_a_reason():
     service, pipeline, callback, next_stage = _stale_service()
-    await pipeline.repository.claim("REQ_gone", input={"document_type": "npwp", "guardrails": None, "file_url": None})
+    await pipeline.repository.claim("REQ_gone", input={"guardrails": None, "file_url": None})
 
-    await service.resume("REQ_gone", {"document_type": "npwp", "guardrails": None, "file_url": None})
+    await service.resume("REQ_gone", {"guardrails": None, "file_url": None})
     await pipeline.runner.drain(5)
 
     job = await pipeline.get("REQ_gone")
@@ -215,7 +213,6 @@ async def test_a_stale_job_of_an_inline_upload_fails_with_a_reason():
 def _submit_with_sequence(client, auth, request_id, sequence):
     data = {
         "request_id": request_id,
-        "document_type": "npwp",
         "guardrails": json.dumps(GUARDRAILS),
         "pipeline_name_sequence": json.dumps(sequence),
     }
@@ -254,7 +251,7 @@ def test_a_longer_sequence_is_handed_on_with_the_job(harness, auth):
 )
 def test_an_invalid_sequence_is_400(harness, auth, raw):
     client, _, _ = harness
-    data = {"request_id": "REQ_seq_bad", "document_type": "npwp", "pipeline_name_sequence": raw}
+    data = {"request_id": "REQ_seq_bad", "pipeline_name_sequence": raw}
 
     response = client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
 
@@ -267,7 +264,7 @@ COLUMNS = {"nomor_npwp": 0.9, "nama": 0.5}
 
 def test_column_confidence_threshold_is_kept_with_the_job_and_handed_on(harness, auth):
     client, _, next_stage = harness
-    data = {"request_id": "REQ_col", "document_type": "npwp", "column_confidence_threshold": json.dumps(COLUMNS)}
+    data = {"request_id": "REQ_col", "column_confidence_threshold": json.dumps(COLUMNS)}
 
     assert (
         client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg")).status_code == 202
@@ -281,7 +278,7 @@ def test_column_confidence_threshold_is_kept_with_the_job_and_handed_on(harness,
 
 def test_without_column_confidence_threshold_nothing_is_handed_on(harness, auth):
     client, _, next_stage = harness
-    data = {"request_id": "REQ_nocol", "document_type": "npwp"}
+    data = {"request_id": "REQ_nocol"}
 
     client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
 
@@ -293,7 +290,7 @@ def test_without_column_confidence_threshold_nothing_is_handed_on(harness, auth)
 @pytest.mark.parametrize("raw", ["not json", "[0.9]", '{"npwp": 0.9}', '{"nama": 1.5}'])
 def test_an_invalid_column_confidence_threshold_is_400(harness, auth, raw):
     client, _, _ = harness
-    data = {"request_id": "REQ_col_bad", "document_type": "npwp", "column_confidence_threshold": raw}
+    data = {"request_id": "REQ_col_bad", "column_confidence_threshold": raw}
 
     response = client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
 
@@ -304,7 +301,6 @@ def test_an_invalid_column_confidence_threshold_is_400(harness, auth, raw):
 async def test_a_stale_job_hands_on_its_stored_column_thresholds(monkeypatch):
     service, pipeline, _, next_stage = _stale_service()
     stored_input = {
-        "document_type": "npwp",
         "guardrails": GUARDRAILS,
         "file_url": "http://minio:9000/b/npwp.jpg",
         "column_confidence_threshold": COLUMNS,

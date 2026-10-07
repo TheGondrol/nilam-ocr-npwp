@@ -79,7 +79,7 @@ class StagePipeline:
         input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """`input` is what a later run of this job needs besides the earlier stages' stored results
-        (document_type, guardrails report, file_url); the stale-job reaper hands it back to `resume`."""
+        (guardrails report, file_url); the stale-job reaper hands it back to `resume`."""
         claimed = await self.repository.claim(request_id, input=input)
         status = STATUS_PROCESSING
         if claimed:

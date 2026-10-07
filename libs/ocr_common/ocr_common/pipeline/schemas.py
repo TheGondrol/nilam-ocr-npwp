@@ -143,7 +143,6 @@ class StructuringPayload(_Forwarded):
         }
     )
 
-    document_type: str | None = Field(None, description="Document type the fields were read as", examples=["npwp"])
     fields: dict[str, StructuredFieldPayload] = Field(
         ...,
         description="Always `nomor_npwp`, `nama`, `nama_badan`. A person's card fills `nama`, a company's `nama_badan`",
@@ -207,7 +206,6 @@ class FinalResult(BaseModel):
         }
     )
 
-    document_type: str = Field(..., description="Document type the fields were read as", examples=["npwp"])
     fields: dict[str, FinalField] = Field(
         ...,
         description=(

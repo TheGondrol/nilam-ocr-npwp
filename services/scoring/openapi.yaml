@@ -343,7 +343,7 @@ paths:
                       stage: SCORING
                       created_at: '2026-09-18T04:00:01+00:00'
                       status: FAILED
-                      error_message: 'Unsupported document_type: ktp. Supported: [''npwp'']'
+                      error_message: scoring trust model is unavailable
                       updated_at: '2026-09-18T04:00:01+00:00'
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '401':
@@ -606,18 +606,6 @@ paths:
                         flag: false
                         guardrail_probability: 0.98
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        '400':
-          description: An unsupported `document_type`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                status_code: 400
-                status_desc: Bad Request
-                message: 'Unsupported document_type: ktp. Supported: [''npwp'']'
-                errors: BAD_REQUEST
-                pipeline_last_stage: scoring
         '401':
           description: Missing or invalid X-API-Key
           content:
@@ -1064,12 +1052,6 @@ components:
       description: A field of the final result.
     FinalResult:
       properties:
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type the fields were read as
-          examples:
-          - npwp
         fields:
           additionalProperties:
             $ref: '#/components/schemas/FinalField'
@@ -1115,7 +1097,6 @@ components:
           - null
       type: object
       required:
-      - document_type
       - fields
       - scoring
       title: FinalResult
@@ -1722,13 +1703,6 @@ components:
           description: Echoed in the response; optional, nothing is recorded under it
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Only `npwp` is supported; anything else is 400
-          default: npwp
-          examples:
-          - npwp
         guardrails:
           anyOf:
           - $ref: '#/components/schemas/GuardrailsResult'
@@ -1819,13 +1793,6 @@ components:
           description: request_id of the pipeline run
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Only `npwp` is supported; anything else fails the job
-          default: npwp
-          examples:
-          - npwp
         guardrails:
           anyOf:
           - $ref: '#/components/schemas/GuardrailsResult'
@@ -2165,14 +2132,6 @@ components:
       description: One named field read by structuring.
     StructuringPayload:
       properties:
-        document_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Document Type
-          description: Document type the fields were read as
-          examples:
-          - npwp
         fields:
           additionalProperties:
             $ref: '#/components/schemas/StructuredFieldPayload'

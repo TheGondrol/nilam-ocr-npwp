@@ -940,12 +940,6 @@ components:
       description: A field of the final result.
     FinalResult:
       properties:
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type the fields were read as
-          examples:
-          - npwp
         fields:
           additionalProperties:
             $ref: '#/components/schemas/FinalField'
@@ -991,7 +985,6 @@ components:
           - null
       type: object
       required:
-      - document_type
       - fields
       - scoring
       title: FinalResult

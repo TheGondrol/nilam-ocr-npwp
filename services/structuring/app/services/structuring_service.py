@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from ocr_common.errors import BadRequest
-from ocr_common.npwp import DOCUMENT_TYPE
 from ocr_common.types import OcrBlock, StructuringResult
 
 from app.ml.base import Structurer
@@ -34,7 +33,6 @@ class StructuringService:
 
         document = self._structurer.structure(cleaned)
         return {
-            "document_type": DOCUMENT_TYPE,
             "fields": document["fields"],
             "flag": document["flag"],
             "flag_reason": document["flag_reason"],

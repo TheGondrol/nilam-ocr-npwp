@@ -305,7 +305,6 @@ paths:
                       created_at: '2026-09-18T04:00:01+00:00'
                       status: DONE
                       result:
-                        document_type: npwp
                         fields:
                           nomor_npwp:
                             value: 12.345.678.9-012.345
@@ -582,7 +581,6 @@ paths:
                     status_desc: OK
                     message: Success
                     data:
-                      document_type: npwp
                       fields:
                         nomor_npwp:
                           value: 12.345.678.9-012.345
@@ -613,7 +611,6 @@ paths:
                     status_desc: OK
                     message: Success
                     data:
-                      document_type: npwp
                       fields:
                         nomor_npwp:
                           value: 12.345.678.9-012.345
@@ -640,7 +637,7 @@ paths:
                       reject_reason: Dokumen bukan NPWP, mohon unggah kartu NPWP
                     request_id: REQ_9cb01af2-493d-446d-b191-af120333f6d0
         '400':
-          description: No text lines to structure, or an unsupported `document_type`
+          description: No text lines to structure
           content:
             application/json:
               schema:
@@ -1447,12 +1444,6 @@ components:
       description: Body of the callback a stage POSTs to the orchestrator when it finishes.
     StructuredDocument:
       properties:
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type the fields were read as
-          examples:
-          - npwp
         fields:
           additionalProperties:
             $ref: '#/components/schemas/StructuredField'
@@ -1510,7 +1501,6 @@ components:
           - null
       type: object
       required:
-      - document_type
       - fields
       - flag
       title: StructuredDocument
@@ -1570,13 +1560,6 @@ components:
           description: Echoed in the response; optional, nothing is recorded under it
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Only `npwp` is supported; anything else is 400
-          default: npwp
-          examples:
-          - npwp
         ocr:
           $ref: '#/components/schemas/OcrPayload'
           description: 'The extraction service''s output: `data` of its `POST /v1/extraction/extract`,
@@ -1638,13 +1621,6 @@ components:
           description: request_id of the pipeline run
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Only `npwp` is supported
-          default: npwp
-          examples:
-          - npwp
         guardrails:
           anyOf:
           - $ref: '#/components/schemas/GuardrailsResult'

@@ -25,7 +25,6 @@ from app.services.job_service import StructuringJobService
 router = APIRouter(tags=["Pipeline"], dependencies=[Depends(verify_api_key)])
 
 STRUCTURED_EXAMPLE = {
-    "document_type": "npwp",
     "fields": {
         "nomor_npwp": {
             "value": "12.345.678.9-012.345",
@@ -108,7 +107,6 @@ async def submit_job(body: StructuringJobRequest, service: StructuringJobService
     ocr = body.ocr.model_dump(exclude_unset=True) if body.ocr is not None else None
     data = await service.submit(
         body.request_id,
-        body.document_type,
         guardrails,
         ocr,
         body.pipeline_name_sequence,

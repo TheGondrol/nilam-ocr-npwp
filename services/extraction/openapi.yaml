@@ -832,13 +832,6 @@ components:
           description: request_id minted by the orchestrator
           examples:
           - REQ_9cb01af2-493d-446d-b191-af120333f6d0
-        document_type:
-          type: string
-          title: Document Type
-          description: Document type chosen by the client. Only `npwp` is supported
-          default: npwp
-          examples:
-          - npwp
         guardrails:
           anyOf:
           - type: string

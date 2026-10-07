@@ -4,7 +4,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import UnprocessableEntity
-from ocr_common.npwp import DOCUMENT_TYPE, contract_data, contract_fields, final_result
+from ocr_common.npwp import contract_data, contract_fields, final_result
 from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import ContractData, FinalResult, ScoringResult
@@ -31,7 +31,6 @@ class ScoringJobService:
     async def submit(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any] | None,
@@ -47,14 +46,13 @@ class ScoringJobService:
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
                 "service has no DATABASE_URL to read nilam_structuring_results from",
             )
-        work, final = self._spec(request_id, document_type, guardrails, ocr, structuring, column_thresholds)
+        work, final = self._spec(request_id, guardrails, ocr, structuring, column_thresholds)
         return await self._pipeline.submit(
             request_id,
             work,
             callback_result=final,
             outcome_data=self._outcome_data(final, column_thresholds),
             input={
-                "document_type": document_type,
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
                 "column_confidence_threshold": dict(column_thresholds) if column_thresholds else None,
@@ -67,7 +65,6 @@ class ScoringJobService:
         input = input or {}
         work, final = self._spec(
             request_id,
-            input.get("document_type") or DOCUMENT_TYPE,
             input.get("guardrails"),
             None,
             None,
@@ -99,7 +96,6 @@ class ScoringJobService:
     def _spec(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any] | None,
@@ -118,7 +114,6 @@ class ScoringJobService:
                 ocr_result = await self._results.get("ocr", request_id)
             return await run_in_threadpool(
                 self._confidence.score,
-                document_type,
                 guardrails,
                 ocr_result,
                 chain["structuring"],
@@ -127,6 +122,6 @@ class ScoringJobService:
             )
 
         def final(scoring: Mapping[str, Any]) -> FinalResult:
-            return final_result(document_type, guardrails, chain["structuring"], scoring)
+            return final_result(guardrails, chain["structuring"], scoring)
 
         return work, final

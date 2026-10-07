@@ -101,7 +101,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
     assert sent.headers["X-API-Key"] == "k"
     fields, file_bytes = _form(sent)
     assert fields["request_id"] == RID
-    assert fields["document_type"] == "npwp"
+    assert "document_type" not in fields, "the stages are not told a document type"
     guardrails = json.loads(fields["guardrails"])
     assert guardrails["passed"] is True
     assert guardrails["document"]["verdict"] == "accepted"
@@ -117,7 +117,6 @@ def test_a_document_without_guardrails_is_handed_over_without_a_guardrails_field
         headers=auth,
         data={
             "request_id": RID,
-            "document_type": "npwp",
             "pipeline_name_sequence": ["extraction", "structuring"],
         },
         files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
@@ -182,9 +181,7 @@ def test_a_document_sent_as_file_url_is_judged_here_and_handed_over_as_the_same_
         return JPEG, "npwp.jpg", "image/jpeg"
 
     monkeypatch.setattr("ocr_common.web.intake.fetch", fake_fetch)
-    response = client.post(
-        "/v1/extract-ocr", headers=auth, data={"request_id": RID, "document_type": "npwp", "file_url": url}
-    )
+    response = client.post("/v1/extract-ocr", headers=auth, data={"request_id": RID, "file_url": url})
 
     assert response.status_code == 200
     [sent] = handler.requests

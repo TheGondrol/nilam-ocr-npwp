@@ -392,7 +392,6 @@ Keduanya dipanggil berantai oleh service sebelumnya dan internal; kalian tidak m
 dari tim ML. Contoh isi `result` sungguhan:
 
     {
-      "document_type": "npwp",
       "fields": {
         "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 0.9999,
                        "source": "NPWP:09.254.294.3-407.000",
@@ -507,7 +506,6 @@ Body callback SCORING saat sukses:
       "status": "DONE",
       "error_message": null,
       "result": {
-        "document_type": "npwp",
         "fields": {
           "nomor_npwp": {"value": "09.254.294.3-407.000", "confidence": 0.9999,
                          "source": "NPWP:09.254.294.3-407.000",

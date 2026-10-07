@@ -346,7 +346,6 @@ async def extract_ocr(
         content, filename, content_type = await read_image(request, file, file_url)
         outcome = await service.submit(
             request_id,
-            document_type,
             filename,
             content_type,
             content,

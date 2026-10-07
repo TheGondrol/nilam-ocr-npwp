@@ -169,10 +169,10 @@ async def test_ocr_params_are_sent_as_form_fields():
         RemoteModelClient(
             "http://ocr-model:8082", 5.0, name="extraction OCR model", transport=httpx.MockTransport(handler)
         ),
-        params={"document_type": "npwp", "scale": 3.5},
+        params={"lang": "id", "scale": 3.5},
     )
     await engine.extract("a.jpg", JPEG, "image/jpeg")
-    assert b'name="document_type"\r\n\r\nnpwp' in seen["body"]
+    assert b'name="lang"\r\n\r\nid' in seen["body"]
     assert b'name="scale"\r\n\r\n3.5' in seen["body"]
     assert b'name="file"; filename="a.jpg"' in seen["body"]
 
@@ -240,14 +240,14 @@ async def test_remote_backend_is_built_from_settings():
             extraction_backend="remote",
             extraction_ocr_url="http://localhost:8082/",
             extraction_ocr_api_key="dummy-key",
-            extraction_ocr_params={"document_type": "npwp"},
+            extraction_ocr_params={"lang": "id"},
         )
     )
     try:
         assert isinstance(engine, RemoteOcrEngine)
         assert engine._client.base_url == "http://localhost:8082"
         assert engine._client._client.headers["X-API-Key"] == "dummy-key"
-        assert engine._params == {"document_type": "npwp"}
+        assert engine._params == {"lang": "id"}
     finally:
         await engine.aclose()
 

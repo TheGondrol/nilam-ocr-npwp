@@ -67,9 +67,7 @@ class StructuredDocument(TypedDict):
 
 
 class StructuringResult(StructuredDocument):
-    """The stored result of the structuring stage: the structured document plus its document type."""
-
-    document_type: str
+    """The stored result of the structuring stage: the structured document."""
 
 
 class FieldConfidences(TypedDict):
@@ -99,7 +97,6 @@ class FinalResult(TypedDict):
     """What the pipeline produced for one request: carried by the SCORING callback and used to build
     the orchestrator's `extract-ocr` data."""
 
-    document_type: str
     fields: dict[str, FinalField]
     scoring: FieldConfidences
     guardrails: dict[str, Any] | None

@@ -83,7 +83,6 @@ class StubExtraction:
     async def submit(
         self,
         request_id,
-        document_type,
         guardrails,
         filename,
         content_type,
@@ -98,7 +97,6 @@ class StubExtraction:
         self.submitted.append(
             {
                 "request_id": request_id,
-                "document_type": document_type,
                 "guardrails": guardrails,
                 "file_url": file_url,
                 "sequence": list(sequence) if sequence else None,

@@ -6,7 +6,7 @@ from typing import Any
 from prometheus_client import Counter
 
 from ocr_common.errors import NotFound, ServiceError
-from ocr_common.npwp import DOCUMENT_TYPE, final_result
+from ocr_common.npwp import final_result
 from ocr_common.pipeline import (
     DEFAULT_SEQUENCE,
     EXTRACTION,
@@ -53,7 +53,6 @@ class ExtractOcrService:
     async def submit(
         self,
         request_id: str,
-        document_type: str,
         filename: str,
         content_type: str | None,
         content: bytes,
@@ -101,7 +100,6 @@ class ExtractOcrService:
         try:
             job = await self._extraction.submit(
                 request_id,
-                document_type,
                 report,
                 filename,
                 content_type,
@@ -118,7 +116,7 @@ class ExtractOcrService:
 
         remaining = wait_seconds - (time.monotonic() - started)
         outcome = await self._waiter.wait(request_id, remaining, last_stage=STAGE_OF[sequence[-1]])
-        return {**verdict, "job": job, **_pipeline(document_type, report, outcome)}
+        return {**verdict, "job": job, **_pipeline(report, outcome)}
 
     async def status(self, request_id: str) -> dict[str, Any]:
         """Where the request is now, read from the stages without waiting; 404 when it never entered the
@@ -133,7 +131,7 @@ class ExtractOcrService:
         return {
             "passed": True,
             "reason": None,
-            **_pipeline(DOCUMENT_TYPE, None, outcome),
+            **_pipeline(None, outcome),
             "column_thresholds": outcome.column_thresholds,
         }
 
@@ -153,12 +151,12 @@ class ExtractOcrService:
         return None
 
 
-def _pipeline(document_type: str, report: dict[str, Any] | None, outcome: WaitOutcome) -> dict[str, Any]:
+def _pipeline(report: dict[str, Any] | None, outcome: WaitOutcome) -> dict[str, Any]:
     """`result` once the pipeline is DONE: the final result when scoring ended it, else the result of the
     stage that did (the last of the sequence), as it is. `pipeline.stage` names that stage."""
     result = None
     if outcome.status == STATUS_DONE and outcome.stage == STAGE_SCORING:
-        result = final_result(document_type, report, outcome.results[STAGE_STRUCTURING], outcome.results[STAGE_SCORING])
+        result = final_result(report, outcome.results[STAGE_STRUCTURING], outcome.results[STAGE_SCORING])
     elif outcome.status == STATUS_DONE:
         result = outcome.results[outcome.stage]
     pipeline = {"stage": outcome.stage, "status": outcome.status, "error_message": outcome.error_message}

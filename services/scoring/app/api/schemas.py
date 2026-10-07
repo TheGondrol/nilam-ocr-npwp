@@ -62,9 +62,6 @@ class ScoringJobRequest(BaseModel):
     request_id: str = Field(
         ..., min_length=1, description="request_id of the pipeline run", examples=[REQUEST_ID_EXAMPLE]
     )
-    document_type: str = Field(
-        "npwp", description="Only `npwp` is supported; anything else fails the job", examples=["npwp"]
-    )
     guardrails: GuardrailsResult | None = Field(
         None, description="Guardrails result submitted with the OCR job; returned unchanged in the final result"
     )
@@ -163,7 +160,6 @@ class ScoringDirectRequest(BaseModel):
         description="Echoed in the response; optional, nothing is recorded under it",
         examples=[REQUEST_ID_EXAMPLE],
     )
-    document_type: str = Field("npwp", description="Only `npwp` is supported; anything else is 400", examples=["npwp"])
     guardrails: GuardrailsResult | None = Field(
         None,
         description=(

@@ -47,7 +47,6 @@ _RESULT_EXAMPLE = {
             "The structured document was scored",
             scored=("Both fields present", envelope(200, "Success", _RESULT_EXAMPLE, REQUEST_ID_EXAMPLE)),
         ),
-        400: error(400, "An unsupported `document_type`", "Unsupported document_type: ktp. Supported: ['npwp']"),
         401: UNAUTHORIZED,
         422: error(422, "Validation Error", "body.structuring: Field required", errors="VALIDATION_ERROR"),
     },
@@ -62,7 +61,6 @@ async def score_direct(
     ocr = body.ocr.model_dump() if body.ocr is not None else None
     data = await run_in_threadpool(
         service.score,
-        body.document_type,
         guardrails,
         ocr,
         body.structuring.model_dump(),

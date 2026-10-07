@@ -133,7 +133,6 @@ OCR = {
     ],
 }
 STRUCTURING = {
-    "document_type": "npwp",
     "fields": {
         "nomor_npwp": {
             "value": "4318085607040052",

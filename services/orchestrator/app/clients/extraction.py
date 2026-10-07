@@ -29,7 +29,6 @@ class ExtractionJobClient:
     async def submit(
         self,
         request_id: str,
-        document_type: str,
         guardrails: dict[str, Any] | None,
         filename: str,
         content_type: str | None,
@@ -46,7 +45,7 @@ class ExtractionJobClient:
         `sequence` (pipeline_name_sequence) goes along as a JSON array, so each stage knows whether to hand
         the job on. `column_thresholds` (column_confidence_threshold) goes along as a JSON object and is
         carried from stage to stage up to scoring."""
-        fields = {"request_id": request_id, "document_type": document_type}
+        fields = {"request_id": request_id}
         if guardrails is not None:
             fields["guardrails"] = json.dumps(guardrails)
         if sequence:

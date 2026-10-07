@@ -35,7 +35,7 @@ def harness():
 
 
 def _payload(request_id, ocr=OCR):
-    return {"request_id": request_id, "document_type": "npwp", "guardrails": GUARDRAILS, "ocr": ocr}
+    return {"request_id": request_id, "guardrails": GUARDRAILS, "ocr": ocr}
 
 
 def test_submit_returns_202_then_structures_callback_and_handoff(harness, auth):
@@ -129,7 +129,7 @@ def reference_harness():
 
 def test_by_reference_reads_the_ocr_result_from_the_database_and_hands_off_a_reference(reference_harness, auth):
     client, next_stage = reference_harness
-    body = {"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}
+    body = {"request_id": "REQ_ref", "guardrails": GUARDRAILS}
 
     assert client.post("/v1/structuring/jobs", headers=auth, json=body).status_code == 202
     job = wait_for_job(client, "/v1/structuring/jobs/REQ_ref")
@@ -141,7 +141,7 @@ def test_by_reference_reads_the_ocr_result_from_the_database_and_hands_off_a_ref
 
 def test_by_reference_fails_the_job_when_the_ocr_result_is_not_stored(reference_harness, auth):
     client, next_stage = reference_harness
-    client.post("/v1/structuring/jobs", headers=auth, json={"request_id": "REQ_unknown", "document_type": "npwp"})
+    client.post("/v1/structuring/jobs", headers=auth, json={"request_id": "REQ_unknown"})
     job = wait_for_job(client, "/v1/structuring/jobs/REQ_unknown")
 
     assert job["status"] == "FAILED"
@@ -155,7 +155,7 @@ async def test_a_stale_job_is_run_again_from_what_the_database_holds():
         stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
     )
     service = StructuringJobService(pipeline, get_structuring_service(), results=FakeResults(ocr={"REQ_stale": OCR}))
-    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS}
+    stored_input = {"guardrails": GUARDRAILS}
     await pipeline.repository.claim("REQ_stale", input=stored_input)  # the process that claimed it died here
 
     await service.resume("REQ_stale", stored_input)
@@ -191,7 +191,7 @@ async def test_a_rejected_document_stops_at_structuring_with_a_failed_callback()
     )
     service = StructuringJobService(pipeline, StructuringService(_RejectingStructurer()))
 
-    await service.submit("REQ_rejected", "npwp", GUARDRAILS, OCR)
+    await service.submit("REQ_rejected", GUARDRAILS, OCR)
     await pipeline.runner.drain(5)
 
     job = await pipeline.get("REQ_rejected")
@@ -295,7 +295,7 @@ async def test_a_stale_job_hands_on_its_stored_column_thresholds():
         stage=STAGE_STRUCTURING, repository=InMemoryJobRepository(), callback=callback, next_stage_client=next_stage
     )
     service = StructuringJobService(pipeline, get_structuring_service(), results=FakeResults(ocr={"REQ_sc": OCR}))
-    stored_input = {"document_type": "npwp", "guardrails": GUARDRAILS, "column_confidence_threshold": COLUMNS}
+    stored_input = {"guardrails": GUARDRAILS, "column_confidence_threshold": COLUMNS}
     await pipeline.repository.claim("REQ_sc", input=stored_input)
 
     await service.resume("REQ_sc", stored_input)

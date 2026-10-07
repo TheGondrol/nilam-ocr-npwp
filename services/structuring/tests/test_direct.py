@@ -25,8 +25,7 @@ def test_the_extraction_output_is_structured_now_and_nothing_is_recorded(client,
     body = response.json()
     assert body["request_id"] == "QC_1"
     data = body["data"]
-    assert set(data) == {"document_type", "fields", "flag", "flag_reason", "reject_reason"}
-    assert data["document_type"] == "npwp"
+    assert set(data) == {"fields", "flag", "flag_reason", "reject_reason"}, "no document_type"
     assert data["fields"]["nomor_npwp"]["value"] == "123456789012345"
     assert data["fields"]["nama"]["value"] == "BUDI SANTOSO"
     assert data["reject_reason"] is None
@@ -60,13 +59,6 @@ def test_no_text_lines_is_400(client, auth):
 
     assert response.status_code == 400
     assert response.json()["message"] == "No text lines to structure"
-
-
-def test_another_document_type_is_400(client, auth):
-    response = _post(client, auth, document_type="ktp", ocr=OCR)
-
-    assert response.status_code == 400
-    assert "Unsupported document_type: ktp" in response.json()["message"]
 
 
 @pytest.mark.parametrize("body", [{}, {"ocr": {}}, {"ocr": {"blocks": "NPWP"}}])

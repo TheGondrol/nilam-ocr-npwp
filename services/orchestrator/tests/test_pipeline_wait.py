@@ -137,7 +137,7 @@ async def test_the_wait_is_counted_from_the_arrival_of_the_request(stub_waiter):
         GuardrailsClient(guardrails), ExtractionJobClient(remote, attempts=1, delay=0), stub_waiter, settings
     )
 
-    await service.submit(RID, "npwp", "npwp.jpg", "image/jpeg", JPEG, received_at=time.monotonic() - 10)
+    await service.submit(RID, "npwp.jpg", "image/jpeg", JPEG, received_at=time.monotonic() - 10)
 
     [(_, timeout)] = stub_waiter.calls
     assert 4 < timeout <= 5

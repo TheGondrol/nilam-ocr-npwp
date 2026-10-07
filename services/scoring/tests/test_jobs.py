@@ -10,7 +10,6 @@ from app.services.job_service import ScoringJobService
 
 GUARDRAILS = {"passed": True, "reason": None}
 STRUCTURING = {
-    "document_type": "npwp",
     "fields": {
         "nomor_npwp": {
             "value": "12.345.678.9-012.345",
@@ -36,10 +35,9 @@ def harness():
     app.dependency_overrides.pop(get_job_service, None)
 
 
-def _payload(request_id, document_type="npwp"):
+def _payload(request_id):
     return {
         "request_id": request_id,
-        "document_type": document_type,
         "guardrails": GUARDRAILS,
         "ocr": {"blocks": [{"text": "NPWP : 12.345.678.9-012.345", "confidence": 0.96, "page": 0}]},
         "structuring": STRUCTURING,
@@ -81,7 +79,6 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
     call = callback.calls[0]
     assert (call["stage"], call["status"]) == ("SCORING", "DONE")
     assert call["result"] == {
-        "document_type": "npwp",
         "fields": {
             "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.96},
             "nama": {"value": "BUDI SANTOSO", "confidence": 0.95},
@@ -103,17 +100,6 @@ def test_same_request_id_is_not_processed_twice(harness, auth):
     assert again.status_code == 202
     assert again.json()["data"]["duplicate"] is True
     assert len(callback.calls) == 1
-
-
-def test_unsupported_document_type_fails_the_job(harness, auth):
-    client, callback = harness
-    response = client.post("/v1/scoring/jobs", headers=auth, json=_payload("REQ_3", document_type="ktp"))
-    assert response.status_code == 202
-
-    job = wait_for_job(client, "/v1/scoring/jobs/REQ_3")
-    assert job["status"] == "FAILED"
-    assert job["error_message"].startswith("Unsupported document_type: ktp")
-    assert [(c["stage"], c["status"], c["result"]) for c in callback.calls] == [("SCORING", "FAILED", None)]
 
 
 def test_missing_structuring_without_a_database_is_422(harness, auth):
@@ -152,7 +138,7 @@ def test_by_reference_reads_structuring_and_ocr_from_the_database(auth):
     app.dependency_overrides[get_job_service] = lambda: service
     try:
         with make_client(app) as client:
-            body = {"request_id": "REQ_ref", "document_type": "npwp", "guardrails": GUARDRAILS}
+            body = {"request_id": "REQ_ref", "guardrails": GUARDRAILS}
             assert client.post("/v1/scoring/jobs", headers=auth, json=body).status_code == 202
             job = wait_for_job(client, "/v1/scoring/jobs/REQ_ref")
     finally:
@@ -172,9 +158,9 @@ async def test_a_stale_job_is_run_again_from_what_the_database_holds():
     service = ScoringJobService(
         pipeline, get_confidence_service(), results=FakeResults(structuring={"REQ_stale": STRUCTURING})
     )
-    await pipeline.repository.claim("REQ_stale", input={"document_type": "npwp", "guardrails": GUARDRAILS})
+    await pipeline.repository.claim("REQ_stale", input={"guardrails": GUARDRAILS})
 
-    await service.resume("REQ_stale", {"document_type": "npwp", "guardrails": GUARDRAILS})
+    await service.resume("REQ_stale", {"guardrails": GUARDRAILS})
     await pipeline.runner.drain(5)
 
     assert (await pipeline.get("REQ_stale"))["status"] == "DONE"
@@ -269,7 +255,7 @@ def test_a_field_left_out_uses_field_confidence_threshold(outcome_harness, auth)
 async def test_a_stale_job_is_run_again_with_its_stored_column_thresholds(outcome_harness):
     _, repository, service = outcome_harness
     service._results = FakeResults(structuring={"REQ_stale_col": STRUCTURING})
-    input = {"document_type": "npwp", "guardrails": GUARDRAILS, "column_confidence_threshold": {"nomor_npwp": 0.9}}
+    input = {"guardrails": GUARDRAILS, "column_confidence_threshold": {"nomor_npwp": 0.9}}
     await repository.claim("REQ_stale_col", input=input)
 
     await service.resume("REQ_stale_col", input)

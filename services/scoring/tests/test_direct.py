@@ -16,7 +16,6 @@ OCR = {
     ]
 }
 STRUCTURING = {
-    "document_type": "npwp",
     "fields": {
         "nomor_npwp": {
             "value": "12.345.678.9-012.345",
@@ -86,13 +85,6 @@ def test_column_confidence_threshold_decides_the_0_1_confidences(client, auth):
     fields = response.json()["data"]["fields"]
     assert (fields["nomor_npwp"]["confidence"], fields["nama"]["confidence"]) == (0, 0)
     assert (fields["nomor_npwp"]["threshold"], fields["nama"]["threshold"]) == (1.0, 1.0)
-
-
-def test_another_document_type_is_400(client, auth):
-    response = _post(client, auth, document_type="ktp", structuring=STRUCTURING)
-
-    assert response.status_code == 400
-    assert response.json()["message"] == "Unsupported document_type: ktp. Supported: ['npwp']"
 
 
 @pytest.mark.parametrize(

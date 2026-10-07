@@ -18,7 +18,7 @@ GUARDRAILS = {"passed": True, "reason": None}
 
 
 def _submit(client, auth, request_id):
-    data = {"request_id": request_id, "document_type": "npwp", "guardrails": json.dumps(GUARDRAILS)}
+    data = {"request_id": request_id, "guardrails": json.dumps(GUARDRAILS)}
     return client.post("/v1/extraction/jobs-test", headers=auth, data=data, files=image_upload("npwp.jpg"))
 
 

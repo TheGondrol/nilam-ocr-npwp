@@ -184,7 +184,7 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 
 | | |
 |---|---|
-| `POST /api/requests` | form `file`, `document_type`, `slow_seconds` (0 = tanpa simulasi), `pipeline_name_sequence` (JSON array; kosong = pipeline penuh; sengaja tidak divalidasi supaya 422 orchestrator bisa diperlihatkan) |
+| `POST /api/requests` | form `file`, `slow_seconds` (0 = tanpa simulasi), `pipeline_name_sequence` (JSON array; kosong = pipeline penuh; sengaja tidak divalidasi supaya 422 orchestrator bisa diperlihatkan) |
 | `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi; bentuk body diperiksa (`contract`) |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
