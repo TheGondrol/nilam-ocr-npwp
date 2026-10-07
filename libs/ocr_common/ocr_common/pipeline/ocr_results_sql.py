@@ -47,7 +47,7 @@ async def write_ocr_result(
     guardrails: int | None = None,
     pipeline_last_stage: str | None = None,
 ) -> None:
-    """Append one answer of `request_id` as a new row (the table is append-only; `update_at` = `created_at`)."""
+    """Append one answer of `request_id` as a new row (the table is append-only)."""
     now = datetime.now(UTC)
     await conn.execute(
         table.insert().values(
@@ -60,7 +60,6 @@ async def write_ocr_result(
             guardrails=guardrails,
             pipeline_last_stage=pipeline_last_stage,
             created_at=now,
-            update_at=now,
         )
     )
 

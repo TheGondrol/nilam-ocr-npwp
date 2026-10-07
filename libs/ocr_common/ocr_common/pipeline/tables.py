@@ -143,35 +143,30 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
 
 
 def ocr_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
-    """`nilam_ocr_results`: the request's final answer, one row per request_id, in the shape of the extract-ocr
-    answer. Written by the service that ends the request, in the same transaction as its own result: the last
-    stage of the pipeline_name_sequence (completed, rejected by the structuring rules, or failed), or the
-    orchestrator NPWP for guardrails (rejected, or the only service). `data` is the last service's result as it
-    is (scoring: the contract's fields). `guardrails` is 0 passed, 1 rejected, null when the request left
-    guardrails out. `pipeline_last_stage` is the service that ended the request, as pipeline_name_sequence names
-    it (`guardrails`, `extraction`, `structuring`, `scoring`), also on a success (unlike the extract-ocr answer);
-    for a failed hand-off, the stage that never received the job (0015).
+    """`nilam_ocr_results`: the log of every answer the central orchestrator gets, one row per answer, in the shape
+    of the extract-ocr answer (see `ocr_results_sql`): every answer to `POST /v1/extract-ocr` (written by the
+    orchestrator NPWP just before it answers) and every result callback (written by the stage that sent it, once
+    delivered). `guardrails` is 0 passed, 1 rejected, null when the request left guardrails out. A request_id's
+    newest row (highest `id`) is the last answer the orchestrator got.
 
-    **Append-only** (0016): every final state is a new row, the history of a request_id run again included
-    (e.g. FAILED, then DONE after the re-run); its newest row (highest `id`) is its state now. Rows are never
-    changed, so `update_at` equals `created_at`. On PostgreSQL a trigger refuses UPDATE and DELETE
+    **Append-only** (0016): rows are never changed. On PostgreSQL a trigger refuses UPDATE and DELETE
     (`APPEND_ONLY_FUNCTION`); TRUNCATE stays possible for the move to another database (copy_database
-    --replace). `implicit_returning=False`: the INSERT does not ask for the new id back."""
+    --replace). The columns are in the client's order (0018). `implicit_returning=False`: the INSERT does not ask
+    for the new id back."""
     name = f"{TABLE_PREFIX}{table_prefix}ocr_results"
     table = Table(
         name,
         metadata,
+        Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
+        Column("request_id", Text, nullable=False),
         Column("status_code", Integer, nullable=False),
         Column("status_desc", Text, nullable=False),
         Column("message", Text, nullable=True),
         Column("data", JSON_TYPE, nullable=True),
         Column("errors", Text, nullable=True),
-        Column("request_id", Text, nullable=False),
+        Column("pipeline_last_stage", Text, nullable=True),
         Column("guardrails", Integer, nullable=True),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-        Column("update_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-        Column("pipeline_last_stage", Text, nullable=True),
-        Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
         Index(f"idx_{name}_request_id", "request_id"),
         schema=PIPELINE_SCHEMA,
         implicit_returning=False,

@@ -180,7 +180,8 @@ async def test_a_delivered_callback_becomes_a_row(url):
         DATA,
         0,
     )
-    assert (row["pipeline_last_stage"], row["created_at"]) == ("scoring", row["update_at"])
+    assert row["pipeline_last_stage"] == "scoring"
+    assert "update_at" not in row
 
 
 async def test_guardrails_is_null_when_the_request_left_it_out(url):

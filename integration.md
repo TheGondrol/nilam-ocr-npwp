@@ -637,7 +637,7 @@ berawalan `nilam_` (sejak migrasi `0013`; sebelumnya `ocr_pipeline_npwp` tanpa a
 
 | Tabel | Isi |
 |---|---|
-| `nilam_ocr_npwp.nilam_ocr_results` | log setiap jawaban ke kalian, append-only: setiap jawaban `POST /v1/extract-ocr` (200, 202, 4xx, 5xx), dan setiap callback hasil saat terkirim; bentuknya jawaban extract-ocr (`status_code`, `status_desc`, `message`, `data`, `errors`, `request_id`, `guardrails`, `created_at`, `update_at`, `pipeline_last_stage`). Baris terbaru per `request_id` = jawaban terakhir yang kalian terima (migrasi `0014`-`0016`) |
+| `nilam_ocr_npwp.nilam_ocr_results` | log setiap jawaban ke kalian, append-only: setiap jawaban `POST /v1/extract-ocr` (200, 202, 4xx, 5xx), dan setiap callback hasil saat terkirim; bentuknya jawaban extract-ocr (`id`, `request_id`, `status_code`, `status_desc`, `message`, `data`, `errors`, `pipeline_last_stage`, `guardrails`, `created_at`). Baris terbaru per `request_id` = jawaban terakhir yang kalian terima (migrasi `0014`-`0016`) |
 | `nilam_ocr_npwp.nilam_ocr_extraction_jobs`, `nilam_ocr_npwp.nilam_ocr_extraction_results` | status dan hasil OCR mentah (sebelum `0014`: `nilam_ocr_jobs`, `nilam_ocr_results`) |
 | `nilam_ocr_npwp.nilam_structuring_jobs`, `nilam_ocr_npwp.nilam_structuring_results` | field hasil penataan |
 | `nilam_ocr_npwp.nilam_scoring_jobs`, `nilam_ocr_npwp.nilam_scoring_results` | confidence akhir |

@@ -148,7 +148,18 @@ async def test_each_answer_is_a_new_row(database):
         (200, "OK", 0),
     ]
     assert rows[1]["data"] == {"nama": {"value": "X", "confidence": 1}}
-    assert all(r["created_at"] == r["update_at"] for r in rows)
+    assert list(rows[0]) == [
+        "id",
+        "request_id",
+        "status_code",
+        "status_desc",
+        "message",
+        "data",
+        "errors",
+        "pipeline_last_stage",
+        "guardrails",
+        "created_at",
+    ]
 
 
 async def test_a_write_that_fails_does_not_fail_the_answer(tmp_path, caplog):
