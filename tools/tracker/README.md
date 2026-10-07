@@ -69,6 +69,7 @@ dan dua simulasi:
 | **X-Callback-Key salah (401)** | tracker menjawab 401 (atau memang salah: `TRACKER_CALLBACK_KEY` diisi dan beda dengan `ORCHESTRATION_CALLBACK_KEY`) | sama dengan 422: dead letter, tidak terkirim sampai dilepas |
 | **Callback lambat** | tracker mencatat callback, lalu baru menjawab 200 setelah `TRACKER_CALLBACK_SLOW_SECONDS` (12), di atas `ORCHESTRATION_TIMEOUT_SECONDS` relay (10) | relay menganggapnya gagal (504) dan mengirim ulang: timeline menandai kedatangan berikutnya **DUPLIKAT** |
 | **Callback tersendat** | 503 untuk `TRACKER_CALLBACK_FLAKY_FAILURES` (2) kedatangan pertama tiap pesan, sesudahnya 200 | pulih sendiri dengan backoff, diterima tepat sekali |
+| **Callback belum siap (409)** | 409 `RESULT_NOT_READY` dalam envelope pusat untuk `TRACKER_CALLBACK_NOT_READY_FAILURES` (2) kedatangan pertama tiap pesan, sesudahnya 200 | dikenali dan dikirim ulang tiap 1,5 dtk (bukan dead letter seperti 4xx lain), diterima tepat sekali |
 | **Dokumen sebagai `file_url`** (pilihan di form, lokal saja) | tracker menyimpan file dan mengirim `file_url=http://host.docker.internal:8090/api/files/...` seperti contoh cURL pusat | orchestrator dan extraction mengunduhnya; job yang dijalankan ulang reaper bisa mengunduh lagi |
 | **Kirim ulang `request_id`** (isian di form) | POST lagi dengan request_id yang sudah ada | uji idempotensi: hasil tersimpan dijawab lagi, atau job FAILED dijalankan lagi |
 | **`pipeline_name_sequence`** (toggle on/off per service di form upload dan load test) | tiap service (guardrails, extraction, structuring, scoring) bisa dinyalakan/dimatikan, plus pintasan penuh, tanpa guardrails, guardrails saja, sampai extraction, sampai structuring, extraction saja. Keempatnya menyala = field tidak dikirim (pipeline penuh); selain itu yang menyala dikirim sebagai JSON array dalam urutan pipeline. UI memeriksa aturan urutan yang sama dengan orchestrator: di form upload kombinasi yang tidak valid tetap bisa dikirim (dengan peringatan) supaya 422-nya terlihat, di load test tombol mulai dikunci | tahap di luar sequence tampil **SKIPPED**. Tahap terakhir mengakhiri request: `data` adalah hasilnya apa adanya dan callback DONE-nya membawa `final: true` (tracker menutup request di situ). Guardrails saja: jawaban POST sudah final, tanpa job dan callback. Sequence tidak valid (mis. extraction + scoring, atau structuring di depan): **422** `INVALID_PIPELINE_SEQUENCE`, tidak ada yang jalan |
@@ -91,6 +92,17 @@ per request, dengan `X-Callback-Key`). Tracker menerima keduanya; untuk latihan 
     ORCHESTRATION_CALLBACK_PATH=/v1/ocr-callback
     ORCHESTRATION_CALLBACK_KEY=local-callback-key     # dan TRACKER_CALLBACK_KEY yang sama di tools/tracker/.env
 
+## Kenapa outbox? (untuk menjelaskan ke tim)
+
+Menu **Kenapa outbox?** memetakan setiap masalah yang ditangani transactional outbox ke cara melihatnya di
+tracker: satu kartu per masalah berisi masalahnya, apa yang dilakukan outbox, bagian layar yang diperhatikan, dan
+tombol **Jalankan** untuk skenario gangguan yang membuktikannya (hasil terakhir dan laporannya ikut tampil,
+request-nya bisa dibuka di menu Pipeline). Masalahnya: pesan hilang di antara simpan hasil dan kirim HTTP,
+penerima mati, callback yang tidak boleh menahan pipeline, beberapa replika, rolling update, dead letter, hand-off
+yang gagal permanen, 409 `RESULT_NOT_READY`, dan pemantauan. Di bawahnya tiga hal yang **tidak** ditangani outbox
+(crash saat job dikerjakan, duplikat at-least-once, database mati) dengan skenarionya juga. **Jalankan semua demo**
+menjalankan semua skenario yang dirujuk kartu. Seperti skenario gangguan: lokal saja. Tautan langsung: `#outbox`.
+
 ## Skenario gangguan (uji kesiapan)
 
 Menu **Skenario gangguan** menjalankan daftar "shit happens" secara otomatis di stack lokal: tiap skenario
@@ -106,6 +118,7 @@ request skenario bisa dibuka di menu Pipeline; gangguannya tercatat di timeline-
 | Jalur normal | 200 completed, satu callback akhir, outbox kosong |
 | Orkestrasi pusat mati 20 dtk (503) | pipeline tetap selesai, callback RETRY dengan backoff, terkirim sendiri setelah pulih, tepat sekali |
 | Orkestrasi pusat tersendat | pulih tanpa tindakan manual, tanpa duplikat |
+| Callback tiba sebelum pusat mencatat 202-nya (409) | `RESULT_NOT_READY` dikirim ulang, diterima tepat sekali |
 | Orkestrasi pusat lambat | relay mengirim ulang: pusat menerima duplikat (WARN: pusat harus idempoten) |
 | Orkestrasi pusat menolak (401) | dead letter setelah 1 attempt, terlihat di `GET /v1/<tahap>/outbox`, terkirim setelah `POST /v1/<tahap>/outbox/release` |
 | Structuring mati 25 dtk | handoff RETRY lalu terkirim, pusat mendapat 202 (bukan 5xx), pipeline selesai |
@@ -188,7 +201,7 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi; bentuk body diperiksa (`contract`) |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
-| `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject" \| "unauthorized" \| "slow" \| "flaky"}` |
+| `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject" \| "unauthorized" \| "slow" \| "flaky" \| "not_ready"}` |
 | `POST /v1/ocr-callback` | callback format result (dev); diperiksa `X-Callback-Key` kalau `TRACKER_CALLBACK_KEY` diisi, dan kontraknya (event `callback` membawa `contract` dan `payload`); body tak terbaca -> 400 |
 | `GET /api/files/{token}/{nama}` | dokumen yang dikirim sebagai `file_url` |
 | `GET` / `POST /api/chaos`, `POST /api/chaos/{service}/start` | keadaan container; `{"service", "action": "stop" \| "kill", "seconds"}` (lokal saja) |
@@ -219,7 +232,7 @@ K6_API_KEY, LOAD_TESTER_DIR.
 Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EXTRACTION_URL, STRUCTURING_URL,
 SCORING_URL (default 127.0.0.1:8030-8034), TRACKER_POLL, REDIS_URL, API_KEY, PORT,
 TRACKER_DATABASE_URL, TRACKER_DB_INTERVAL (0.25), TRACKER_WAIT_SECONDS (15, label saja).
-Simulasi dan skenario: TRACKER_CALLBACK_KEY, TRACKER_CALLBACK_SLOW_SECONDS (12), TRACKER_CALLBACK_FLAKY_FAILURES (2),
+Simulasi dan skenario: TRACKER_CALLBACK_KEY, TRACKER_CALLBACK_SLOW_SECONDS (12), TRACKER_CALLBACK_FLAKY_FAILURES (2), TRACKER_CALLBACK_NOT_READY_FAILURES (2),
 TRACKER_FILE_BASE_URL (http://host.docker.internal:PORT), TRACKER_CONTAINER_PREFIX (nilam-ocr-),
 TRACKER_STOP_GRACE_SECONDS (45), TRACKER_DRAIN_SECONDS (30), TRACKER_JOB_LEASE_SECONDS (300),
 TRACKER_STALE_JOB_INTERVAL_SECONDS (30); empat terakhir harus sama dengan env service.

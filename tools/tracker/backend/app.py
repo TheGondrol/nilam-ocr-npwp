@@ -112,10 +112,21 @@ DB_WATCH_TIMEOUT = float(os.environ.get("TRACKER_DB_WATCH_TIMEOUT", "900"))
 # Jawaban tracker (sebagai Orkestrasi pusat) untuk callback. slow: 200, tapi baru setelah
 # CALLBACK_SLOW_SECONDS, di atas ORCHESTRATION_TIMEOUT_SECONDS relay (10): relay menganggapnya gagal (504) dan
 # mengirim ulang, padahal tracker sudah mencatatnya, jadi Orkestrasi menerima duplikat. flaky: 503 untuk
-# CALLBACK_FLAKY_FAILURES kedatangan pertama tiap pesan, sesudahnya 200.
-CALLBACK_MODES = {"ok": 200, "down": 503, "reject": 422, "unauthorized": 401, "slow": 200, "flaky": 200}
+# CALLBACK_FLAKY_FAILURES kedatangan pertama tiap pesan, sesudahnya 200. not_ready: 409 RESULT_NOT_READY (pusat belum
+# mencatat 202-nya) untuk CALLBACK_NOT_READY_FAILURES kedatangan pertama tiap pesan, sesudahnya 200.
+CALLBACK_MODES = {
+    "ok": 200,
+    "down": 503,
+    "reject": 422,
+    "unauthorized": 401,
+    "slow": 200,
+    "flaky": 200,
+    "not_ready": 200,
+}
 CALLBACK_SLOW_SECONDS = float(os.environ.get("TRACKER_CALLBACK_SLOW_SECONDS", "12"))
 CALLBACK_FLAKY_FAILURES = int(os.environ.get("TRACKER_CALLBACK_FLAKY_FAILURES", "2"))
+# Di bawah NOT_READY_RETRIES pipeline (5): lebih dari itu callback-nya jadi dead letter.
+CALLBACK_NOT_READY_FAILURES = int(os.environ.get("TRACKER_CALLBACK_NOT_READY_FAILURES", "2"))
 # Kalau diisi, /v1/ocr-callback memeriksa X-Callback-Key seperti Orkestrasi pusat (401 kalau beda).
 CALLBACK_KEY = os.environ.get("TRACKER_CALLBACK_KEY") or None
 REJECTED_CODE = "DOWNSTREAM_VALIDATION_ERROR"
@@ -661,6 +672,8 @@ def callback_answer(mode: str, arrival: int, key_ok: bool) -> int:
         return 401
     if mode == "flaky":
         return 503 if arrival <= CALLBACK_FLAKY_FAILURES else 200
+    if mode == "not_ready":
+        return 409 if arrival <= CALLBACK_NOT_READY_FAILURES else 200
     return CALLBACK_MODES[mode]
 
 
@@ -783,6 +796,18 @@ async def receive_callback(
     if mode == "slow" and accepted:
         # Dicatat di atas, tapi jawabannya datang setelah timeout relay.
         await asyncio.sleep(CALLBACK_SLOW_SECONDS)
+    if not accepted and http_status == 409:
+        # Envelope Orkestrasi pusat: pipeline mengenali RESULT_NOT_READY dari field `errors`, lalu mengirim ulang.
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status_code": 409,
+                "status_desc": "Conflict",
+                "message": "simulasi: hasil request ini belum tercatat (202 belum disimpan pusat)",
+                "data": None,
+                "errors": "RESULT_NOT_READY",
+            },
+        )
     if not accepted:
         detail = "X-Callback-Key salah" if not key_ok else f"simulasi: orkestrasi menjawab {http_status}"
         return JSONResponse(status_code=http_status, content={"detail": detail})
@@ -861,6 +886,7 @@ async def get_simulation():
         "database_error": db_error,
         "callback_slow_seconds": CALLBACK_SLOW_SECONDS,
         "callback_flaky_failures": CALLBACK_FLAKY_FAILURES,
+        "callback_not_ready_failures": CALLBACK_NOT_READY_FAILURES,
         "callback_key": CALLBACK_KEY is not None,
         "target": TARGET,
     }
@@ -1015,6 +1041,7 @@ chaos.configure(
     wait_seconds=WAIT_SECONDS,
     callback_slow_seconds=CALLBACK_SLOW_SECONDS,
     flaky_failures=CALLBACK_FLAKY_FAILURES,
+    not_ready_failures=CALLBACK_NOT_READY_FAILURES,
 )
 
 

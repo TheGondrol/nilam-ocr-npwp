@@ -244,3 +244,18 @@ form button.toggle.on { border: 1px solid var(--processing); background: #eef2ff
 .presets { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .presets .small-link { padding: 0; border: 0; background: none; color: var(--processing); }
 .warn.small { color: var(--rejected); font-size: 0.75rem; }
+.guide-intro p { margin: 0; line-height: 1.5; }
+.guide-heading { margin: 22px 0 0; }
+.guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
+.guide-grid .panel { margin-top: 14px; }
+.guide-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.guide-row { display: grid; grid-template-columns: 64px 1fr; gap: 8px; font-size: 0.84rem; margin-bottom: 6px; }
+.guide-row .k { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+.guide-row p, .guide-row ul { margin: 0; }
+.guide-row ul { padding-left: 16px; }
+.guide-demos { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.guide-demo-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.84rem; }
+.guide-demo-head .name { flex: 1; min-width: 160px; }
+.guide-demo-head .pill { font-size: 0.62rem; padding: 1px 6px; }
+@media (max-width: 700px) { .guide-grid { grid-template-columns: 1fr; } }
+

@@ -16,6 +16,11 @@ const CALLBACK_MODES = [
   { value: 'unauthorized', label: 'X-Callback-Key salah (401)', hint: 'sama dengan 422: dead letter, perlu release manual' },
   { value: 'slow', label: 'lambat (> timeout relay)', hint: 'dicatat lalu dijawab terlambat: relay mengirim ulang, pusat menerima duplikat' },
   { value: 'flaky', label: 'tersendat (503 lalu 200)', hint: 'beberapa kedatangan pertama tiap pesan 503, sesudahnya 200' },
+  {
+    value: 'not_ready',
+    label: 'belum siap (409 RESULT_NOT_READY)',
+    hint: 'pusat belum mencatat 202-nya: relay mengirim ulang tiap 1,5 dtk, lalu diterima',
+  },
 ]
 const SOURCES = [
   { value: 'upload', label: 'upload (multipart file)' },
@@ -1033,6 +1038,259 @@ function LoadTest({ overview, nav }) {
   )
 }
 
+// "Kenapa outbox?": tiap masalah yang ditangani transactional outbox, apa yang dilakukannya, dan skenario gangguan
+// yang membuktikannya di stack lokal. Untuk menjelaskan ke tim tanpa membaca kode.
+const OUTBOX_PROBLEMS = [
+  {
+    title: 'Hasil tersimpan, pesannya hilang',
+    problem:
+      'Begitu tahap selesai ia harus menyimpan hasil ke database DAN mengirim HTTP (hand-off ke tahap berikutnya, callback ke pusat). Keduanya tidak bisa atomik: pod mati di antaranya berarti hand-off atau callback hilang, request macet di tengah, pusat tidak pernah tahu.',
+    solution:
+      'Pesan ditulis ke nilam_pipeline_outbox di transaksi yang sama dengan hasil job: tersimpan bersama atau tidak sama sekali. Pengiriman dikerjakan relay sesudahnya.',
+    scenarios: ['baseline', 'sigterm-drained'],
+    look: [
+      'Panel pipeline_outbox: baris QUEUED muncul di detik yang sama dengan hasil tahap, lalu CLAIMED dan DELIVERED.',
+      'Timeline: commit hasil, klaim relay, hand-off, callback, berurutan.',
+    ],
+  },
+  {
+    title: 'Penerima sedang tidak bisa menerima',
+    problem:
+      'Pusat atau tahap berikutnya menjawab 5xx, timeout, atau tidak terjangkau. Dulu dicoba 3x dalam ~2 detik lalu menyerah: pesannya hilang.',
+    solution:
+      'Dicoba ulang dengan jeda berlipat (0,5 dtk, 1, 2, ... maks. 5 menit sekali): hand-off sampai 24 jam, callback sampai 600 dtk (batas tunggu pusat).',
+    scenarios: ['callback-down', 'stage-down', 'callback-flaky'],
+    look: [
+      'Panel pipeline_outbox: baris RETRY dengan attempt bertambah dan next attempt makin jauh.',
+      'Panel Callback ke Orkestrasi: kedatangan dijawab 503, lalu 200 begitu penerima hidup, tanpa tindakan manual.',
+    ],
+    manual: 'Manual: di menu Pipeline pilih "callback mati (503)", kirim dokumen, tunggu, lalu kembalikan ke normal.',
+  },
+  {
+    title: 'Callback yang gagal tidak menahan pipeline',
+    problem: 'Kalau pusat mati, tahap tidak boleh berhenti menyerahkan job ke tahap berikutnya.',
+    solution: 'Hand-off dikirim lebih dulu dan diproses terpisah dari callback: pipeline tetap jalan, callback menumpuk lalu terkirim.',
+    scenarios: ['callback-down'],
+    look: ['Kartu structuring dan scoring tetap DONE sementara callback-nya masih RETRY.'],
+  },
+  {
+    title: 'Beberapa replika, relay mati di tengah pengiriman',
+    problem: 'Dua pod yang sama tidak boleh mengirim pesan yang sama bersamaan; pesan yang sedang dikirim pod yang mati tidak boleh hilang.',
+    solution: 'Relay mengklaim baris dengan FOR UPDATE SKIP LOCKED dan lease 30 dtk; lease habis = baris diambil lagi replika lain.',
+    scenarios: ['concurrent'],
+    look: ['Satu klaim job dan satu callback akhir walau dua POST datang bersamaan.'],
+    note: 'Lokal hanya satu replika per service: penguncian baris outbox dibuktikan test otomatis (libs/ocr_common/tests/test_outbox.py).',
+  },
+  {
+    title: 'Rolling update (SIGTERM)',
+    problem: 'Deploy mematikan pod lama saat job dan pengiriman sedang berjalan.',
+    solution:
+      'Pod menyelesaikan job dalam masa drain, relay menyelesaikan pengiriman yang sedang jalan lalu mencoba sekali lagi yang sudah jatuh tempo; sisanya aman di tabel.',
+    scenarios: ['sigterm-drained', 'sigterm-interrupted'],
+    look: ['Hand-off tetap terkirim setelah restart; job yang terlalu panjang FAILED "interrupted" dan pusat diberi tahu.'],
+  },
+  {
+    title: 'Pesan yang memang ditolak (dead letter)',
+    problem: 'Penerima menjawab 4xx (key salah, body ditolak): mencoba terus hanya membebani dan tidak akan berhasil.',
+    solution:
+      'Langsung jadi dead letter yang tetap tersimpan, terlihat di backlog dan log, dan bisa dikirim ulang setelah penyebabnya dibetulkan.',
+    scenarios: ['callback-rejected'],
+    look: [
+      'Panel pipeline_outbox: baris DEAD dengan last_error; sidebar backlog: dead_letters bertambah.',
+      'Tombol "Lepaskan dead letter" mengirimnya lagi.',
+    ],
+    manual: 'Manual: di menu Pipeline pilih "callback menolak (422)" atau "X-Callback-Key salah (401)".',
+  },
+  {
+    title: 'Hand-off gagal permanen tetap dilaporkan',
+    problem: 'Kalau tahap berikutnya tidak pernah menerima hand-off, request menggantung selamanya tanpa ada yang tahu.',
+    solution: 'Hand-off yang jadi dead letter diganti callback FAILED atas nama tahap berikutnya: pusat tetap mendapat keadaan akhir.',
+    scenarios: [],
+    note: 'Belum ada skenario (perlu tahap yang menolak hand-off dengan 4xx); dibuktikan test test_a_handoff_the_next_stage_refuses_becomes_a_failed_callback.',
+  },
+  {
+    title: 'Callback tiba sebelum pusat mencatat 202-nya',
+    problem: 'Pipeline bisa selesai sangat cepat setelah jawaban 202; pusat menjawab callback-nya 409 RESULT_NOT_READY.',
+    solution: 'Kode itu dikenali dan callback dikirim ulang tiap 1,5 dtk sampai 5x, bukan dianggap 4xx biasa (dead letter).',
+    scenarios: ['callback-not-ready'],
+    look: ['Panel Callback ke Orkestrasi: kedatangan dijawab 409 lalu 200, satu callback akhir diterima.'],
+    manual: 'Manual: di menu Pipeline pilih "callback belum siap (409)".',
+  },
+  {
+    title: 'Bisa dipantau',
+    problem: 'Pesan yang tertahan atau mati tidak boleh hanya diketahui saat pusat komplain.',
+    solution: 'Backlog per tahap (pending, retrying, umur tertua, dead letter), warning di log kalau basi, metrik, dan di dev transaksi APM + event log per pengiriman.',
+    scenarios: [],
+    look: [
+      'Sidebar menu Pipeline: Backlog outbox tiap service (GET /v1/<tahap>/outbox).',
+      'Dev: Elastic APM transaksi "<TAHAP> callback", Kibana event.dataset : "outbox".',
+    ],
+  },
+]
+
+const OUTBOX_LIMITS = [
+  {
+    title: 'Crash saat job sedang dikerjakan',
+    problem: 'Pod mati sebelum hasilnya tersimpan: belum ada yang masuk outbox.',
+    solution: 'Bukan outbox, tapi reaper job basi: job PROCESSING tanpa pemilik dijalankan ulang setelah lease. Upload inline sudah hilang (job FAILED, minta kirim ulang); file_url pulih sendiri.',
+    scenarios: ['crash-file-url', 'crash-inline'],
+  },
+  {
+    title: 'At-least-once: bisa duplikat',
+    problem: 'Penerima yang lambat menjawab dianggap gagal, pesannya dikirim lagi padahal sudah diterima.',
+    solution: 'Tidak dicegah oleh outbox: penerima harus idempoten per request_id (tahap kita sudah, pusat sudah diminta).',
+    scenarios: ['callback-slow'],
+  },
+  {
+    title: 'Database mati',
+    problem: 'Hasil dan outbox sama-sama tidak bisa ditulis.',
+    solution: 'Request baru ditolak 5xx. Temuan terbuka: request yang terputus bisa melapor FAILED lalu DONE.',
+    scenarios: ['postgres-down'],
+  },
+]
+
+function GuideCard({ item, byId, running, available, onRun, openRequest }) {
+  const [open, setOpen] = useState(null)
+  return (
+    <section className="panel guide-card">
+      <h3>{item.title}</h3>
+      <div className="guide-row">
+        <span className="k">masalah</span>
+        <p>{item.problem}</p>
+      </div>
+      <div className="guide-row">
+        <span className="k">outbox</span>
+        <p>{item.solution}</p>
+      </div>
+      {item.look && (
+        <div className="guide-row">
+          <span className="k">lihat di</span>
+          <ul>
+            {item.look.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {item.note && <p className="hint small">{item.note}</p>}
+      {item.manual && <p className="hint small">{item.manual}</p>}
+      {item.scenarios.length > 0 && (
+        <div className="guide-demos">
+          {item.scenarios.map((id) => {
+            const scenario = byId[id]
+            const last = scenario?.last
+            return (
+              <div key={id} className="guide-demo">
+                <div className="guide-demo-head">
+                  {last ? <LevelPill level={last.status} /> : <span className="pill idle">belum</span>}
+                  <span className="name">{scenario?.title ?? id}</span>
+                  <button className="small" disabled={running || !available} onClick={() => onRun([id])}>
+                    Jalankan
+                  </button>
+                  {last && (
+                    <button className="link small-link" onClick={() => setOpen(open === id ? null : id)}>
+                      {open === id ? 'tutup laporan' : 'laporan terakhir'}
+                    </button>
+                  )}
+                </div>
+                {scenario?.expect && <div className="hint small">diharapkan: {scenario.expect}</div>}
+                {open === id && last && <RunReport run={last} openRequest={openRequest} />}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function OutboxGuide({ nav, openRequest }) {
+  const [data, setData] = useState(null)
+  const [image, setImage] = useState('')
+  const [error, setError] = useState(null)
+
+  const load = () =>
+    fetch('/api/scenarios')
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d)
+        setImage((current) => current || d.images[0] || '')
+      })
+      .catch(() => {})
+
+  useEffect(() => {
+    load()
+    const timer = setInterval(load, 1500)
+    return () => clearInterval(timer)
+  }, [])
+
+  async function run(ids) {
+    setError(null)
+    const r = await fetch('/api/scenarios/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenarios: ids, image }),
+    })
+    if (!r.ok) setError((await r.json()).detail ?? r.statusText)
+    load()
+  }
+
+  const byId = Object.fromEntries((data?.scenarios ?? []).map((s) => [s.id, s]))
+  const running = Boolean(data?.running)
+  const available = Boolean(data?.available)
+  const allIds = [...new Set([...OUTBOX_PROBLEMS, ...OUTBOX_LIMITS].flatMap((item) => item.scenarios))].filter((id) => byId[id])
+  const card = (item) => (
+    <GuideCard key={item.title} item={item} byId={byId} running={running} available={available} onRun={run} openRequest={openRequest} />
+  )
+
+  return (
+    <div className="app">
+      <aside>
+        <h1>NPWP pipeline tracker</h1>
+        {nav}
+        <p className="hint">
+          Tiap kartu: masalah yang muncul karena tahap harus menyimpan hasil dan mengirim HTTP sekaligus, apa yang dilakukan transactional
+          outbox, dan skenario gangguan yang membuktikannya di stack lokal.
+        </p>
+        {data && !available && (
+          <div className="error">Skenario hanya di mode lokal (docker compose). Komentari blok GKE di tools/tracker/.env.</div>
+        )}
+        <label className="field wide">
+          dokumen uji (harus lolos guardrails dan aturan structuring)
+          <select value={image} onChange={(e) => setImage(e.target.value)}>
+            {(data?.images ?? []).map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="actions">
+          <button className="small" disabled={running || !available} onClick={() => run(allIds)}>
+            Jalankan semua demo ({allIds.length})
+          </button>
+        </div>
+        {running && <p className="hint small">Sedang berjalan: {data.running}. Detail langkahnya di menu Skenario gangguan.</p>}
+        {error && <div className="error">{error}</div>}
+      </aside>
+      <main>
+        <section className="panel guide-intro">
+          <h2>Kenapa outbox?</h2>
+          <p>
+            Tanpa outbox: <code>simpan hasil</code> lalu <code>POST hand-off / callback</code>. Kalau yang kedua gagal atau pod mati di antaranya,
+            hasilnya ada tapi tidak ada yang tahu. Dengan outbox: <code>simpan hasil + pesan</code> dalam satu transaksi, lalu relay mengirim pesan
+            itu sampai diterima, dicoba ulang, atau dicatat sebagai dead letter.
+          </p>
+        </section>
+        <h2 className="guide-heading">Yang ditangani</h2>
+        <div className="guide-grid">{OUTBOX_PROBLEMS.map(card)}</div>
+        <h2 className="guide-heading">Yang tidak ditangani outbox</h2>
+        <div className="guide-grid">{OUTBOX_LIMITS.map(card)}</div>
+      </main>
+    </div>
+  )
+}
+
 function Nav({ view, setView }) {
   return (
     <div className="nav">
@@ -1045,6 +1303,9 @@ function Nav({ view, setView }) {
       <button className={view === 'scenarios' ? 'active' : ''} onClick={() => setView('scenarios')}>
         Skenario gangguan
       </button>
+      <button className={view === 'outbox' ? 'active' : ''} onClick={() => setView('outbox')}>
+        Kenapa outbox?
+      </button>
     </div>
   )
 }
@@ -1052,9 +1313,9 @@ function Nav({ view, setView }) {
 export default function App() {
   const [view, setView] = useState(() => {
     try {
-      // #scenarios / #loadtest membuka menu itu langsung (tautan, screenshot headless).
+      // #scenarios / #loadtest / #outbox membuka menu itu langsung (tautan, screenshot headless).
       const stored = window.location.hash.slice(1) || localStorage.getItem('tracker.view')
-      return ['loadtest', 'scenarios'].includes(stored) ? stored : 'pipeline'
+      return ['loadtest', 'scenarios', 'outbox'].includes(stored) ? stored : 'pipeline'
     } catch (_) {
       return 'pipeline'
     }
@@ -1076,17 +1337,12 @@ export default function App() {
   }, [])
   const nav = <Nav view={view} setView={setView} />
   if (view === 'loadtest') return <LoadTest overview={overview} nav={nav} />
-  if (view === 'scenarios')
-    return (
-      <Scenarios
-        nav={nav}
-        overview={overview}
-        openRequest={(rid) => {
-          setFocus({ rid, at: Date.now() })
-          setView('pipeline')
-        }}
-      />
-    )
+  const openRequest = (rid) => {
+    setFocus({ rid, at: Date.now() })
+    setView('pipeline')
+  }
+  if (view === 'outbox') return <OutboxGuide nav={nav} openRequest={openRequest} />
+  if (view === 'scenarios') return <Scenarios nav={nav} overview={overview} openRequest={openRequest} />
   return <Pipeline nav={nav} overview={overview} focus={focus} />
 }
 

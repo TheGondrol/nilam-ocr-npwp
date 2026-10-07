@@ -578,6 +578,30 @@ async def s_callback_flaky(run: Run) -> None:
     await run.expect_outbox_drained(rid)
 
 
+async def s_callback_not_ready(run: Run) -> None:
+    failures = ctx["not_ready_failures"]
+    await run.callback("not_ready")
+    out = await run.submit()
+    await _completed_answer(run, out)
+    rid = out["request_id"]
+    final = await run.wait_final(rid, 60)
+    stats = await run.final(rid)
+    await run.check(
+        f"Pusat yang {failures}x menjawab 409 RESULT_NOT_READY: callback akhir dikirim ulang dan sampai",
+        bool(final),
+        f"tiba {stats['arrived']}x, diterima {stats['accepted']}x",
+    )
+    await run.check(
+        f"Dikirim ulang tepat {failures}x lalu diterima (bukan langsung dead letter seperti 4xx lain)",
+        stats["arrived"] == failures + 1,
+        f"tiba {stats['arrived']}x",
+    )
+    await run.check(
+        "Diterima tepat satu kali (tidak ada duplikat)", stats["accepted"] == 1, f"diterima {stats['accepted']}x"
+    )
+    await run.expect_outbox_drained(rid)
+
+
 async def s_callback_slow(run: Run) -> None:
     slow = ctx["callback_slow_seconds"]
     await run.callback("slow")
@@ -977,6 +1001,13 @@ SCENARIOS = [
         "Pusat kadang gagal sesaat (restart pod, koneksi DB-nya penuh).",
         "Callback akhir sampai tanpa tindakan manual, tepat satu kali.",
         s_callback_flaky,
+    ),
+    Scenario(
+        "callback-not-ready",
+        "Callback tiba sebelum pusat mencatat 202-nya (409)",
+        "Race: pipeline selesai sangat cepat setelah 202, pusat belum menyimpan request-nya.",
+        "409 RESULT_NOT_READY dikenali dan dikirim ulang tiap 1,5 dtk; callback akhir diterima tepat sekali.",
+        s_callback_not_ready,
     ),
     Scenario(
         "callback-slow",
