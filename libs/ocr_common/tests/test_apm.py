@@ -64,7 +64,10 @@ def test_with_a_server_url_the_agent_never_captures_bodies_or_headers(monkeypatc
     monkeypatch.setattr("elasticapm.contrib.starlette.make_apm_client", make_apm_client)
     monkeypatch.setattr(apm, "_client", None)  # restored to None afterwards, not to the fake start() installs
     settings = _settings(
-        elastic_apm_server_url="http://apm:8200", elastic_apm_secret_token="t", elastic_apm_api_key="a"
+        elastic_apm_server_url="http://apm:8200",
+        elastic_apm_secret_token="t",
+        elastic_apm_api_key="a",
+        elastic_apm_sanitize_field_names="password,*token",
     )
     app = create_app(settings=settings, title="t", description="d", service_name="scoring")
 
@@ -73,6 +76,7 @@ def test_with_a_server_url_the_agent_never_captures_bodies_or_headers(monkeypatc
     assert seen["ENVIRONMENT"] == "local"
     assert (seen["CAPTURE_BODY"], seen["CAPTURE_HEADERS"]) == ("off", False)
     assert (seen["SECRET_TOKEN"], seen["API_KEY"]) == ("t", "a")
+    assert seen["SANITIZE_FIELD_NAMES"] == "password,*token"
 
 
 def test_a_job_is_a_transaction_labelled_with_its_request_id(client):

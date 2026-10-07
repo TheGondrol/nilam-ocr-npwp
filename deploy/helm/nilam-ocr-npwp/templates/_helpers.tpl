@@ -91,6 +91,9 @@ URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 {{- $_ := set $env "ELASTIC_APM_ENVIRONMENT" (.environment | default $root.Values.environment) }}
 {{- $_ := set $env "ELASTIC_APM_TRANSACTION_SAMPLE_RATE" (.transactionSampleRate | default "1.0" | toString) }}
 {{- $_ := set $env "ELASTIC_APM_VERIFY_SERVER_CERT" (ternary "false" "true" (eq (toString .verifyServerCert) "false")) }}
+{{- if .sanitizeFieldNames }}
+{{- $_ := set $env "ELASTIC_APM_SANITIZE_FIELD_NAMES" .sanitizeFieldNames }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- range $key, $value := $root.Values.commonEnv }}

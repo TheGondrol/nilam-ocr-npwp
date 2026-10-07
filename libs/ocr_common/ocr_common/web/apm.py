@@ -44,6 +44,8 @@ def start(settings: BaseServiceSettings, service_name: str) -> Any | None:
         config["SECRET_TOKEN"] = settings.elastic_apm_secret_token
     if settings.elastic_apm_api_key:
         config["API_KEY"] = settings.elastic_apm_api_key
+    if settings.elastic_apm_sanitize_field_names:
+        config["SANITIZE_FIELD_NAMES"] = settings.elastic_apm_sanitize_field_names
     _client = make_apm_client(config)
     logger.info("Elastic APM on: service %s, server %s", config["SERVICE_NAME"], config["SERVER_URL"])
     return _client

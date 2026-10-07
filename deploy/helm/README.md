@@ -155,8 +155,10 @@ kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
   -p '{"stringData":{"ELASTIC_APM_SECRET_TOKEN":"<token>"}}'
 ```
 
-lalu isi `apm.serverUrl` (dan kalau perlu `apm.environment`, `apm.transactionSampleRate`) di
-`values-ddb-dev.yaml`, commit ke main, dan `./deploy.sh all`.
+lalu isi `apm.serverUrl` (dan kalau perlu `apm.environment`, `apm.transactionSampleRate`,
+`apm.sanitizeFieldNames`) di `values-ddb-dev.yaml`, commit ke main, dan `./deploy.sh all`. Di dev sudah terisi
+(server `http://10.213.128.39:8200`, environment `dev`); token tetap harus ada di Secret sebelum deploy, kalau tidak
+server APM menolak setiap kiriman (401) walau service tetap jalan.
 
 Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>`:
 

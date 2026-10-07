@@ -77,6 +77,8 @@ apm:
   # 1.0 = setiap request dan job dilacak; turunkan kalau volumenya besar.
   transactionSampleRate: "1.0"
   verifyServerCert: true
+  # Nama field yang disamarkan, dipisah koma, boleh wildcard (`*token`). Kosong = daftar bawaan agen.
+  sanitizeFieldNames: ""
 
 # Identitas GCP lewat Workload Identity Federation dengan Entra ID (panduan Tim SEA, wif.gcs.env), dipakai service
 # dengan `gcsModels: true` untuk mengunduh modelnya dari GCS saat start (<SERVICE>_MODEL_GCS_URI + _SHA256 di

@@ -56,6 +56,9 @@ class BaseServiceSettings(BaseSettings):
     elastic_apm_environment: str | None = None
     elastic_apm_transaction_sample_rate: float = Field(1.0, ge=0, le=1)
     elastic_apm_verify_server_cert: bool = True
+    # Comma-separated, wildcards allowed (`*token`); unset = the agent's own list. Only applies to what is captured
+    # at all, and bodies and headers never are.
+    elastic_apm_sanitize_field_names: str | None = None
 
     # GCP Workload Identity Federation with Entra ID (ocr_common/clients/gcp.py), for the models a service
     # downloads from GCS at start (*_MODEL_GCS_URI): the names of Tim SEA's guide; the secret comes from the Secret.
