@@ -54,7 +54,7 @@ def _repository(url: str, table_prefix: str, stage: str) -> SqlJobRepository:
 async def _rows(url: str, table_prefix: str = "") -> list[dict]:
     table = ocr_results_table(MetaData(), table_prefix)
     async with database.get_engine(url).connect() as conn:
-        return [dict(row) for row in (await conn.execute(select(table))).mappings().all()]
+        return [dict(row) for row in (await conn.execute(select(table).order_by(table.c.id))).mappings().all()]
 
 
 async def _row(url: str) -> dict:
@@ -166,18 +166,18 @@ async def test_a_rejection_by_the_structuring_rules_ends_the_request_with_400(ur
     )
 
 
-async def test_a_request_id_run_again_overwrites_its_row_and_keeps_created_at(url):
+async def test_a_request_id_run_again_gets_another_row_append_only(url):
     repo = _repository(url, "scoring", STAGE_SCORING)
     await repo.claim(RID)
     await repo.fail(RID, "boom")
-    first = await _row(url)
     await repo.claim(RID)
     await repo.complete(RID, {"npwp_confidence": 0.7}, outcome_data=DATA)
 
-    row = await _row(url)
-    assert (row["status_code"], row["errors"], row["data"]) == (200, None, DATA)
-    assert row["created_at"] == first["created_at"]
-    assert row["update_at"] >= first["update_at"]
+    failed, done = await _rows(url)
+    assert (failed["request_id"], failed["status_code"], failed["errors"]) == (RID, 422, "SCORING_FAILED")
+    assert (done["request_id"], done["status_code"], done["errors"], done["data"]) == (RID, 200, None, DATA)
+    assert done["id"] > failed["id"]
+    assert all(row["update_at"] == row["created_at"] for row in (failed, done))
 
 
 async def test_the_answer_is_written_in_the_job_transaction(url):

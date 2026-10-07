@@ -5,14 +5,14 @@ ends the request writes it in the same transaction as its own result: a stage th
 
 A stage only writes when the request ends with it: the last service of the pipeline_name_sequence completed, the
 structuring rules rejected the document, or a stage failed (its own work, or the hand-off to the next one). The
-`processing` state is not written, so a request_id run again keeps its earlier row until it ends again.
+`processing` state is not written. The table is append-only: a request_id run again gets another row when it ends
+again, and its newest row is its state now.
 """
 
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Table, select
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE
@@ -38,22 +38,23 @@ async def write_ocr_result(
     guardrails: int | None = None,
     pipeline_last_stage: str | None = None,
 ) -> None:
-    """Upsert the final answer of `request_id`; a row already there (the request_id run again) is overwritten
-    and keeps its `created_at`. `pipeline_last_stage` is the service that ended the request."""
+    """Append the final answer of `request_id` as a new row (the table is append-only; `update_at` =
+    `created_at`). `pipeline_last_stage` is the service that ended the request."""
     now = datetime.now(UTC)
-    values: dict[str, Any] = {
-        "status_code": status_code,
-        "status_desc": STATUS_DESC.get(status_code, "Error"),
-        "message": message,
-        "data": data,
-        "errors": errors,
-        "guardrails": guardrails,
-        "pipeline_last_stage": pipeline_last_stage,
-        "update_at": now,
-    }
-    dialect = postgresql if conn.dialect.name == "postgresql" else sqlite
-    statement = dialect.insert(table).values(request_id=request_id, created_at=now, **values)
-    await conn.execute(statement.on_conflict_do_update(index_elements=["request_id"], set_=values))
+    await conn.execute(
+        table.insert().values(
+            request_id=request_id,
+            status_code=status_code,
+            status_desc=STATUS_DESC.get(status_code, "Error"),
+            message=message,
+            data=data,
+            errors=errors,
+            guardrails=guardrails,
+            pipeline_last_stage=pipeline_last_stage,
+            created_at=now,
+            update_at=now,
+        )
+    )
 
 
 class OcrResultsOutcome:
