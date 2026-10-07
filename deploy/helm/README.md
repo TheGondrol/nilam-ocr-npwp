@@ -165,6 +165,13 @@ Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>` (atau `apm.
 
 - satu transaksi per request HTTP, dan satu transaksi `<STAGE> job` per job di latar belakang (yang berjalan
   sesudah jawaban `202`), hasilnya `done` / `failed` / `interrupted`;
+- satu transaksi `<STAGE> callback` / `<STAGE> handoff` (type `outbox`) per pengiriman oleh relay outbox, dengan
+  span HTTP ke Orkestrasi pusat / tahap berikutnya dan hasil `delivered` / `retry` / `dead` / `skipped` (`skipped`:
+  tidak ada yang dikirim, mis. DONE tahap yang bukan akhir request di format result). Inilah bukti callback ke
+  pusat benar-benar terkirim, dan jawaban HTTP-nya;
+- satu trace per request: job meneruskan trace request HTTP yang mengantrekannya, dan pesan outbox menyimpan
+  `traceparent` job-nya (tidak ikut dikirim), jadi pengiriman, request tahap berikutnya, dan job-nya ada di trace
+  yang sama;
 - span panggilan ke service lain dan ke model OCR (httpx) dan ke database (asyncpg / SQLAlchemy);
 - label `request_id` di setiap transaksi, id yang sama dengan di log; log JSON membawa `trace.id` dan
   `transaction.id` selama transaksi aktif, jadi log dan trace bisa dicocokkan;

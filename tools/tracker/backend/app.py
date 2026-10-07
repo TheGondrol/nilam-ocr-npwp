@@ -46,6 +46,7 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import chaos
+import contract
 import httpx
 import loadtest
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -677,21 +678,55 @@ def is_final(body: dict[str, Any]) -> bool:
 
 async def callback_stats(request_id: str) -> dict[str, Any]:
     """Berapa kali callback akhir request ini tiba dan diterima, dan keadaan akhir yang diterima berurutan
-    (DONE / FAILED), untuk cek duplikat dan keadaan akhir yang saling bertentangan."""
+    (DONE / FAILED), untuk cek duplikat dan keadaan akhir yang saling bertentangan; plus hasil cek kontrak
+    setiap callback yang tiba (`contract`: {format, verdict, kind, failed, warned})."""
     counts = await redis.hgetall(f"ocr:cbfinal:{request_id}")
     statuses = await redis.lrange(f"ocr:cbfinal_status:{request_id}", 0, -1)
+    reports = await redis.lrange(f"ocr:cbcontract:{request_id}", 0, -1)
     return {
         "arrived": int(counts.get("arrived", 0)),
         "accepted": int(counts.get("accepted", 0)),
         "statuses": statuses,
+        "contract": [json.loads(report) for report in reports],
     }
 
 
-async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = True, payload: Any = None):
+async def orchestrator_answer(request_id: str) -> dict[str, Any] | None:
+    """Jawaban GET /v1/extract-ocr/{request_id} orchestrator saat ini, pembanding body callback; None kalau
+    tidak terbaca."""
+    try:
+        r = await http.get(f"{ORCHESTRATOR_URL}/v1/extract-ocr/{quote(request_id)}", timeout=5.0)
+        return {"http_status": r.status_code, "body": r.json()}
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("jawaban orchestrator %s untuk cek kontrak: %s", request_id, exc)
+        return None
+
+
+def _summary(report: dict[str, Any], fmt: str) -> dict[str, Any]:
+    """Ringkasan satu cek kontrak untuk Redis dan cek skenario."""
+    return {
+        "format": fmt,
+        "verdict": report["verdict"],
+        "kind": report["kind"],
+        "failed": [c["rule"] for c in report["checks"] if c["level"] == contract.FAIL],
+        "warned": [c["rule"] for c in report["checks"] if c["level"] == contract.WARN],
+    }
+
+
+def _not_a_callback(fmt: str, body: Any, report: dict[str, Any]) -> JSONResponse:
+    """Body yang tidak bisa dikaitkan ke request mana pun: dijawab 400 seperti penerima sungguhan."""
+    log.warning("callback %s tidak terbaca, dijawab 400: %s %s", fmt, str(body)[:200], _summary(report, fmt)["failed"])
+    return JSONResponse(status_code=400, content={"detail": "body callback tidak sesuai kontrak", "contract": report})
+
+
+async def receive_callback(
+    body: dict[str, Any], *, fmt: str, report: dict[str, Any], key_ok: bool = True, payload: Any = None
+):
     """Satu callback, sudah dalam bentuk stage `{request_id, stage, status, result, error_message, error_code,
     final}`. Jawabannya mengikuti simulasi: ok -> 200, down -> 503 (relay mengulang dengan backoff), reject ->
     422 / unauthorized -> 401 (relay berhenti: dead letter), slow -> dicatat lalu 200 setelah
-    CALLBACK_SLOW_SECONDS (relay sudah timeout dan akan mengirim ulang: duplikat), flaky -> 503 lalu 200."""
+    CALLBACK_SLOW_SECONDS (relay sudah timeout dan akan mengirim ulang: duplikat), flaky -> 503 lalu 200.
+    `report` adalah hasil cek kontrak body yang tiba (contract.py); `payload` body aslinya, tampil di timeline."""
     request_id, stage, status = body["request_id"], body["stage"], body["status"]
     mode = simulation["callback"]
     final = is_final(body)
@@ -706,6 +741,8 @@ async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = Tru
     duplicate = False
     if accepted and not load_test:
         duplicate = await redis.hincrby(f"ocr:callbacks_ok:{request_id}", message_key, 1) > 1
+    if not load_test:
+        await redis.rpush(f"ocr:cbcontract:{request_id}", json.dumps(_summary(report, fmt)))
     if final and not load_test:
         await redis.hincrby(f"ocr:cbfinal:{request_id}", "arrived", 1)
         if accepted:
@@ -714,7 +751,7 @@ async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = Tru
 
     if load_test:
         # Request dari load tester: dihitung terpisah, tidak masuk daftar request dan stream event.
-        await loadtest.record_callback(body, accepted=accepted)
+        await loadtest.record_callback(body, accepted=accepted, contract_verdict=report["verdict"])
     else:
         await emit(
             request_id,
@@ -731,6 +768,7 @@ async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = Tru
             error_message=body.get("error_message"),
             error_code=body.get("error_code"),
             payload=payload,
+            contract=report,
         )
         if accepted:
             result = body.get("result")
@@ -759,8 +797,16 @@ async def receive_callback(body: dict[str, Any], *, fmt: str, key_ok: bool = Tru
 async def callback(request: Request):
     """Callback format stage (ORCHESTRATION_CALLBACK_FORMAT=stage, default lokal): satu per tahap,
     {request_id, stage, status, result, error_message, error_code, final}."""
-    body = await request.json()
-    return await receive_callback(body, fmt="stage")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    report = contract.check_stage_callback(body)
+    if not isinstance(body, dict) or not all(
+        isinstance(body.get(key), str) for key in ("request_id", "stage", "status")
+    ):
+        return _not_a_callback("stage", body, report)
+    return await receive_callback(body, fmt="stage", report=report, payload=body)
 
 
 @app.post("/v1/ocr-callback")
@@ -770,10 +816,18 @@ async def result_callback(request: Request):
     request saat berakhir, {request_id, status: completed | failed, result, guardrails, message, error_code}.
     Ditolak = completed dengan result null dan guardrails 1. Diterjemahkan ke tahap yang mengakhirinya supaya
     kartu dan cek skenario sama dengan format stage."""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
     key_ok = CALLBACK_KEY is None or request.headers.get("x-callback-key") == CALLBACK_KEY
+    if not isinstance(body, dict) or not isinstance(body.get("request_id"), str) or not body["request_id"]:
+        return _not_a_callback("result", body, contract.check_result_callback(body, key_ok=key_ok))
     request_id = body["request_id"]
     stages = pipeline_stages(await request_sequence(request_id)) or ["SCORING"]
+    # Dibandingkan dengan jawaban GET orchestrator saat callback tiba; tidak untuk ribuan request load test.
+    answer = None if request_id.startswith("LT_") else await orchestrator_answer(request_id)
+    report = contract.check_result_callback(body, key_ok=key_ok, ends_at_scoring=stages[-1] == "SCORING", answer=answer)
     rejected = body.get("status") == "completed" and body.get("result") is None and body.get("guardrails") == 1
     if body.get("status") == "completed" and not rejected:
         stage, status = stages[-1], "DONE"
@@ -796,7 +850,7 @@ async def result_callback(request: Request):
         "error_code": body.get("error_code") or (REJECTED_CODE if rejected else None),
         "final": True,
     }
-    return await receive_callback(stage_body, fmt="result", key_ok=key_ok, payload=body)
+    return await receive_callback(stage_body, fmt="result", report=report, key_ok=key_ok, payload=body)
 
 
 # --- simulation, outbox, listing ----------------------------------------------

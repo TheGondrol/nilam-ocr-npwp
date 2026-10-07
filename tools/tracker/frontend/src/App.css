@@ -138,6 +138,14 @@ button.link { background: none; border: 0; padding: 0; color: var(--processing);
 .timeline .ev.outbox .who { color: var(--processing); }
 .timeline .ev.callback .who { color: var(--done); }
 .timeline .ev.http .who { color: var(--rejected); }
+.contract { margin-top: 4px; }
+.contract summary { cursor: pointer; font-size: 0.78rem; color: var(--muted); }
+.contract summary .pill { font-size: 0.62rem; padding: 1px 6px; vertical-align: middle; }
+.contract-checks { list-style: none; margin: 6px 0 0; padding: 0; font-size: 0.76rem; }
+.contract-checks li { display: grid; grid-template-columns: 44px 1fr; gap: 8px; align-items: baseline; padding: 2px 0; }
+.contract-checks .pill { font-size: 0.58rem; padding: 1px 4px; text-align: center; text-transform: uppercase; }
+.contract-checks .detail { color: var(--muted); overflow-wrap: anywhere; }
+.contract .json pre { max-height: 280px; font-size: 0.7rem; }
 .timeline .ev.outbox.dead .what, .timeline .ev.stage.failed .what { color: var(--failed); }
 .timeline .ev.outbox.retry .what { color: var(--rejected); }
 .timeline .ev.pipeline .what { font-weight: 600; }

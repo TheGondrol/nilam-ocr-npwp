@@ -257,7 +257,7 @@ async def reconcile() -> None:
 # --- callback dari pipeline untuk request LT_ --------------------------------------
 
 
-async def record_callback(body: dict[str, Any], *, accepted: bool) -> None:
+async def record_callback(body: dict[str, Any], *, accepted: bool, contract_verdict: str = "pass") -> None:
     request_id = str(body.get("request_id", ""))
     parts = request_id.split("_", 2)
     if len(parts) < 3:
@@ -266,6 +266,8 @@ async def record_callback(body: dict[str, Any], *, accepted: bool) -> None:
     stage, status = str(body.get("stage", "")), str(body.get("status", ""))
     r = ctx["redis"]
     await r.hincrby(_key(run, "cb"), f"{stage}:{status}", 1)
+    # Hasil cek kontrak setiap callback yang tiba (bentuknya saja; tidak dibandingkan dengan jawaban GET).
+    await r.hincrby(_key(run, "contract"), contract_verdict, 1)
     if not accepted:
         return
     # Tahap terakhir sequence menandai callback DONE-nya `final: true`; body lama tanpa field itu: hanya SCORING.
@@ -333,6 +335,7 @@ async def stats(run: str) -> dict[str, Any]:
     failed = await r.hgetall(_key(run, "failed"))
     rejected = await r.hgetall(_key(run, "rejected"))
     callbacks = {k: int(v) for k, v in (await r.hgetall(_key(run, "cb"))).items()}
+    contract = {k: int(v) for k, v in (await r.hgetall(_key(run, "contract"))).items()}
 
     submitted = {s["request_id"]: float(s["started_at"]) for s in samples}
     starts = sorted(submitted.values())
@@ -366,6 +369,7 @@ async def stats(run: str) -> dict[str, Any]:
         "completed_per_minute": completed_per_minute,
         "e2e": _trend(e2e),
         "callbacks": callbacks,
+        "contract": {level: contract.get(level, 0) for level in ("pass", "warn", "fail")},
         "failures": [{"request_id": k, "reason": v} for k, v in list(failed.items())[:20]],
         "rejections": [
             {"reason": reason, "count": count} for reason, count in Counter(rejected.values()).most_common(10)
@@ -592,7 +596,7 @@ async def remove(run: str) -> dict[str, Any]:
     if task is not None:
         task.cancel()
     r = ctx["redis"]
-    await r.delete(*[_key(run, s) for s in ("samples", "status", "cb", "done", "failed", "rejected")])
+    await r.delete(*[_key(run, s) for s in ("samples", "status", "cb", "contract", "done", "failed", "rejected")])
     await r.hdel("ocr:loadtests", run)
     try:
         (LT_DIR / "out" / f"{run}.json").unlink(missing_ok=True)

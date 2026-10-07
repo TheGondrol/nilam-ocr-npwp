@@ -21,7 +21,38 @@ Untuk satu request, dari kiri ke kanan di layar:
    `last_error`, dan riwayat waktunya. Tombol *Lepaskan dead letter* menjalankan
    `UPDATE pipeline_outbox SET failed_at = NULL, next_attempt_at = now()`.
 4. **Timeline** semua event dengan `t+ms` sejak upload: commit transaksi, klaim relay,
-   handoff, callback, retry, dead letter, END.
+   handoff, callback, retry, dead letter, END. Setiap callback yang tiba membawa **cek kontrak**
+   (lihat di bawah) dan body JSON aslinya, bisa dibuka di bawah barisnya.
+
+## Cek kontrak callback
+
+Setiap callback yang tiba di tracker diperiksa terhadap kontrak "Callback Hasil OCR" yang disepakati dengan
+Orkestrasi pusat (2 Okt 2026 + jawaban 5 Okt 2026), oleh [backend/contract.py](backend/contract.py). Hasilnya
+PASS / WARN / FAIL per aturan, tampil di timeline bersama body yang benar-benar dikirim (terbuka sendiri kalau FAIL).
+
+| Callback | Yang diperiksa |
+|---|---|
+| selesai | `status: completed`, `guardrails` integer 0, `result` object; kalau pipeline berakhir di scoring: tepat `nomor_npwp` dan `nama`, masing-masing `{value: string \| null, confidence: 0 \| 1}` (integer, bukan probabilitas) |
+| ditolak (aturan structuring setelah 202) | `status: completed`, `result: null`, `guardrails` integer 1, `message` berisi alasan; `error_code` di luar kontrak, kalau ada `DOWNSTREAM_VALIDATION_ERROR` |
+| gagal | `status: failed`, `message` berisi alasan, `error_code` `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` (WARN kalau lain) |
+| semua | `X-Callback-Key` benar (kalau `TRACKER_CALLBACK_KEY` diisi), `request_id` string, tidak membawa data internal pipeline (`answer`, `traceparent`), field tambahan = WARN |
+| dibandingkan | jawaban `GET /v1/extract-ocr/{request_id}` orchestrator saat callback tiba: `result` sama persis dengan `data` 200, penolakan = 400 `DOWNSTREAM_VALIDATION_ERROR`, gagal = 422 dengan kode yang sama |
+
+Body yang tidak bisa dikaitkan ke request (bukan JSON object, tanpa `request_id`) dijawab **400**, seperti penerima
+sungguhan, jadi relay menjadikannya dead letter. Callback format stage (default lokal) bukan kontrak pusat: yang
+diperiksa hanya bentuknya. Di **skenario gangguan**, setiap skenario diakhiri cek "Body callback ... sesuai
+kontrak" untuk semua request-nya; di **load test**, tile "callback melanggar kontrak" menghitung bentuk body setiap
+callback (tanpa perbandingan GET, supaya orchestrator tidak dibebani). Uji pemeriksanya sendiri:
+`python -m pytest tools/tracker/backend`.
+
+Acuannya kode pengirim (`result_callback_body` di `libs/ocr_common/ocr_common/pipeline/callbacks.py`), **bukan**
+bagian C `docs/confluence/spesifikasi-api-ocr-npwp.xml`: bagian itu masih bentuk sebelum kesepakatan (`guardrails`
+object, `error_message`, confidence mentah, `nama_badan`).
+
+Callback di dev (GKE) tidak lewat tracker: pod mengirimnya ke Orkestrasi pusat. Bukti terkirimnya ada di Elastic
+APM: setiap pengiriman outbox adalah transaksi `<TAHAP> callback` (service `nilam-ocr-npwp`, type `outbox`) dengan
+span HTTP ke pusat dan hasilnya `delivered` / `retry` / `dead` / `skipped`, dalam trace yang sama dengan request
+dan job-nya (filter label `request_id`). Isi body tidak dikirim ke APM.
 
 Di sidebar ada **backlog outbox tiap service** (`GET /v1/<tahap>/outbox`, di-refresh 2 detik)
 dan dua simulasi:
@@ -150,11 +181,11 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | | |
 |---|---|
 | `POST /api/requests` | form `file`, `document_type`, `slow_seconds` (0 = tanpa simulasi), `pipeline_name_sequence` (JSON array; kosong = pipeline penuh; sengaja tidak divalidasi supaya 422 orchestrator bisa diperlihatkan) |
-| `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi |
+| `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi; bentuk body diperiksa (`contract`) |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
 | `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject" \| "unauthorized" \| "slow" \| "flaky"}` |
-| `POST /v1/ocr-callback` | callback format result (dev); diperiksa `X-Callback-Key` kalau `TRACKER_CALLBACK_KEY` diisi |
+| `POST /v1/ocr-callback` | callback format result (dev); diperiksa `X-Callback-Key` kalau `TRACKER_CALLBACK_KEY` diisi, dan kontraknya (event `callback` membawa `contract` dan `payload`); body tak terbaca -> 400 |
 | `GET /api/files/{token}/{nama}` | dokumen yang dikirim sebagai `file_url` |
 | `GET` / `POST /api/chaos`, `POST /api/chaos/{service}/start` | keadaan container; `{"service", "action": "stop" \| "kill", "seconds"}` (lokal saja) |
 | `GET /api/scenarios`, `POST /api/scenarios/run`, `POST /api/scenarios/stop` | daftar + hasil terakhir; `{"scenarios": [...] \| null, "image"}`; hentikan |

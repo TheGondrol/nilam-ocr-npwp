@@ -479,11 +479,53 @@ function Timeline({ events, t0 }) {
           <li key={i} className={`ev ${e.type} ${(e.status ?? '').toLowerCase()}`}>
             <span className="t">t+{fmtMs((e.ts - t0) * 1000)}</span>
             <span className="who">{e.type === 'outbox' ? 'outbox' : e.type === 'callback' ? 'callback' : e.type === 'http' ? 'http' : e.stage.toLowerCase()}</span>
-            <span className="what">{describe(e, t0)}</span>
+            <div className="what">
+              {describe(e, t0)}
+              {e.type === 'callback' && e.contract && <ContractCheck report={e.contract} body={e.payload} />}
+            </div>
           </li>
         ))}
       </ol>
     </section>
+  )
+}
+
+const CONTRACT_LABEL = { pass: 'sesuai kontrak', warn: 'sesuai kontrak, ada catatan', fail: 'MELANGGAR kontrak' }
+const CALLBACK_KIND = {
+  completed: 'completed (selesai)',
+  rejected: 'completed, result null (ditolak)',
+  failed: 'failed',
+  stage: 'format stage (lokal, bukan kontrak pusat)',
+  invalid: 'tidak terbaca',
+}
+
+// Hasil cek kontrak satu callback (backend/contract.py) dan body JSON yang benar-benar tiba. Terbuka sendiri
+// kalau melanggar.
+function ContractCheck({ report, body }) {
+  const passed = report.checks.filter((c) => c.level === 'pass').length
+  return (
+    <details className={`contract ${report.verdict}`} open={report.verdict === 'fail'}>
+      <summary>
+        <span className={`pill level-${report.verdict}`}>{CONTRACT_LABEL[report.verdict] ?? report.verdict}</span>{' '}
+        {CALLBACK_KIND[report.kind] ?? report.kind} · {passed}/{report.checks.length} cek lulus · body JSON
+      </summary>
+      <ul className="contract-checks">
+        {report.checks.map((c, i) => (
+          <li key={i}>
+            <span className={`pill level-${c.level}`}>{c.level}</span>
+            <span>
+              {c.rule}
+              {c.detail && <span className="detail"> · {c.detail}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {body != null && (
+        <div className="json">
+          <pre>{JSON.stringify(body, null, 2)}</pre>
+        </div>
+      )}
+    </details>
   )
 }
 
@@ -897,6 +939,14 @@ function LoadTest({ overview, nav }) {
                 <Tile k="tuntas" v={d.completed} s={pct(d.completed, sent)} cls="done" />
                 <Tile k="ditolak" v={d.rejected ?? 0} s="model guardrails / aturan structuring" cls="rejected" />
                 <Tile k="gagal" v={d.failed} s="callback FAILED, bukan penolakan" cls="failed" />
+                {d.contract && (
+                  <Tile
+                    k="callback melanggar kontrak"
+                    v={d.contract.fail}
+                    s={`${d.contract.pass} sesuai, ${d.contract.warn} dengan catatan (bentuk body saja)`}
+                    cls={d.contract.fail ? 'failed' : 'done'}
+                  />
+                )}
                 <Tile k="dalam proses" v={d.in_flight} s="pipeline jalan, belum tuntas / gagal / ditolak" cls="processing" />
                 <Tile
                   k="dokumen / menit"

@@ -278,6 +278,24 @@ class Run:
         await self.save()
         return ok
 
+    async def check_contract(self) -> None:
+        """Setelah setiap skenario: body setiap callback yang tiba untuk request skenario ini sesuai kontrak
+        (contract.py). Request tanpa callback (ditolak guardrails, jawaban sinkron saja) dilewati."""
+        for request_id in self.request_ids:
+            reports = (await ctx["callback_stats"](request_id))["contract"]
+            if not reports:
+                continue
+            failed = sorted({rule for report in reports for rule in report["failed"]})
+            warned = sorted({rule for report in reports for rule in report["warned"]})
+            detail = f"{len(reports)} callback ({reports[-1]['format']}, {reports[-1]['kind']})"
+            if failed:
+                detail += f"; melanggar: {'; '.join(failed)}"
+            elif warned:
+                detail += f"; perlu diketahui: {'; '.join(warned)}"
+            await self.check(
+                f"Body callback {request_id} sesuai kontrak", not failed and not warned, detail, warn=not failed
+            )
+
     async def note(self, label: str, detail: str, *, level: str = "info") -> None:
         """Temuan yang bukan lulus / gagal: info, atau warn untuk hal yang harus diketahui Orkestrasi pusat."""
         self.checks.append(
@@ -1074,6 +1092,7 @@ async def _run_all(ids: list[str], image: tuple[bytes, str, str]) -> None:
         await run.save()
         try:
             await scenario.run(run)
+            await run.check_contract()
             levels = {check["level"] for check in run.checks}
             run.status = "fail" if "fail" in levels else "warn" if "warn" in levels else "pass"
         except Aborted:
