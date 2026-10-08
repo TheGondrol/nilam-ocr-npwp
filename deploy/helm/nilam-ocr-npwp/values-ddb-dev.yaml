@@ -43,11 +43,12 @@ commonEnv:
 # (deploy/helm/README.md, "Model dari GCS"). Opsi ambil-saat-start (gcpWif, *_MODEL_GCS_URI) tidak dipakai di dev.
 
 # Server Elastic APM dev (7 Okt 2026). Secret token di Secret nilam-ocr-npwp-secrets (ELASTIC_APM_SECRET_TOKEN),
-# bukan di sini. Satu service name untuk kelima service (permintaan 7 Okt 2026); service mana yang melayani
-# terlihat dari service.node.name (nama pod). environment diisi eksplisit: `environment` di atas bernilai production.
+# bukan di sini. Satu service name untuk kelima service, ocr-npwp seperti service OCR lain (ocr-ktp, ...;
+# 8 Okt 2026, sebelumnya nilam-ocr-npwp); service mana yang melayani terlihat dari service.node.name (nama pod).
+# environment diisi eksplisit: `environment` di atas bernilai production.
 apm:
   serverUrl: http://10.213.128.39:8200
-  serviceName: nilam-ocr-npwp
+  serviceName: ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
 
