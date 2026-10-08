@@ -132,7 +132,7 @@ Client ─► Orkestrasi pusat: generate request_id · POST url file + document_
 Orkestrasi pusat ─► orchestrator:8034 POST /v1/extract-ocr             SATU-SATUNYA PANGGILAN
                 (request_id, document_type, params, file | file_url)
    orchestrator: file_url? unduh sekali dari MinIO (host di FILE_URL_ALLOWED_HOSTS) : pakai file
-                > MAX_UPLOAD_BYTES (2,5 MB)        ◄─ 413 "Ukuran dokumen melebihi batas ..."   (sebelum guardrails)
+                > MAX_UPLOAD_BYTES (10 MB)         ◄─ 413 "Ukuran dokumen melebihi batas ..."   (sebelum guardrails)
                 PDF > MAX_DOCUMENT_PAGES (2)       ◄─ 400 "Jumlah halaman melebihi batas ..."   (sebelum guardrails)
                 ─► guardrails:8031 POST /v1/guardrails/check (file + request_id), SINKRON
                      hanya model guardrails per halaman ◄─ 200 {passed, reason, document, pages}
@@ -306,7 +306,7 @@ Semua service (`ocr_common.config.BaseServiceSettings`):
 | `AUTH_DISABLED` | Tidak | `false` | `true` = pemeriksaan `X-API-Key` dimatikan. Hanya diterima dengan `ENVIRONMENT=local`; service mencatat peringatan saat start. `API_KEY` tetap wajib karena dipakai sebagai key keluar |
 | `SERVICE_BASE_URL` | Tidak | – | Nilai `servers` di OpenAPI (`/docs`) |
 | `PORT` | Tidak | per service | orchestrator 8034, extraction 8030, guardrails 8031, structuring 8032, scoring 8033 |
-| `MAX_UPLOAD_BYTES` | Tidak | `2621440` (2,5 MB) | Berlaku untuk `file` maupun `file_url`. Lebih besar → **413** `Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`, sebelum model apa pun jalan. Angka dari ML engineer (NPWP umumnya 1–2 MB, ada yang 2,1 MB) |
+| `MAX_UPLOAD_BYTES` | Tidak | `10485760` (10 MB) | Berlaku untuk `file` maupun `file_url`. Lebih besar → **413** `Ukuran dokumen melebihi batas 10 MB, pastikan hanya mengunggah dokumen NPWP`, sebelum model apa pun jalan. Dinaikkan dari 2,5 MB pada 8 Okt 2026 (NPWP umumnya 1–2 MB, ada yang 2,1 MB, menurut ML engineer) |
 | `FILE_URL_ALLOWED_HOSTS` | Produksi: ya, kalau `file_url` menunjuk storage internal; **di orchestrator dan extraction**, karena orchestrator mengunduhnya untuk cek guardrails lalu meneruskan `file_url` ke extraction | – | Host yang boleh diunduh lewat `file_url`, dipisah koma; entri berawalan titik (`.example.internal`) = semua subdomain. Host terdaftar boleh resolve ke IP privat (MinIO internal), tapi tidak ke loopback / link-local (metadata server). Kosong = hanya host yang resolve ke alamat publik. Di `ENVIRONMENT=local` pemeriksaan alamat dimatikan. Redirect tidak pernah diikuti |
 | `ALLOWED_CONTENT_TYPES` | Tidak | `["image/jpeg","image/jpg","image/png","application/pdf"]` | JSON list |
 

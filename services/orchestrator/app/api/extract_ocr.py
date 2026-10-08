@@ -183,7 +183,7 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
         "dicek kembali`. A single-word name or a letter in the number is tolerated: the fields are returned, and "
         "the trust model's confidence already accounts for it.\n\n"
         "**Refused before anything runs** (plain error envelope, no `guardrails`): a document above "
-        "`MAX_UPLOAD_BYTES` (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
+        "`MAX_UPLOAD_BYTES` (10 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` "
         "(2) pages answers `400`, both with an Indonesian `message` the client can show as is.\n\n"
         "**Which services run: `pipeline_name_sequence`.** The services of this request, in order: `guardrails`, "
         "`extraction`, `structuring`, `scoring`. Guardrails may be left out at the front and the end cut off, "
@@ -237,8 +237,8 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
         401: UNAUTHORIZED,
         413: error(
             413,
-            "The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started",
-            PAYLOAD_TOO_LARGE_MESSAGE.format(limit="2,5 MB"),
+            "The document exceeds `MAX_UPLOAD_BYTES` (10 MB by default); nothing was started",
+            PAYLOAD_TOO_LARGE_MESSAGE.format(limit="10 MB"),
         ),
         422: {
             "model": ExtractOcrResponse,

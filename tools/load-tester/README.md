@@ -36,7 +36,7 @@ Unggahan dikelola dari sidebar menu **Load testing**: unggah (klik atau seret, J
 setelah run, file yang sama perlu diunggah ulang untuk run berikutnya. Nama file dirapikan
 (karakter selain huruf, angka, `._-` jadi `_`) dan tidak pernah menimpa file di kedua folder
 (diberi akhiran `-1`, `-2`, ...). File yang dipakai run yang sedang berjalan tidak bisa dihapus.
-File di atas 2,5 MB (default `MAX_UPLOAD_BYTES` service) ditandai karena akan dijawab 413; itu
+File di atas 10 MB (default `MAX_UPLOAD_BYTES` service) ditandai karena akan dijawab 413; itu
 sengaja dibiarkan bisa diunggah untuk menguji jalur penolakan. Endpoint-nya:
 `POST /api/loadtest/images` (multipart, field `files`), `GET` dan `DELETE /api/loadtest/images/{nama}`,
 dan `DELETE /api/loadtest/assets` untuk menghapus semua unggahan yang tertinggal (mis. setelah backend

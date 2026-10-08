@@ -29,7 +29,7 @@ const STATUS_BUCKETS = [
   { key: 'timeout', label: 'Timeout', color: '#64748b' },
 ]
 
-const SERVICE_UPLOAD_LIMIT = 2.5 * 1024 * 1024
+const SERVICE_UPLOAD_LIMIT = 10 * 1024 * 1024
 
 function pct(n, total) {
   return total ? `${((100 * n) / total).toFixed(1)}%` : '-'

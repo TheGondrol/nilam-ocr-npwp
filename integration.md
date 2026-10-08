@@ -69,7 +69,7 @@ kalian. Orchestrator memeriksa file, meminta guardrails menilainya, lalu menungg
 `PIPELINE_WAIT_SECONDS` (default **15 detik**, dihitung sejak request diterima):
 
     POST :8034/v1/extract-ocr
-      file > 2,5 MB              -> 413  message "Ukuran dokumen melebihi batas 2,5 MB, ..." (sebelum model)
+      file > 10 MB               -> 413  message "Ukuran dokumen melebihi batas 10 MB, ..." (sebelum model)
       PDF > 2 halaman            -> 400  message "Jumlah halaman melebihi batas, ..."        (sebelum model)
       ditolak model guardrails   -> 400  errors = DOWNSTREAM_VALIDATION_ERROR, guardrails = 1
                                          tidak ada yang jalan, tidak ada callback
@@ -161,7 +161,7 @@ Sejak 1 Oktober 2026 jawaban tidak lagi membawa `document_type`, `job_status`, d
 |---|---|---|
 | `request_id` | ya | dibuat oleh kalian |
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
-| `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
+| `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **10 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
 | `guardrails_confidence_threshold` | tidak | JSON object per guardrails, `{"acc_rej": 0.8}`: pipeline ini punya satu guardrails, `acc_rej` (accept/reject), jadi hanya key itu yang valid. Nilainya angka di antara 0 dan 1 (eksklusif): threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold (`guardrails: 0`), ditolak kalau di bawahnya (`guardrails: 1`). **Tidak dikirim** (kesepakatan 8 Okt 2026): dokumen **selalu diterima** apa pun kata model, dan `guardrails` di jawaban berisi **probabilitas accept** model (float 4 desimal, halaman terendah), bukan 0 / 1 |
 | `column_confidence_threshold` | tidak | JSON object, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya, `0` kalau di bawahnya. Key `all_field` berlaku untuk semua field (`{"all_field": 0.8}`); key per field `nomor_npwp` / `nama` boleh dipakai sebagai gantinya atau bersamaan, dan key per field menang atas `all_field`. Field yang tidak disebut, atau field ini tidak dikirim sama sekali: `confidence` field itu berisi **probabilitas trust model** (float 4 desimal, 0–1), bukan 0 / 1 (kesepakatan 8 Okt 2026) |
@@ -213,7 +213,7 @@ dengan jawaban POST-nya (200 dengan laporan guardrails sebagai `data`).
 langsung masuk pipeline. Keputusannya sepenuhnya di kalian: kami tidak punya pengaturan yang
 menolaknya. OCR (`extraction`) tidak bisa dilewati. Yang tetap berlaku:
 
-- pengecekan file: tipe, 2,5 MB (413), dan 2 halaman (400);
+- pengecekan file: tipe, 10 MB (413), dan 2 halaman (400);
 - aturan structuring: dokumen blur / blank, kode wilayah salah, dan seterusnya tetap dijawab 400
   `DOWNSTREAM_VALIDATION_ERROR` dengan `guardrails: 1`. Nilai `guardrails: 1` dalam kasus ini hanya
   bisa berasal dari aturan structuring.
@@ -321,7 +321,7 @@ Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks 
 | 400 | `TOO_MANY_PAGES` | PDF lebih dari 2 halaman (`Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 400 | `INVALID_FILE_SOURCE` | `file` dan `file_url` dua-duanya, atau tidak ada | tidak |
 | 400 | `FILE_URL_REJECTED` | host `file_url` tidak diizinkan, atau tidak bisa diunduh | tidak |
-| 413 | `FILE_TOO_LARGE` | file lebih dari 2,5 MB (`Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
+| 413 | `FILE_TOO_LARGE` | file lebih dari 10 MB (`Ukuran dokumen melebihi batas 10 MB, pastikan hanya mengunggah dokumen NPWP`) | tidak |
 | 401 | `UNAUTHORIZED` | `X-API-Key` salah atau tidak ada | tidak |
 | 422 | `INVALID_PIPELINE_SEQUENCE` | `pipeline_name_sequence` melanggar aturan urutan; `message` menyebut alasannya | tidak |
 | 422 | `INVALID_THRESHOLD` | `guardrails_confidence_threshold` / `column_confidence_threshold` tidak bisa dibaca; `message` menyebut alasannya | tidak |
@@ -627,7 +627,7 @@ penjelasan yang aman untuk di-log.
 | Kode | Arti |
 |---|---|
 | 400 | file bermasalah (kosong, tipe tidak didukung, lebih dari 2 halaman) atau intake salah |
-| 413 | file lebih dari 2,5 MB |
+| 413 | file lebih dari 10 MB |
 | 401 | `X-API-Key` salah atau tidak ada |
 | 404 | `request_id` tidak dikenal di tahap itu |
 | 422 | body atau field tidak valid |

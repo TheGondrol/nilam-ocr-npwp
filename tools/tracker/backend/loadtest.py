@@ -44,7 +44,7 @@ K6_TARGET = os.environ.get("K6_TARGET", "http://orchestrator:8034")
 K6_TRACKER = os.environ.get("K6_TRACKER") or f"http://host.docker.internal:{os.environ.get('PORT', '8090')}"
 K6_API_KEY = os.environ.get("K6_API_KEY", "")
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".pdf")
-# Batas tracker sendiri, sengaja di atas MAX_UPLOAD_BYTES service (2,5 MB) supaya file besar tetap
+# Batas tracker sendiri, sengaja di atas MAX_UPLOAD_BYTES service (10 MB) supaya file besar tetap
 # bisa diunggah untuk menguji jawaban 413.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_RATE = 50.0

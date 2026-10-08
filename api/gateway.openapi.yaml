@@ -131,7 +131,7 @@ paths:
 
 
         **Refused before anything runs** (plain error envelope, no `guardrails`): a document above `MAX_UPLOAD_BYTES`
-        (2.5 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` (2) pages answers `400`,
+        (10 MB by default) answers `413`, one with more than `MAX_DOCUMENT_PAGES` (2) pages answers `400`,
         both with an Indonesian `message` the client can show as is.
 
 
@@ -260,7 +260,7 @@ paths:
                 errors: UNAUTHORIZED
                 pipeline_last_stage: orchestrator
         '413':
-          description: The document exceeds `MAX_UPLOAD_BYTES` (2.5 MB by default); nothing was started
+          description: The document exceeds `MAX_UPLOAD_BYTES` (10 MB by default); nothing was started
           content:
             application/json:
               schema:
@@ -268,7 +268,7 @@ paths:
               example:
                 status_code: 413
                 status_desc: Payload Too Large
-                message: Ukuran dokumen melebihi batas 2,5 MB, pastikan hanya mengunggah dokumen NPWP
+                message: Ukuran dokumen melebihi batas 10 MB, pastikan hanya mengunggah dokumen NPWP
                 errors: FILE_TOO_LARGE
                 pipeline_last_stage: orchestrator
         '422':

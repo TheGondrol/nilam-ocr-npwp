@@ -93,7 +93,7 @@ def _parse_sequence(raw: str | None) -> list[str] | None:
         "which hands it to scoring. The caller does nothing more: it receives one callback per stage, and the final result in "
         "the `SCORING` callback (see *Webhooks*).\n\n"
         "**Document.** Send `file` (multipart) or `file_url`, exactly one. JPEG, PNG or PDF, at most "
-        "`MAX_UPLOAD_BYTES` (2.5 MB). "
+        "`MAX_UPLOAD_BYTES` (10 MB). "
         "`file_url` is downloaded in the background, so make a presigned URL live longer than the worst queueing "
         "time; an expired or unreachable URL becomes a `FAILED` job, not a `4xx`.\n\n"
         "**Idempotency.** The same request_id again answers `202` with `duplicate: true` and does not run OCR "
