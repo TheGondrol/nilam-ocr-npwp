@@ -157,9 +157,9 @@ kubectl -n nilam-ocr-npwp patch secret nilam-ocr-npwp-secrets --type merge \
 
 lalu isi `apm.serverUrl` (dan kalau perlu `apm.environment`, `apm.transactionSampleRate`,
 `apm.sanitizeFieldNames`) di `values-ddb-dev.yaml`, commit ke main, dan `./deploy.sh all`. Di dev sudah terisi
-(server `http://10.213.128.39:8200`, versi 9.2.0, environment `dev`, satu service name `ocr-npwp` untuk
-kelima service, seragam dengan service OCR lain; token sudah di Secret sejak 7 Okt 2026). Tanpa token di Secret,
-server APM menolak setiap kiriman (401) walau service tetap jalan.
+(server `http://10.213.128.39:8200`, versi 9.2.0, environment `dev`, satu service name `nilam-ocr-npwp` untuk
+kelima service; token sudah di Secret sejak 7 Okt 2026). Tanpa token di Secret, server APM menolak setiap kiriman
+(401) walau service tetap jalan.
 
 Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>` (atau `apm.serviceName` kalau diisi):
 
