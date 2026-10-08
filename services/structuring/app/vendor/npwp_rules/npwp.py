@@ -48,7 +48,8 @@ PROVINCE_CODES = {
     "64": "Kalimantan Timur", "65": "Kalimantan Utara", "71": "Sulawesi Utara",
     "72": "Sulawesi Tengah", "73": "Sulawesi Selatan", "74": "Sulawesi Tenggara",
     "75": "Gorontalo", "76": "Sulawesi Barat", "81": "Maluku", "82": "Maluku Utara",
-    "91": "Papua", "92": "Papua Barat",
+    "91": "Papua", "92": "Papua Barat", "93": "Papua Selatan", "94": "Papua Tengah",
+    "95": "Papua Pegunungan", "96": "Papua Barat Daya",
 }
 
 _AMBIGUOUS_DIGIT = "T"
