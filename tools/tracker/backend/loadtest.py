@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import time
 from collections import Counter
 from pathlib import Path
@@ -132,12 +133,24 @@ def _image_path(name: str) -> Path:
     return upload if upload.is_file() else SAMPLES_DIR / name
 
 
+def _sync_docker(*args: str) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(
+            ["docker", *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120.0,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except Exception as exc:
+        return 1, str(exc)
+
+
 async def _docker(*args: str) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-    )
-    out, _ = await proc.communicate()
-    return proc.returncode or 0, out.decode("utf-8", "replace").strip()
+    return await asyncio.to_thread(_sync_docker, *args)
 
 
 async def _meta(run: str) -> dict[str, Any] | None:

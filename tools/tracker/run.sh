@@ -119,8 +119,15 @@ for svc in "orchestrator|$ORCHESTRATOR_URL" "guardrails|$GUARDRAILS_URL" "extrac
   up "$url/health" || warn "service $name ($url) tidak menjawab; tahap itu akan gagal"
 done
 
-python -c "import fastapi, httpx, redis" 2>/dev/null \
-  || { say "memasang dependency backend"; python -m pip install -q -r "$HERE/backend/requirements.txt"; }
+PYTHON_BIN="python"
+if [[ -f "$ROOT/.venv/Scripts/python.exe" ]]; then
+  PYTHON_BIN="$ROOT/.venv/Scripts/python.exe"
+elif [[ -f "$ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT/.venv/bin/python"
+fi
+
+"$PYTHON_BIN" -c "import fastapi, httpx, redis" 2>/dev/null \
+  || { say "memasang dependency backend"; "$PYTHON_BIN" -m pip install -q -r "$HERE/backend/requirements.txt"; }
 [[ -d "$HERE/frontend/node_modules" ]] \
   || { say "memasang dependency frontend"; (cd "$HERE/frontend" && npm install --no-audit --no-fund); }
 
@@ -137,7 +144,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 say "backend  -> http://127.0.0.1:$BACKEND_PORT"
-PORT="$BACKEND_PORT" python "$HERE/backend/app.py" &
+PORT="$BACKEND_PORT" "$PYTHON_BIN" "$HERE/backend/app.py" &
 BACKEND_PID=$!
 
 say "frontend -> http://127.0.0.1:$FRONTEND_PORT"

@@ -23,7 +23,9 @@ Setiap event punya `type`:
     http      jawaban orchestrator /v1/extract-ocr (200 / 202 / 400 / 422) dan lamanya, plus pipeline_last_stage
     stage     status tahap (PROCESSING / DONE / FAILED / REJECTED; GUARDRAILS SKIPPED kalau tidak ada di
               sequence), `source`: db | callback. Request berakhir di tahap terakhir sequence-nya
-    outbox    baris nilam_pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DELIVERED / DEAD / RELEASED
+    outbox    baris nilam_pipeline_outbox request ini: QUEUED / CLAIMED / RETRY / DEAD / RELEASED dari tabel
+              (`source` kosong), DELIVERED / SKIPPED dari log relay (`source: log`, mode lokal, outbox_logs.py;
+              tanpa log: DELIVERED saat barisnya hilang dari tabel)
     callback  tiap callback yang datang ke tracker, dengan attempt ke-n, jawaban tracker, dan duplicate
     chaos     gangguan yang terjadi selama request hidup (container di-stop / di-kill / dinyalakan, DB tak terbaca)
     pipeline  END: tidak ada lagi yang akan terjadi untuk request ini
@@ -39,8 +41,15 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
+
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 from contextlib import asynccontextmanager
 from typing import Any, cast
 from urllib.parse import quote
@@ -49,6 +58,7 @@ import chaos
 import contract
 import httpx
 import loadtest
+import outbox_logs
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
@@ -101,11 +111,34 @@ POLL = os.environ.get("TRACKER_POLL") == "1"
 POLL_INTERVAL = float(os.environ.get("TRACKER_POLL_INTERVAL", "2"))
 POLL_TIMEOUT = float(os.environ.get("TRACKER_POLL_TIMEOUT", "300"))
 WAIT_SECONDS = float(os.environ.get("TRACKER_WAIT_SECONDS", "15"))  # = PIPELINE_WAIT_SECONDS orchestrator, untuk label
-DB_URL = os.environ.get("TRACKER_DATABASE_URL") or (
-    f"postgresql://postgres:changeme@127.0.0.1:{os.environ.get('POSTGRES_HOST_PORT', '5433')}/bribrain_ocr_nilam"
-    if TARGET == "local"
-    else ""
-)
+
+
+def resolve_db_url() -> str:
+    target = os.environ.get("TRACKER_TARGET", "local")
+    raw = (os.environ.get("TRACKER_DATABASE_URL") or "").strip()
+    if target == "gke":
+        return raw
+    # Mode lokal: otomatis ke Postgres docker-compose.db.yml (127.0.0.1:${POSTGRES_HOST_PORT:-5433})
+    # kecuali TRACKER_DATABASE_URL secara eksplisit menunjuk localhost / 127.0.0.1
+    if raw and ("127.0.0.1" in raw or "localhost" in raw):
+        return raw
+    port = os.environ.get("POSTGRES_HOST_PORT", "5433")
+    return f"postgresql://postgres:changeme@127.0.0.1:{port}/bribrain_ocr_nilam"
+
+
+def db_host_label(url: str) -> str:
+    if not url:
+        return "tidak diset (kosong)"
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        return f"{parsed.hostname}:{parsed.port or 5432} ({parsed.path.lstrip('/')})"
+    except Exception:
+        return url
+
+
+DB_URL = resolve_db_url()
 DB_INTERVAL = float(os.environ.get("TRACKER_DB_INTERVAL", "0.25"))
 DB_WATCH_TIMEOUT = float(os.environ.get("TRACKER_DB_WATCH_TIMEOUT", "900"))
 
@@ -135,13 +168,24 @@ FILE_BASE_URL = (
     os.environ.get("TRACKER_FILE_BASE_URL") or f"http://host.docker.internal:{os.environ.get('PORT', '8090')}"
 )
 MAX_FILES = 200
+# Mode lokal: hasil kirim setiap pesan outbox dibaca dari log relay (outbox_logs.py), karena barisnya di jalur normal
+# terhapus sebelum watcher DB sempat membacanya. 0 = hanya dari tabel.
+OUTBOX_LOGS = os.environ.get("TRACKER_OUTBOX_LOGS", "1") != "0"
+# Jeda sebelum END supaya baris log pengiriman terakhir (docker logs -f sedikit tertinggal) masuk sebelum SSE ditutup.
+OUTBOX_LOG_GRACE_SECONDS = 1.0
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global outbox_follower
     await get_pool()
     await loadtest.reconcile()
+    if TARGET == "local" and OUTBOX_LOGS:
+        outbox_follower = outbox_logs.OutboxLogFollower(emit, known_request, chaos.container)
+        outbox_follower.start()
     yield
+    if outbox_follower is not None:
+        await outbox_follower.stop()
     for task in watchers.values():
         task.cancel()
     await http.aclose()
@@ -162,6 +206,16 @@ watchers: dict[str, asyncio.Task[None]] = {}
 files: dict[str, tuple[bytes, str]] = {}  # token -> (isi, content type) untuk file_url
 pool: Any = None
 db_error: str | None = None
+outbox_follower: outbox_logs.OutboxLogFollower | None = None
+
+
+async def known_request(request_id: str) -> bool:
+    """Request yang dikirim lewat tracker ini (bukan load test, bukan request orang lain di stack yang sama)."""
+    return bool(await redis.hexists("ocr:requests", request_id))
+
+
+def outbox_from_logs() -> bool:
+    return outbox_follower is not None and outbox_follower.active
 
 
 # --- event bus -----------------------------------------------------------------
@@ -334,6 +388,7 @@ async def watch_db(request_id: str) -> None:
     last = stages[-1]
     seen_jobs: dict[str, tuple[str, int]] = {}
     seen_rows: dict[int, dict[str, Any]] = {}
+    seen_ocr_rows: set[str] = set()
     rejected = False
     deadline = time.time() + DB_WATCH_TIMEOUT
     db_down = False
@@ -348,6 +403,10 @@ async def watch_db(request_id: str) -> None:
                 rows = await conn.fetch(
                     "SELECT id, stage, kind, payload, attempts, next_attempt_at, failed_at, last_error, created_at "
                     "FROM nilam_pipeline_outbox WHERE request_id = $1 ORDER BY id",
+                    request_id,
+                )
+                ocr_records = await conn.fetch(
+                    "SELECT * FROM nilam_ocr_results WHERE request_id = $1 ORDER BY created_at ASC",
                     request_id,
                 )
         except Exception as exc:  # noqa: BLE001 - skenario Postgres mati: tunggu sampai terbaca lagi
@@ -381,6 +440,35 @@ async def watch_db(request_id: str) -> None:
                 error_message=reject_reason or job["error_message"],
             )
 
+        for ocr_rec in ocr_records:
+            r_dict = dict(ocr_rec)
+            key_ocr = f"{r_dict.get('request_id')}:{r_dict.get('status_code')}:{r_dict.get('created_at')}"
+            if key_ocr not in seen_ocr_rows:
+                seen_ocr_rows.add(key_ocr)
+                p_data = r_dict.get("data")
+                if isinstance(p_data, str):
+                    try:
+                        p_data = json.loads(p_data)
+                    except Exception:
+                        pass
+                await emit(
+                    request_id,
+                    "DATABASE",
+                    "OCR_RESULT",
+                    type="ocr_results",
+                    row={
+                        "status_code": r_dict.get("status_code"),
+                        "status_desc": r_dict.get("status_desc"),
+                        "message": r_dict.get("message"),
+                        "guardrails": r_dict.get("guardrails"),
+                        "pipeline_last_stage": r_dict.get("pipeline_last_stage"),
+                        "created_at": _iso(r_dict.get("created_at")),
+                        "update_at": _iso(r_dict.get("update_at")),
+                        "errors": r_dict.get("errors"),
+                        "data": p_data,
+                    },
+                )
+
         current = {row["id"]: _outbox_view(row) for row in rows}
         for row_id, view in current.items():
             before = seen_rows.get(row_id)
@@ -397,7 +485,11 @@ async def watch_db(request_id: str) -> None:
             seen_rows[row_id] = view
         for row_id in list(seen_rows):
             if row_id not in current:
-                await emit(request_id, "OUTBOX", "DELIVERED", type="outbox", message=seen_rows.pop(row_id))
+                gone = seen_rows.pop(row_id)
+                # Baris hilang = terkirim (atau tidak perlu dikirim). Kalau log relay diikuti, hasil persisnya
+                # (delivered / skipped, attempt ke berapa) datang dari sana.
+                if not outbox_from_logs():
+                    await emit(request_id, "OUTBOX", "DELIVERED", type="outbox", message=gone)
 
         statuses = {stage: job["status"] for stage, job in jobs.items() if job is not None}
         # Request berakhir di tahap terakhir sequence-nya (SCORING kalau pipeline penuh).
@@ -408,6 +500,8 @@ async def watch_db(request_id: str) -> None:
         # sepersekian detik setelah tahap itu DONE. END menutup SSE; tunda sampai jawaban itu tercatat
         # supaya event GUARDRAILS DONE tidak tertulis di belakang END dan kartu tidak tersangkut PENDING.
         if finished and not pending and await guardrails_answered(request_id):
+            if outbox_from_logs():
+                await asyncio.sleep(OUTBOX_LOG_GRACE_SECONDS)
             await emit(request_id, "PIPELINE", "END", type="pipeline", dead_letters=len(dead))
             return
         await asyncio.sleep(DB_INTERVAL)
@@ -884,6 +978,7 @@ async def get_simulation():
         "wait_seconds": WAIT_SECONDS,
         "database": pool is not None,
         "database_error": db_error,
+        "db_host": db_host_label(DB_URL),
         "callback_slow_seconds": CALLBACK_SLOW_SECONDS,
         "callback_flaky_failures": CALLBACK_FLAKY_FAILURES,
         "callback_not_ready_failures": CALLBACK_NOT_READY_FAILURES,
@@ -948,6 +1043,85 @@ async def list_requests():
     rows = [json.loads(v) for v in (await redis.hgetall("ocr:requests")).values()]
     rows.sort(key=lambda r: r.get("created_at", 0), reverse=True)
     return rows[:50]
+
+
+@app.delete("/api/requests/{request_id}")
+async def delete_request(request_id: str):
+    """Hapus satu request dari ringkasan Redis dan stream event-nya, serta bersihkan nilam_ocr_results bila ada."""
+    await redis.hdel("ocr:requests", request_id)
+    await redis.delete(f"ocr:events:{request_id}")
+    stop_watcher(request_id)
+
+    db = await get_pool()
+    if db is not None:
+        try:
+            async with db.acquire() as conn:
+                await conn.execute("DELETE FROM nilam_ocr_results WHERE request_id = $1", request_id)
+        except Exception as exc:
+            log.warning("cannot delete nilam_ocr_results for %s: %s", request_id, exc)
+
+    return {"ok": True, "request_id": request_id}
+
+
+@app.delete("/api/requests")
+async def clear_requests():
+    """Hapus seluruh riwayat request dari Redis (dan stream-stream event-nya)."""
+    raw_keys = await redis.hkeys("ocr:requests")
+    for k in raw_keys:
+        rid = k.decode() if isinstance(k, bytes) else str(k)
+        await redis.delete(f"ocr:events:{rid}")
+        stop_watcher(rid)
+    await redis.delete("ocr:requests")
+    return {"ok": True, "count": len(raw_keys)}
+
+
+@app.get("/api/requests/{request_id}/ocr-results")
+async def get_ocr_results(request_id: str):
+    """Ambil baris nilam_ocr_results untuk request_id ini langsung dari PostgreSQL."""
+    db = await get_pool()
+    if db is None:
+        return {
+            "available": False,
+            "error": db_error or "Database PostgreSQL tidak terhubung",
+            "target": TARGET,
+            "db_host": db_host_label(DB_URL),
+            "rows": [],
+        }
+    try:
+        async with db.acquire() as conn:
+            records = await conn.fetch(
+                "SELECT * FROM nilam_ocr_results WHERE request_id = $1 ORDER BY created_at ASC",
+                request_id,
+            )
+            rows = []
+            for r in records:
+                row_dict = dict(r)
+                if "created_at" in row_dict:
+                    row_dict["created_at"] = _iso(row_dict["created_at"])
+                if "update_at" in row_dict:
+                    row_dict["update_at"] = _iso(row_dict["update_at"])
+                if isinstance(row_dict.get("data"), str):
+                    try:
+                        row_dict["data"] = json.loads(row_dict["data"])
+                    except Exception:
+                        pass
+                rows.append(row_dict)
+            return {
+                "available": True,
+                "target": TARGET,
+                "db_host": db_host_label(DB_URL),
+                "count": len(rows),
+                "rows": rows,
+            }
+    except Exception as exc:
+        log.warning("error fetching nilam_ocr_results for %s: %s", request_id, exc)
+        return {
+            "available": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "target": TARGET,
+            "db_host": db_host_label(DB_URL),
+            "rows": [],
+        }
 
 
 @app.get("/api/requests/{request_id}/events")
@@ -1047,5 +1221,14 @@ chaos.configure(
 
 if __name__ == "__main__":
     import uvicorn
+    from pathlib import Path
 
-    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("PORT", "8090")))
+    app_dir = str(Path(__file__).resolve().parent)
+    uvicorn.run(
+        "app:app",
+        host="127.0.0.1",
+        port=int(os.environ.get("PORT", "8090")),
+        reload=True,
+        app_dir=app_dir,
+    )
+

@@ -29,8 +29,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import re
+import subprocess
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 # Tabel jobs tahap OCR sejak migrasi 0014; tahap lain `nilam_<tahap>_jobs`.
 JOB_TABLES = {"OCR": "nilam_ocr_extraction_jobs"}
@@ -47,8 +49,8 @@ STOP_GRACE = float(os.environ.get("TRACKER_STOP_GRACE_SECONDS", "45"))
 # menunggu > 5 menit; untuk latihan isi PIPELINE_JOB_LEASE_SECONDS=30 dan PIPELINE_STALE_JOB_INTERVAL_SECONDS=5
 # di services/*/.env, lalu TRACKER_JOB_LEASE_SECONDS=30 dan TRACKER_STALE_JOB_INTERVAL_SECONDS=5 di sini.
 DRAIN = float(os.environ.get("TRACKER_DRAIN_SECONDS", "30"))
-LEASE = float(os.environ.get("TRACKER_JOB_LEASE_SECONDS", "300"))
-STALE_INTERVAL = float(os.environ.get("TRACKER_STALE_JOB_INTERVAL_SECONDS", "30"))
+LEASE = float(os.environ.get("TRACKER_JOB_LEASE_SECONDS", "30"))
+STALE_INTERVAL = float(os.environ.get("TRACKER_STALE_JOB_INTERVAL_SECONDS", "5"))
 END_TIMEOUT = 120.0
 PREFIX_OF_STAGE = {"OCR": "extraction", "STRUCTURING": "structuring", "SCORING": "scoring"}
 STAGES = ["OCR", "STRUCTURING", "SCORING"]
@@ -64,16 +66,26 @@ def configure(**values: Any) -> None:
 # --- docker -------------------------------------------------------------------------
 
 
-async def docker(*args: str, timeout: float = 120.0) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-    )
+def _sync_docker(*args: str, timeout: float = 120.0) -> tuple[int, str]:
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
-    except TimeoutError:
-        proc.kill()
+        proc = subprocess.run(
+            ["docker", *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except subprocess.TimeoutExpired:
         return 124, f"docker {' '.join(args)}: timeout {timeout:.0f}s"
-    return proc.returncode or 0, out.decode(errors="replace").strip()
+    except Exception as exc:
+        return 1, f"docker {' '.join(args)}: {exc}"
+
+
+async def docker(*args: str, timeout: float = 120.0) -> tuple[int, str]:
+    return await asyncio.to_thread(_sync_docker, *args, timeout=timeout)
 
 
 def container(service: str) -> str:
@@ -230,10 +242,17 @@ class Scenario:
 class Run:
     """Satu skenario yang sedang berjalan: langkah, cek, dan alat bantunya."""
 
-    def __init__(self, run_id: str, scenario: Scenario, image: tuple[bytes, str, str]):
+    def __init__(
+        self,
+        run_id: str,
+        scenario: Scenario,
+        image: tuple[bytes, str, str],
+        options: dict[str, Any] | None = None,
+    ):
         self.id = run_id
         self.scenario = scenario
         self.image = image
+        self.options = options or {}
         self.started = time.time()
         self.steps: list[dict[str, Any]] = []
         self.checks: list[dict[str, Any]] = []
@@ -254,6 +273,7 @@ class Run:
             "steps": self.steps,
             "checks": self.checks,
             "request_ids": self.request_ids,
+            "options": self.options,
         }
 
     async def save(self) -> None:
@@ -351,6 +371,17 @@ class Run:
         while (left := end - time.monotonic()) > 0:
             self._alive()
             await asyncio.sleep(min(0.5, left))
+
+    async def wait_until_elapsed(self, target_seconds: float | None = None) -> None:
+        """Menunggu agar gangguan terjadi di detik target (misal detik ke-5 atau sesuai options)."""
+        if target_seconds is None:
+            target_seconds = float(self.options.get("chaos_delay_seconds", 5.0))
+        remain = target_seconds - (time.time() - self.started)
+        if remain > 0:
+            end = time.monotonic() + remain
+            while (left := end - time.monotonic()) > 0:
+                self._alive()
+                await asyncio.sleep(min(0.2, left))
 
     async def wait(self, what: str, predicate: Callable[[], Awaitable[Any]], timeout: float) -> Any:
         """Tunggu sampai `predicate()` truthy; nilainya dikembalikan, atau None kalau waktu habis."""
@@ -674,7 +705,7 @@ async def s_callback_rejected(run: Run) -> None:
 
 
 async def s_stage_down(run: Run) -> None:
-    outage = 25.0
+    outage = float(run.options.get("outage_seconds", 25.0))
     await run.callback("ok")
     task = run.submit_later(slow_seconds=8)
     rid = run.request_ids[-1]
@@ -684,6 +715,7 @@ async def s_stage_down(run: Run) -> None:
         return job if job and job["status"] == "PROCESSING" else None
 
     await run.wait("job OCR PROCESSING", ocr_processing, 30)
+    await run.wait_until_elapsed()
     await run.stop("structuring", grace=5)
     down_at = time.monotonic()
 
@@ -721,6 +753,7 @@ async def s_sigterm_drained(run: Run) -> None:
         return job if job and job["status"] == "PROCESSING" else None
 
     await run.wait("job OCR PROCESSING", ocr_processing, 30)
+    await run.wait_until_elapsed()
     took = await run.stop("extraction")
     job = await run.job("OCR", rid)
     await run.check(
@@ -728,6 +761,9 @@ async def s_sigterm_drained(run: Run) -> None:
         bool(job and job["status"] == "DONE"),
         f"OCR {job and job['status']}, berhenti setelah {took:.1f} dtk",
     )
+    outage = float(run.options.get("outage_seconds", 5.0))
+    if outage > 0:
+        await run.sleep(outage, f"extraction berhenti {outage:.0f} dtk")
     await run.start("extraction")
     final = await run.wait_final(rid, 90)
     await run.check("Pipeline selesai; callback akhir diterima", bool(final), json.dumps(final))
@@ -747,6 +783,7 @@ async def s_sigterm_interrupted(run: Run) -> None:
         return job if job and job["status"] == "PROCESSING" else None
 
     await run.wait("job OCR PROCESSING", ocr_processing, 30)
+    await run.wait_until_elapsed()
     took = await run.stop("extraction")
     await run.check(
         f"Proses berhenti di dalam grace ({STOP_GRACE:.0f} dtk), tidak perlu SIGKILL",
@@ -759,6 +796,9 @@ async def s_sigterm_interrupted(run: Run) -> None:
         bool(job and job["status"] == "FAILED" and "shutdown" in (job["error_message"] or "")),
         f"OCR {job and job['status']}: {job and job['error_message']}",
     )
+    outage = float(run.options.get("outage_seconds", 5.0))
+    if outage > 0:
+        await run.sleep(outage, f"extraction berhenti {outage:.0f} dtk")
     await run.start("extraction")
     final = await run.wait_final(rid, 60)
     await run.check(
@@ -805,11 +845,15 @@ async def _crash(run: Run, source: str) -> None:
         return job if job and job["status"] == "PROCESSING" else None
 
     await run.wait("job OCR PROCESSING", ocr_processing, 30)
+    await run.wait_until_elapsed()
     await run.stop("extraction", kill=True)
+    outage = float(run.options.get("outage_seconds", 5.0))
+    if outage > 0:
+        await run.sleep(outage, f"extraction pod mati {outage:.0f} dtk")
     await run.start("extraction")
     job = await run.job("OCR", rid)
     await run.note(
-        "Setelah SIGKILL, job tertinggal tanpa pemilik",
+        "Setelah SIGKILL, pekerjaan terputus di database",
         f"OCR {job and job['status']} (attempt {job and job['attempts']})",
     )
     await task
@@ -820,9 +864,9 @@ async def _crash(run: Run, source: str) -> None:
 
     budget = LEASE + STALE_INTERVAL + 30
     t0 = time.monotonic()
-    job = await run.wait(f"reaper mengambil alih job (lease {LEASE:.0f} dtk)", reclaimed, budget)
+    job = await run.wait(f"sistem auto-recovery mengambil alih job (lease {LEASE:.0f} dtk)", reclaimed, budget)
     await run.check(
-        "Reaper mengambil alih job yatim setelah lease habis (PIPELINE_JOB_LEASE_SECONDS)",
+        "Sistem Auto-Recovery mengambil alih pekerjaan terputus setelah lease habis (PIPELINE_JOB_LEASE_SECONDS)",
         bool(job),
         f"{time.monotonic() - t0:.0f} dtk setelah proses mati" if job else f"belum dalam {budget:.0f} dtk",
     )
@@ -858,7 +902,7 @@ async def s_crash_file_url(run: Run) -> None:
 
 
 async def s_postgres_down(run: Run) -> None:
-    outage = 20.0
+    outage = float(run.options.get("outage_seconds", 20.0))
     await run.callback("ok")
     task = run.submit_later(slow_seconds=8, source="file_url")
     rid = run.request_ids[-1]
@@ -868,6 +912,7 @@ async def s_postgres_down(run: Run) -> None:
         return job if job and job["status"] == "PROCESSING" else None
 
     await run.wait("job OCR PROCESSING", ocr_processing, 30)
+    await run.wait_until_elapsed()
     await run.stop("postgres", grace=10)
     down_at = time.monotonic()
     await run.step("request baru masuk selama database mati")
@@ -887,7 +932,7 @@ async def s_postgres_down(run: Run) -> None:
         return job if job and job["status"] != "PROCESSING" else None
 
     budget = LEASE + STALE_INTERVAL + 60
-    job = await run.wait("job OCR tidak lagi PROCESSING (reaper, lease)", settled, budget)
+    job = await run.wait("job OCR tidak lagi PROCESSING (auto-recovery, lease)", settled, budget)
     await run.check(
         "Setelah database pulih, job yang terputus tidak tertinggal PROCESSING",
         bool(job),
@@ -900,7 +945,7 @@ async def s_postgres_down(run: Run) -> None:
         await run.note(
             "Orkestrasi pusat menerima dua keadaan akhir berbeda untuk request_id yang sama",
             f"berurutan: {', '.join(stats['statuses'])}. Saat database putus, tahap melaporkan FAILED langsung, lalu "
-            "reaper menjalankan job yang sama lagi dan bisa melaporkan DONE. Pusat harus menerima DONE yang datang "
+            "sistem auto-recovery menjalankan ulang job yang sama dan bisa melaporkan DONE. Pusat harus menerima DONE yang datang "
             "setelah FAILED (keadaan terakhir menang).",
             level="warn",
         )
@@ -1048,7 +1093,7 @@ SCENARIOS = [
         "crash-inline",
         "Extraction mati mendadak (SIGKILL), dokumen upload",
         "OOMKilled / node hilang saat OCR bekerja, dokumen dikirim multipart.",
-        "Reaper mengambil alih setelah lease; job FAILED dengan pesan minta kirim ulang.",
+        "Auto-recovery mengambil alih setelah lease timeout; job FAILED dengan pesan minta kirim ulang.",
         s_crash_inline,
         needs_lease=True,
     ),
@@ -1056,7 +1101,7 @@ SCENARIOS = [
         "crash-file-url",
         "Extraction mati mendadak (SIGKILL), dokumen file_url",
         "Sama, dokumen dikirim sebagai file_url seperti contoh cURL pusat.",
-        "Reaper mengambil alih setelah lease, mengunduh ulang, pipeline selesai sendiri.",
+        "Auto-recovery mengambil alih setelah lease timeout, mengunduh ulang dokumen, dan pipeline selesai sendiri.",
         s_crash_file_url,
         needs_lease=True,
     ),
@@ -1115,10 +1160,14 @@ def _load_image(name: str | None) -> tuple[bytes, str, str]:
     return chosen.read_bytes(), chosen.name, content_type
 
 
-async def _run_all(ids: list[str], image: tuple[bytes, str, str]) -> None:
+async def _run_all(
+    ids: list[str],
+    image: tuple[bytes, str, str],
+    options: dict[str, Any] | None = None,
+) -> None:
     for scenario_id in ids:
         scenario = BY_ID[scenario_id]
-        run = Run(f"{int(time.time())}-{scenario_id}", scenario, image)
+        run = Run(f"{int(time.time())}-{scenario_id}", scenario, image, options=options)
         current["run"] = run
         await run.save()
         try:
@@ -1152,6 +1201,14 @@ async def list_scenarios():
         "available": ctx["target"] == "local",
         "running": current["run"].id if current["run"] else None,
         "images": [path.name for path in _images()],
+        "image_files": [
+            {
+                "name": path.name,
+                "size": path.stat().st_size,
+                "sample": path.parent == ctx["images_dir"],
+            }
+            for path in _images()
+        ],
         "settings": {
             "stop_grace_seconds": STOP_GRACE,
             "drain_seconds": DRAIN,
@@ -1174,6 +1231,53 @@ async def list_scenarios():
     }
 
 
+@router.post("/api/scenarios/images")
+async def upload_scenario_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """Unggah file uji ke folder assets/ (tersedia untuk skenario gangguan dan load test)."""
+    folder = ctx["images_dir"].parent / "assets"
+    folder.mkdir(parents=True, exist_ok=True)
+    saved: list[str] = []
+    for upload in files:
+        name = re.sub(r"[^\w.\-]+", "_", upload.filename or "upload.jpg")
+        content = await upload.read()
+        if not content:
+            continue
+        stem, suffix = os.path.splitext(name)
+        path = folder / name
+        n = 0
+        while path.exists():
+            n += 1
+            path = folder / f"{stem}-{n}{suffix}"
+        path.write_bytes(content)
+        saved.append(path.name)
+    all_imgs = _images()
+    return {
+        "saved": saved,
+        "images": [p.name for p in all_imgs],
+        "image_files": [
+            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]}
+            for p in all_imgs
+        ],
+    }
+
+
+@router.delete("/api/scenarios/images/{name}")
+async def delete_scenario_image(name: str) -> dict[str, Any]:
+    """Hapus file uji unggahan di assets/ (file contoh di images/ tidak bisa dihapus)."""
+    folder = ctx["images_dir"].parent / "assets"
+    target = folder / name
+    if target.is_file():
+        target.unlink()
+    all_imgs = _images()
+    return {
+        "images": [p.name for p in all_imgs],
+        "image_files": [
+            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]}
+            for p in all_imgs
+        ],
+    }
+
+
 @router.post("/api/scenarios/run")
 async def run_scenarios(body: dict[str, Any]):
     _require_local()
@@ -1185,8 +1289,12 @@ async def run_scenarios(body: dict[str, Any]):
     if unknown:
         raise HTTPException(status_code=422, detail=f"skenario tidak dikenal: {unknown}")
     image = _load_image(body.get("image"))
-    current["task"] = asyncio.create_task(_run_all(ids, image))
-    return {"started": ids}
+    options = {
+        "chaos_delay_seconds": float(body.get("chaos_delay_seconds", 5.0)),
+        "outage_seconds": float(body.get("outage_seconds", 10.0)),
+    }
+    current["task"] = asyncio.create_task(_run_all(ids, image, options=options))
+    return {"started": ids, "options": options}
 
 
 @router.post("/api/scenarios/stop")
