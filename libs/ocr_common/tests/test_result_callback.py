@@ -57,6 +57,27 @@ def test_scoring_done_carries_exactly_the_200_data_and_guardrails_0():
     }
 
 
+def test_without_a_guardrails_threshold_the_callback_carries_the_accepted_probability():
+    stage_body = stage_callback_body(
+        RID, "SCORING", "DONE", result=_final(nama="BUDI SANTOSO"), final=True, answer=ANSWER, guardrails=0.9821
+    )
+
+    assert result_callback_body(stage_body) == {
+        "request_id": RID,
+        "status": "completed",
+        "result": ANSWER,
+        "guardrails": 0.9821,
+    }
+
+
+def test_a_rejection_keeps_guardrails_1_also_without_a_guardrails_threshold():
+    stage_body = stage_callback_body(
+        RID, "STRUCTURING", "FAILED", error_message="x", error_code="DOWNSTREAM_VALIDATION_ERROR", guardrails=0.9821
+    )
+
+    assert (result_callback_body(stage_body) or {})["guardrails"] == 1
+
+
 def test_a_sequence_that_ends_early_carries_that_stage_result_as_the_200_does():
     structuring = {"fields": {"nomor_npwp": {"value": "1"}}, "flag": False, "flag_reason": None}
     stage_body = stage_callback_body(RID, "STRUCTURING", "DONE", result=structuring, final=True, answer=structuring)
@@ -121,12 +142,12 @@ def test_a_stage_that_does_not_end_the_request_sends_nothing(stage):
 async def test_the_stage_callback_never_sends_the_answer_or_the_trace_parent():
     seen: list[httpx.Request] = []
     callback = OrchestrationCallback(_recording_client(seen), "/v1/callbacks/stage")
-    body = stage_callback_body(RID, "SCORING", "DONE", result={"x": 1}, final=True, answer=ANSWER)
+    body = stage_callback_body(RID, "SCORING", "DONE", result={"x": 1}, final=True, answer=ANSWER, guardrails=0.98)
 
     assert await callback.send({**body, TRACE_PARENT_KEY: "00-ab-cd-01"}) is True
 
     [request] = seen
-    assert {"answer", TRACE_PARENT_KEY}.isdisjoint(json.loads(request.content))
+    assert {"answer", "guardrails", TRACE_PARENT_KEY}.isdisjoint(json.loads(request.content))
 
 
 async def test_the_result_callback_sends_only_the_end_of_a_request_and_never_the_trace_parent():

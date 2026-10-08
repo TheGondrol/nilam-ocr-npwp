@@ -46,8 +46,11 @@ class WaitOutcome:
     error_message: str | None = None
     results: dict[str, dict[str, Any]] = field(default_factory=dict)
     # column_confidence_threshold stored with the first stage's job (the GET answers with the same
-    # confidences as the POST); None: FIELD_CONFIDENCE_THRESHOLD for every field.
+    # confidences as the POST); None: no field has a threshold.
     column_thresholds: dict[str, float] | None = None
+    # The answer's `guardrails` stored with the first stage's job (the GET answers with the same value as the
+    # POST); None: guardrails did not run, or a job from before it was kept.
+    guardrails: int | float | None = None
 
 
 class PipelineWait(Protocol):
@@ -99,8 +102,13 @@ class PipelineWaiter:
         if record is None:
             return None
         columns = record.get("column_confidence_threshold")
+        guardrails = record.get("guardrails")
         outcome = await self._snapshot(request_id, record)
-        return replace(outcome, column_thresholds=columns if isinstance(columns, dict) and columns else None)
+        return replace(
+            outcome,
+            column_thresholds=columns if isinstance(columns, dict) and columns else None,
+            guardrails=guardrails if isinstance(guardrails, int | float) and not isinstance(guardrails, bool) else None,
+        )
 
     async def _snapshot(self, request_id: str, first: dict[str, Any]) -> WaitOutcome:
         results: dict[str, dict[str, Any]] = {}

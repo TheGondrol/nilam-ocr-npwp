@@ -40,7 +40,6 @@ class BaseServiceSettings(BaseSettings):
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     allowed_content_types: list[str] = ["image/jpeg", "image/jpg", "image/png", "application/pdf"]
     file_url_allowed_hosts: str = ""
-    field_confidence_threshold: float = Field(0.5, ge=0, le=1)
     # The `-test` endpoints (orchestrator `/v1/extract-ocr-test`, `/v1/<stage>/jobs-test`): the same pipeline on
     # the `testing_*` tables, without callbacks or writes to the orchestrator's tables. For the ML team's
     # load tests on dev; off everywhere else, and then the routes do not exist.

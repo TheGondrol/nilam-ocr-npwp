@@ -81,21 +81,11 @@ def get_confidence_service() -> ConfidenceService:
 
 
 def get_job_service() -> ScoringJobService:
-    return ScoringJobService(
-        get_pipeline(),
-        get_confidence_service(),
-        get_settings().field_confidence_threshold,
-        results=get_results(),
-    )
+    return ScoringJobService(get_pipeline(), get_confidence_service(), results=get_results())
 
 
 def get_testing_job_service() -> ScoringJobService:
-    return ScoringJobService(
-        get_testing_pipeline(),
-        get_confidence_service(),
-        get_settings().field_confidence_threshold,
-        results=get_testing_results(),
-    )
+    return ScoringJobService(get_testing_pipeline(), get_confidence_service(), results=get_testing_results())
 
 
 @lru_cache

@@ -6,7 +6,7 @@ from typing import Any
 from prometheus_client import Counter
 
 from ocr_common.errors import NotFound, ServiceError
-from ocr_common.npwp import final_result
+from ocr_common.npwp import auto_accept, final_result
 from ocr_common.pipeline import (
     DEFAULT_SEQUENCE,
     EXTRACTION,
@@ -73,8 +73,10 @@ class ExtractOcrService:
         `guardrails` the report is the answer and nothing enters the pipeline. Otherwise the stages hand
         the job on up to the last service of `sequence`, and that one's result is the answer.
 
-        `guardrails_threshold` and `column_thresholds` come from the central orchestrator for this request;
-        None falls back to the guardrails service's own threshold and to FIELD_CONFIDENCE_THRESHOLD."""
+        `guardrails_threshold` and `column_thresholds` come from the central orchestrator for this request.
+        Without a guardrails threshold the document is accepted whatever the model says (`auto_accept`: the
+        answer's `guardrails` is then the accepted probability); a field without a column threshold gets the trust
+        model's probability as its confidence."""
         started = time.monotonic() if received_at is None else received_at
         check_document(content_type, content, self._settings)
         if GUARDRAILS in sequence:
@@ -82,6 +84,8 @@ class ExtractOcrService:
                 report = await self._guardrails.check(request_id, filename, content_type, content, guardrails_threshold)
             except ServiceError as exc:
                 raise StageError(GUARDRAILS, exc) from exc
+            if guardrails_threshold is None:
+                report = auto_accept(report)
             await self._log.record(
                 request_id, report, threshold_from_request=guardrails_threshold is not None, sequence=sequence
             )
@@ -133,6 +137,7 @@ class ExtractOcrService:
             "reason": None,
             **_pipeline(None, outcome),
             "column_thresholds": outcome.column_thresholds,
+            "guardrails": outcome.guardrails,
         }
 
     async def _judged_only(self, request_id: str) -> dict[str, Any] | None:

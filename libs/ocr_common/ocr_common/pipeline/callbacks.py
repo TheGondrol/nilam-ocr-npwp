@@ -9,7 +9,7 @@ from typing import Any, Protocol, cast
 
 from ocr_common.clients.remote import RemoteClientError, RemoteModelClient
 from ocr_common.errors import ServiceError
-from ocr_common.npwp import REJECTED_CODE, contract_fields
+from ocr_common.npwp import GUARDRAILS_PASSED, GUARDRAILS_REJECTED, REJECTED_CODE, contract_fields
 from ocr_common.types import FinalResult
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,7 @@ class StageCallback(Protocol):
         error_code: str | None = None,
         final: bool = False,
         answer: dict[str, Any] | None = None,
+        guardrails: int | float | None = None,
     ) -> bool:
         """Direct mode: build and send the callback with retries; returns False when it was skipped or gave up."""
         ...
@@ -97,6 +98,7 @@ def stage_callback_body(
     error_code: str | None = None,
     final: bool = False,
     answer: dict[str, Any] | None = None,
+    guardrails: int | float | None = None,
 ) -> dict[str, Any]:
     """The per-stage callback body. `error_code` is only present when set: `DOWNSTREAM_VALIDATION_ERROR`
     on a rejection, so a FAILED callback tells a rejected document from a stage that broke. `final: true`
@@ -104,8 +106,9 @@ def stage_callback_body(
     pipeline_name_sequence), whose `result` is then the request's answer.
 
     `answer`, only on that final DONE, is the `data` the orchestrator's `extract-ocr` 200 answers with for
-    this request (scoring: the 0/1 confidences decided with the request's thresholds). It is kept for the
-    result callback, which must carry exactly that; the per-stage callback leaves it out."""
+    this request (scoring: the confidences decided with the request's thresholds), and `guardrails` its
+    `guardrails` (0, or the accepted probability when the request sent no guardrails threshold). Both are kept
+    for the result callback, which must carry exactly that; the per-stage callback leaves them out."""
     body: dict[str, Any] = {
         "request_id": request_id,
         "stage": stage,
@@ -119,12 +122,15 @@ def stage_callback_body(
         body["final"] = True
     if answer is not None:
         body["answer"] = answer
+    if guardrails is not None:
+        body["guardrails"] = guardrails
     return body
 
 
 def _sendable(body: dict[str, Any]) -> dict[str, Any]:
-    """A stored stage body without what is kept for us only: the result callback's `answer`, the trace parent."""
-    return {key: value for key, value in body.items() if key not in ("answer", TRACE_PARENT_KEY)}
+    """A stored stage body without what is kept for us only: the result callback's `answer` and `guardrails`, the
+    trace parent."""
+    return {key: value for key, value in body.items() if key not in ("answer", "guardrails", TRACE_PARENT_KEY)}
 
 
 class OrchestrationCallback:
@@ -147,9 +153,10 @@ class OrchestrationCallback:
         error_code: str | None = None,
         final: bool = False,
         answer: dict[str, Any] | None = None,
+        guardrails: int | float | None = None,
     ) -> bool:
         """Send `{request_id, stage, status, result, error_message[, error_code]}` with retries; False when
-        skipped or failed. `answer` is only for the result callback and is not sent."""
+        skipped or failed. `answer` and `guardrails` are only for the result callback and are not sent."""
         if self._client is None:
             logger.info("callback skipped (ORCHESTRATION_URL not set): %s %s %s", request_id, stage, status)
             return False
@@ -181,10 +188,7 @@ class OrchestrationCallback:
 RESULT_COMPLETED = "completed"
 RESULT_FAILED = "failed"
 _FINAL_STAGE = "SCORING"
-# `guardrails` of the result callback, as in the extract-ocr answer: 1 = rejected, 0 = passed.
-GUARDRAILS_PASSED = 0
-GUARDRAILS_REJECTED = 1
-# FIELD_CONFIDENCE_THRESHOLD's default: only for a SCORING body queued before `answer` existed.
+# The former FIELD_CONFIDENCE_THRESHOLD default: only for a SCORING body queued before `answer` existed.
 _LEGACY_THRESHOLD = 0.5
 
 
@@ -194,11 +198,12 @@ def result_callback_body(stage_body: dict[str, Any]) -> dict[str, Any] | None:
     is not the end of the request.
 
     Completed (DONE of the stage that ends the request: scoring, or the last of a shorter
-    pipeline_name_sequence). `result` is exactly the `data` the extract-ocr 200 answers with for the
-    same request (scoring: `nomor_npwp` and `nama` with 0/1 confidences; an earlier stage: its result as
-    it is)::
+    pipeline_name_sequence). `result` and `guardrails` are exactly the `data` and `guardrails` the extract-ocr
+    200 answers with for the same request (scoring: `nomor_npwp` and `nama` with 0/1 confidences, or the trust
+    model's probabilities for the fields the request sent no threshold for; an earlier stage: its result as it
+    is; `guardrails` 0, or the accepted probability when the request sent no guardrails threshold)::
 
-        {"request_id", "status": "completed", "result": {...}, "guardrails": 0}
+        {"request_id", "status": "completed", "result": {...}, "guardrails": 0 | 0.9821}
 
     Rejected by the structuring rules (a FAILED with `DOWNSTREAM_VALIDATION_ERROR`): the orchestrator
     recognises a rejection by `result: null` with `guardrails: 1`, and passes `message` to its client::
@@ -240,12 +245,14 @@ def result_callback_body(stage_body: dict[str, Any]) -> dict[str, Any] | None:
         answer = _legacy_answer(stage, stage_body.get("result"))
     if answer is None:
         return None
-    return {"request_id": request_id, "status": RESULT_COMPLETED, "result": answer, "guardrails": GUARDRAILS_PASSED}
+    # A body queued before `guardrails` was kept with it: the 0 every completed callback had then.
+    guardrails = stage_body.get("guardrails", GUARDRAILS_PASSED)
+    return {"request_id": request_id, "status": RESULT_COMPLETED, "result": answer, "guardrails": guardrails}
 
 
 def _legacy_answer(stage: str, final: dict[str, Any] | None) -> dict[str, Any] | None:
     """The answer of a DONE body queued before `answer` existed: an earlier stage's result as it is; for
-    scoring, the 0/1 confidences decided with FIELD_CONFIDENCE_THRESHOLD's default (the request's own
+    scoring, the 0/1 confidences decided with the former FIELD_CONFIDENCE_THRESHOLD default (the request's own
     thresholds were not kept with the body)."""
     if not final:
         return None
@@ -278,6 +285,7 @@ class ResultCallback:
         error_code: str | None = None,
         final: bool = False,
         answer: dict[str, Any] | None = None,
+        guardrails: int | float | None = None,
     ) -> bool:
         """Send the result callback with retries (5xx, and a 409 RESULT_NOT_READY a few times); False when
         this event is not final, or when it failed."""
@@ -291,6 +299,7 @@ class ResultCallback:
                 error_code=error_code,
                 final=final,
                 answer=answer,
+                guardrails=guardrails,
             )
         )
         if body is None:
@@ -356,6 +365,7 @@ class LoggedCallback:
         error_code: str | None = None,
         final: bool = False,
         answer: dict[str, Any] | None = None,
+        guardrails: int | float | None = None,
     ) -> bool:
         """`inner.notify`, then `delivered` when it sent a callback that ends the request."""
         sent = await self.inner.notify(
@@ -367,6 +377,7 @@ class LoggedCallback:
             error_code=error_code,
             final=final,
             answer=answer,
+            guardrails=guardrails,
         )
         body = stage_callback_body(
             request_id,
@@ -377,6 +388,7 @@ class LoggedCallback:
             error_code=error_code,
             final=final,
             answer=answer,
+            guardrails=guardrails,
         )
         if sent and result_callback_body(body) is not None:
             await self._delivered(body)

@@ -15,7 +15,15 @@ from app.api.response_log import ResponseLogMiddleware
 from app.config import get_settings
 from app.dependencies import get_guardrails_client, get_testing_extraction_client, get_testing_pipeline_waiter
 from app.services.response_log import SqlResponseLog
-from tests.conftest import ACCEPTED_REPORT, JPEG, RecordingResponseLog, StubExtraction, StubGuardrails, StubWaiter
+from tests.conftest import (
+    ACCEPTED_REPORT,
+    JPEG,
+    WITH_GUARDRAILS_THRESHOLD,
+    RecordingResponseLog,
+    StubExtraction,
+    StubGuardrails,
+    StubWaiter,
+)
 
 RID = "OCR_response_log"
 
@@ -37,12 +45,12 @@ def test_a_finished_request_is_logged_with_the_answer_it_got(client, auth, respo
 
     assert response.status_code == 200
     [record] = response_logs[""].records
-    assert (record["request_id"], record["status_code"], record["guardrails"]) == (RID, 200, 0)
+    assert (record["request_id"], record["status_code"], record["guardrails"]) == (RID, 200, 0.9821)
     assert record["body"] == response.json()
 
 
 def test_a_guardrails_rejection_is_logged(client, auth, response_logs):
-    response = _submit(client, auth, filename="blur.jpg")
+    response = _submit(client, auth, filename="blur.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert response.status_code == 400
     assert _logged(response_logs) == [(RID, 400, "DOWNSTREAM_VALIDATION_ERROR", 1)]
@@ -69,7 +77,8 @@ def test_a_guardrails_only_request_is_logged_with_the_report(client, auth, respo
     _submit(client, auth, pipeline_name_sequence='["guardrails"]')
 
     [record] = response_logs[""].records
-    assert (record["status_code"], record["body"]["data"], record["guardrails"]) == (200, ACCEPTED_REPORT, 0)
+    assert (record["status_code"], record["guardrails"]) == (200, 0.9821)
+    assert record["body"]["data"] == {**ACCEPTED_REPORT, "auto_accepted": True, "score": 0.9821}
 
 
 def test_a_refusal_before_anything_runs_is_logged(client, auth, response_logs):
@@ -140,12 +149,15 @@ async def test_each_answer_is_a_new_row(database):
     await log.record(
         RID, 200, {**body, "message": "done", "data": {"nama": {"value": "X", "confidence": 1}}}, guardrails=0
     )
+    # Without a guardrails threshold the answer's guardrails is the accepted probability (0019: a float column).
+    await log.record(RID, 200, {**body, "message": "done"}, guardrails=0.9821)
 
     async with get_engine(url).connect() as conn:
         rows = (await conn.execute(select(table).order_by(table.c.id))).mappings().all()
     assert [(r["status_code"], r["status_desc"], r["guardrails"]) for r in rows] == [
         (202, "Accepted", None),
         (200, "OK", 0),
+        (200, "OK", 0.9821),
     ]
     assert rows[1]["data"] == {"nama": {"value": "X", "confidence": 1}}
     assert list(rows[0]) == [

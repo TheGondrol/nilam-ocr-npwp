@@ -64,9 +64,10 @@ class RecordingCallback:
         error_code=None,
         final=False,
         answer=None,
+        guardrails=None,
     ) -> bool:
-        """Record the callback, in the body shape a stage sends (`error_code`, `final` and `answer` only when
-        set)."""
+        """Record the callback, in the body shape a stage sends (`error_code`, `final`, `answer` and `guardrails`
+        only when set)."""
         self.calls.append(
             stage_callback_body(
                 request_id,
@@ -77,6 +78,7 @@ class RecordingCallback:
                 error_code=error_code,
                 final=final,
                 answer=answer,
+                guardrails=guardrails,
             )
         )
         return True

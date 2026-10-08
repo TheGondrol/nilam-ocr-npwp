@@ -7,13 +7,15 @@ class ContractField(BaseModel):
     value: str | None = Field(
         None, description="The value read; null when the field was not found", examples=["12.345.678.9-012.345"]
     )
-    confidence: Literal[0, 1] = Field(
+    confidence: int | float = Field(
         ...,
         description=(
-            "1 when the ML team's trust model gives this value a probability of being correct of at least "
-            "`FIELD_CONFIDENCE_THRESHOLD` (0.5 by default); 0 when it is lower, or when there is no value"
+            "With a threshold for this field in `column_confidence_threshold` (its own key, or `all_field`): 1 when "
+            "the ML team's trust model gives this value a probability of being correct of at least that threshold, "
+            "else 0. Without one: that probability itself, a float from 0 to 1 (4 decimals). 0 when there is no "
+            "value"
         ),
-        examples=[1],
+        examples=[1, 0.9731],
     )
 
 
@@ -58,12 +60,14 @@ class ExtractOcrResponse(BaseModel):
         ),
         examples=["structuring"],
     )
-    guardrails: Literal[0, 1] | None = Field(
+    guardrails: int | float | None = Field(
         None,
         description=(
-            "0: the document passed the guardrails model (and the pipeline ran); 1: it was rejected by the "
-            "guardrails model or by the structuring rules. Null on 202, and when the request was refused before "
-            "the check"
+            "With `guardrails_confidence_threshold`: 0 the document passed the guardrails model (and the pipeline "
+            "ran). Without it the document is accepted whatever the model says, and this is the model's accepted "
+            "probability (the lowest of its pages), a float from 0 to 1 (4 decimals). 1: rejected, by the "
+            "guardrails model (only with a threshold) or by the structuring rules. Null on 202, and when the "
+            "request was refused before the check"
         ),
-        examples=[0],
+        examples=[0, 0.9821],
     )

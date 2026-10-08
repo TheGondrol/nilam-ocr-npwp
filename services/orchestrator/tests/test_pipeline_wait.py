@@ -12,14 +12,17 @@ from app.config import get_settings
 from app.main import app
 from app.services.extract_service import ExtractOcrService
 from app.services.pipeline_waiter import STATUS_REJECTED, PipelineWaiter, WaitOutcome
-from tests.conftest import ACCEPTED_REPORT, JPEG
+from tests.conftest import ACCEPTED_REPORT, JPEG, WITH_GUARDRAILS_THRESHOLD
 
 RID = "REQ_wait"
 
 
-def _submit(client, auth, filename="npwp.jpg"):
+def _submit(client, auth, filename="npwp.jpg", **form):
     return client.post(
-        "/v1/extract-ocr", headers=auth, data={"request_id": RID}, files={"file": (filename, JPEG, "image/jpeg")}
+        "/v1/extract-ocr",
+        headers=auth,
+        data={"request_id": RID, **form},
+        files={"file": (filename, JPEG, "image/jpeg")},
     )
 
 
@@ -46,10 +49,10 @@ def test_finished_within_the_wait_is_200_with_the_final_result(client, auth, stu
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0, None)
+    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0.9821, None)
     assert body["data"] == {
-        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
     }
     [(request_id, timeout)] = stub_waiter.calls
     assert request_id == RID
@@ -79,7 +82,7 @@ def test_failure_within_the_wait_is_422_with_the_failed_stage(client, auth, stub
     assert response.status_code == 422
     body = response.json()
     assert (body["errors"], body["message"]) == ("OCR_FAILED", "extraction OCR model is unavailable")
-    assert (body["status_code"], body["data"], body["guardrails"]) == (422, None, 0)
+    assert (body["status_code"], body["data"], body["guardrails"]) == (422, None, 0.9821)
 
 
 def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, auth, stub_waiter):
@@ -95,7 +98,7 @@ def test_rejection_by_the_structuring_rules_is_400_with_their_reason(client, aut
 
 
 def test_rejected_document_answers_at_once_without_waiting(client, auth, stub_waiter):
-    response = _submit(client, auth, filename="notnpwp.jpg")
+    response = _submit(client, auth, filename="notnpwp.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert response.status_code == 400
     assert response.json()["errors"] == "DOWNSTREAM_VALIDATION_ERROR"

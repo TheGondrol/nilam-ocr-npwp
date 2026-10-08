@@ -957,6 +957,26 @@ components:
           type: array
           title: Pages
           description: One entry per page, in page order
+        auto_accepted:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Accepted
+          description: 'true: the central orchestrator sent no guardrails threshold, so the document passed
+            whatever the model said (`document.verdict` stays the guardrails service''s own)'
+          examples:
+          - true
+        score:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Score
+          description: 'With `auto_accepted`: the model''s accepted probability, the lowest of its pages;
+            the answer''s `guardrails`'
+          examples:
+          - 0.9821
       additionalProperties: true
       type: object
       title: GuardrailsResult
@@ -1660,8 +1680,8 @@ components:
           description: 'Per field, from the central orchestrator: the trust model''s probability that
             the field''s value is correct must reach it for the field''s `confidence` to be `1` (else
             `0`), always on the accept side. Keys: `all_field` (every field), `nomor_npwp`, `nama`; a
-            field''s own key wins over `all_field`, and a field left out (or the whole map omitted) uses
-            `FIELD_CONFIDENCE_THRESHOLD`. Only carried on to scoring'
+            field''s own key wins over `all_field`. A field left out (or the whole map omitted) gets that
+            probability itself as `confidence`, a float from 0 to 1. Only carried on to scoring'
           examples:
           - nama: 0.5
             nomor_npwp: 0.9
@@ -1739,11 +1759,23 @@ components:
           - type: 'null'
           title: Column Confidence Threshold
           description: 'The central orchestrator''s per-field thresholds the job was submitted with (`nomor_npwp`,
-            `nama`; an `all_field` it sent is already spread over them); null when none were given: `FIELD_CONFIDENCE_THRESHOLD`
-            for every field'
+            `nama`; an `all_field` it sent is already spread over them); null when none were given: every
+            field''s confidence is then the trust model''s probability'
           examples:
           - nama: 0.5
             nomor_npwp: 0.9
+        guardrails:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Guardrails
+          description: 'The `guardrails` of the request''s extract-ocr answer, from the guardrails report
+            the job was submitted with: `0` when the document passed with the central orchestrator''s
+            threshold, the model''s accepted probability when it sent none; null when guardrails did not
+            run'
+          examples:
+          - 0.9821
         result:
           anyOf:
           - $ref: '#/components/schemas/StructuredDocument'

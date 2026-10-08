@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import httpx
 import pytest
 
@@ -48,8 +50,8 @@ def test_finished_request_is_200_with_its_data(client, auth, stub_waiter, stub_g
         "status_desc": "OK",
         "message": "OCR extraction completed successfully",
         "data": {
-            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-            "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+            "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
         },
         "errors": None,
         "request_id": RID,
@@ -59,6 +61,24 @@ def test_finished_request_is_200_with_its_data(client, auth, stub_waiter, stub_g
     assert stub_waiter.snapshots == [RID]
     assert stub_waiter.calls == [], "the status is read, not waited for"
     assert stub_guardrails.checked == []
+
+
+def test_the_get_answers_with_the_guardrails_kept_with_the_job(client, auth, stub_waiter):
+    # The POST was auto-accepted (no guardrails threshold): its first job keeps the accepted probability.
+    stub_waiter.snapshot_outcome = replace(stub_waiter.outcome, guardrails=0.9821)
+
+    response = _get(client, auth)
+
+    assert (response.status_code, response.json()["guardrails"]) == (200, 0.9821)
+
+
+async def test_the_snapshot_reads_the_guardrails_of_the_first_job():
+    ocr = {**_job("DONE", {"blocks": []}), "pipeline_name_sequence": ["guardrails", "extraction"], "guardrails": 0.9821}
+    waiter = PipelineWaiter(_stages(ocr), poll_interval=0.01)
+
+    outcome = await waiter.snapshot(RID)
+
+    assert outcome is not None and (outcome.status, outcome.guardrails) == ("DONE", 0.9821)
 
 
 def test_running_request_is_202(client, auth, stub_waiter):

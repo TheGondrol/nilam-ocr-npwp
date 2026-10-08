@@ -29,7 +29,6 @@ from app.api.extract_contract import (
 )
 from app.api.response_log import SEQUENCE_STATE
 from app.api.schemas import ExtractOcrResponse
-from app.config import Settings, get_settings
 from app.dependencies import get_extract_service
 from app.services.document_checks import TOO_MANY_PAGES_MESSAGE
 from app.services.extract_service import ExtractOcrService
@@ -85,11 +84,12 @@ _GUARDRAILS_ONLY = extract_body(200, COMPLETED_MESSAGE, data=_GUARDRAILS_REPORT,
 _CONTRACT_TABLE = (
     "| Outcome | HTTP | `data` | `guardrails` | `errors` | `pipeline_last_stage` |\n"
     "|---|---|---|---|---|---|\n"
-    "| Finished | 200 | the fields | `0` | null | null |\n"
+    "| Finished | 200 | the fields | `0`, or the accepted probability without a guardrails threshold "
+    "| null | null |\n"
     "| Still running | 202 | null | null | null | null |\n"
     f"| Rejected by the guardrails model | 400 | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
     f"| Rejected by the structuring rules | 400 | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
-    "| A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or "
+    "| A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` | the service that failed |\n\n"
     "The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running, "
     "4xx / 5xx failed or refused.\n\n"
@@ -162,18 +162,20 @@ def _parse_sequence(values: list[str] | None) -> tuple[str, ...]:
         'the central orchestrator\'s `extract-ocr` contract ("Finished" meaning finished within the wait):\n\n'
         + _CONTRACT_TABLE
         + "`data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer's name, or the "
-        "registered name on a company's card. `confidence` is `1` when the ML team's trust model gives the value a "
-        "probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default), else `0`.\n\n"
+        "registered name on a company's card. `confidence` is the ML team's trust model's probability that the "
+        "value is correct (a float, 4 decimals), or `1` / `0` when the central orchestrator sent a threshold for "
+        "the field (below). `0` when there is no value.\n\n"
         "**Thresholds from the central orchestrator, per request, all optional.** "
         '`guardrails_confidence_threshold` (`{"acc_rej": 0.8}`, keyed by guardrails name; this pipeline has one, '
-        "`acc_rej`: a page passes when the model's accepted probability reaches it, and is rejected below it) "
-        "replaces the guardrails threshold for this document; left out, the guardrails service's own is used "
-        "(`GUARDRAILS_THRESHOLD_URL`, else `GUARDRAILS_THRESHOLD`, else the model's 0.5). "
+        "`acc_rej`): a page passes when the model's accepted probability reaches it, and is rejected below it, and "
+        "`guardrails` is `0` / `1`. Left out, the document is accepted whatever the model says, and `guardrails` "
+        "is the model's accepted probability, the lowest of its pages (a float). "
         '`column_confidence_threshold` (`{"all_field": 0.8}` for every field, or per field '
         '`{"nomor_npwp": 0.9, "nama": 0.5}`, a field\'s own key winning over `all_field`) sets the trust '
-        "probability for `confidence: 1`, always on the accept side; a field it leaves out, or the whole field "
-        "omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold that cannot be read, or an unknown key "
-        f"in either, answers `422` `{INVALID_THRESHOLD_CODE}` and nothing runs.\n\n"
+        "probability for `confidence: 1`, always on the accept side; a field it leaves out, or every field when it "
+        "is omitted, gets the probability itself. The callback carries the same `data` and `guardrails`. A "
+        "threshold that cannot be read, or an unknown key in either, answers `422` "
+        f"`{INVALID_THRESHOLD_CODE}` and nothing runs.\n\n"
         "**Rejected by the structuring rules**: the ML team's rules reject a document that is blurred or blank, "
         "not in the standard NPWP format, another document or bundled with one, a screenshot of the online NPWP "
         "lookup, longer than the page limit, or whose number carries an invalid birthdate, province, kecamatan "
@@ -300,7 +302,6 @@ async def extract_ocr(
         examples=['{"all_field": 0.8}', '{"nomor_npwp": 0.9, "nama": 0.5}'],
     ),
     service: ExtractOcrService = Depends(get_extract_service),
-    settings: Settings = Depends(get_settings),
 ):
     received_at = time.monotonic()
     if document_type != DOCUMENT_TYPE:
@@ -360,12 +361,7 @@ async def extract_ocr(
         return _stage_error_body(exc, request_id=request_id)
     finally:
         reset_request_id(token)
-    status_code, body = extract_response(
-        outcome,
-        request_id=request_id,
-        threshold=settings.field_confidence_threshold,
-        column_thresholds=column_thresholds,
-    )
+    status_code, body = extract_response(outcome, request_id=request_id, column_thresholds=column_thresholds)
     response.status_code = status_code
     return body
 
@@ -463,7 +459,6 @@ async def get_extract_ocr(
     request: Request,
     response: Response,
     service: ExtractOcrService = Depends(get_extract_service),
-    settings: Settings = Depends(get_settings),
 ):
     token = adopt_request_id(request, request_id)
     try:
@@ -474,10 +469,7 @@ async def get_extract_ocr(
     finally:
         reset_request_id(token)
     status_code, body = extract_response(
-        outcome,
-        request_id=request_id,
-        threshold=settings.field_confidence_threshold,
-        column_thresholds=outcome.get("column_thresholds"),
+        outcome, request_id=request_id, column_thresholds=outcome.get("column_thresholds")
     )
     response.status_code = status_code
     return body

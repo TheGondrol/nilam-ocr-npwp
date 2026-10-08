@@ -4,7 +4,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import UnprocessableEntity
-from ocr_common.npwp import contract_data, contract_fields, final_result
+from ocr_common.npwp import contract_data, contract_fields, final_result, guardrails_value
 from ocr_common.pipeline import StagePipeline, Work, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import ContractData, FinalResult, ScoringResult
@@ -19,13 +19,11 @@ class ScoringJobService:
         self,
         pipeline: StagePipeline,
         confidence: ConfidenceService,
-        confidence_threshold: float = 0.5,
         *,
         results: StageResults | None = None,
     ):
         self._pipeline = pipeline
         self._confidence = confidence
-        self._confidence_threshold = confidence_threshold
         self._results = results
 
     async def submit(
@@ -40,7 +38,7 @@ class ScoringJobService:
         """Scoring is always the last service of a pipeline_name_sequence, so it ends every request it runs
         for; `sequence` is only kept with the job for the orchestrator's GET. `column_thresholds` (the
         central orchestrator's `column_confidence_threshold`) turns each field's trust probability into the
-        0/1 `confidence` of the outcome row; a field it leaves out uses FIELD_CONFIDENCE_THRESHOLD."""
+        0/1 `confidence` of the outcome row; a field it leaves out keeps the probability itself."""
         if structuring is None and self._results is None:
             raise UnprocessableEntity(
                 "structuring is missing: the request refers to the structuring result by request_id, but this "
@@ -52,6 +50,7 @@ class ScoringJobService:
             work,
             callback_result=final,
             outcome_data=self._outcome_data(final, column_thresholds),
+            guardrails=guardrails_value(guardrails),
             input={
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
@@ -75,6 +74,7 @@ class ScoringJobService:
             work,
             callback_result=final,
             outcome_data=self._outcome_data(final, input.get("column_confidence_threshold")),
+            guardrails=guardrails_value(input.get("guardrails")),
         )
 
     async def get(self, request_id: str) -> dict[str, Any]:
@@ -83,13 +83,13 @@ class ScoringJobService:
     def _outcome_data(
         self, final: Final, column_thresholds: Mapping[str, float] | None
     ) -> Callable[[Mapping[str, Any]], ContractData]:
-        """The outcome row's `data`: the 0/1 confidences stored in the result, so the row and the stored
-        result can never disagree."""
+        """The outcome row's `data`: the confidences stored in the result, so the row and the stored result can
+        never disagree."""
 
         def data(scoring: Mapping[str, Any]) -> ContractData:
             if "fields" in scoring:
                 return contract_data(scoring["fields"])
-            return contract_fields(final(scoring), self._confidence_threshold, column_thresholds)
+            return contract_fields(final(scoring), None, column_thresholds)
 
         return data
 
@@ -117,7 +117,6 @@ class ScoringJobService:
                 guardrails,
                 ocr_result,
                 chain["structuring"],
-                self._confidence_threshold,
                 column_thresholds,
             )
 

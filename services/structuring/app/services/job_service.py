@@ -4,6 +4,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from ocr_common.errors import UnprocessableEntity
+from ocr_common.npwp import guardrails_value
 from ocr_common.pipeline import STRUCTURING, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.pipeline.results import StageResults, load_upstream
 from ocr_common.types import StructuringResult
@@ -53,6 +54,7 @@ class StructuringJobService:
             work,
             **chain(sequence, STRUCTURING, handoff),
             rejection=_rejection,
+            guardrails=guardrails_value(guardrails),
             input={
                 "guardrails": guardrails,
                 "pipeline_name_sequence": stored(sequence),
@@ -72,7 +74,13 @@ class StructuringJobService:
             sequence,
             input.get("column_confidence_threshold"),
         )
-        await self._pipeline.resume(request_id, work, **chain(sequence, STRUCTURING, handoff), rejection=_rejection)
+        await self._pipeline.resume(
+            request_id,
+            work,
+            **chain(sequence, STRUCTURING, handoff),
+            rejection=_rejection,
+            guardrails=guardrails_value(input.get("guardrails")),
+        )
 
     async def get(self, request_id: str) -> dict[str, Any]:
         return await self._pipeline.get(request_id)

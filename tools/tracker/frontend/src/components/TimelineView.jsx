@@ -75,9 +75,14 @@ function httpEntry(e) {
   const after = `setelah ${fmtMs(e.elapsed_ms)}`
   const pls = e.pipeline_last_stage
   if (e.http_status === 200) {
+    const guardrails = e.body?.guardrails
+    const probability =
+      typeof guardrails === 'number' && guardrails !== 0
+        ? ` guardrails = ${guardrails}: pusat tidak mengirim guardrails_confidence_threshold, jadi dokumen diterima apa pun kata model dan nilainya probabilitas diterima (halaman terendah), bukan 0 / 1. Begitu juga confidence field tanpa column_confidence_threshold: probabilitas trust model.`
+        : ''
     return {
       title: `Orchestrator menjawab HTTP 200 ${after}: pipeline selesai sebelum batas tunggu ${e.wait_seconds} dtk, hasil final langsung ada di body jawaban.`,
-      detail: `pipeline_last_stage = null karena tidak ada error. ${PIPELINE_LAST_STAGE_RULE} Service mana saja yang dijalankan sudah ditentukan pusat lewat pipeline_name_sequence, jadi tidak perlu diulang di jawaban.`,
+      detail: `pipeline_last_stage = null karena tidak ada error. ${PIPELINE_LAST_STAGE_RULE} Service mana saja yang dijalankan sudah ditentukan pusat lewat pipeline_name_sequence, jadi tidak perlu diulang di jawaban.${probability}`,
     }
   }
   if (e.http_status === 202) {

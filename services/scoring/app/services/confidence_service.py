@@ -26,22 +26,21 @@ class ConfidenceService:
         guardrails: dict[str, Any] | None,
         ocr: dict[str, Any] | None,
         structuring: dict[str, Any],
-        threshold: float,
         column_thresholds: Mapping[str, float] | None = None,
     ) -> ScoringResult:
         """The scoring stage's result for the chained stage results: the ML team's payload built from them,
-        the trust model's two probabilities, and the 0/1 decision per field with the threshold that decided
-        it (the field's `column_thresholds` entry, else `threshold`). The same for a job and for
+        the trust model's two probabilities, and each field's confidence: 0/1 with the field's
+        `column_thresholds` entry, else the probability itself (threshold None). The same for a job and for
         `/v1/scoring-direct`."""
         payload = self.payload_from_chain(guardrails, ocr, structuring)
         result = self.predict(payload)
         npwp, name = result["npwp_confidence"], result["name_confidence"]
-        # The 0/1 decision is stored with the probabilities: which field passed, with which threshold.
+        # The decision is stored with the probabilities: each field's confidence, and the threshold that decided it.
         decided = final_result(guardrails, structuring, {"npwp_confidence": npwp, "name_confidence": name})
         return {
             "npwp_confidence": npwp,
             "name_confidence": name,
-            "fields": scored_fields(decided, threshold, column_thresholds),
+            "fields": scored_fields(decided, None, column_thresholds),
             "payload": payload,
         }
 
@@ -52,7 +51,8 @@ class ConfidenceService:
         """The ML team's scoring payload from the chained stage results: number and name signals from
         structuring (the name as its base read, before normalisation), the document-level OCR scores from
         the OCR blocks, the flag from the structuring rules, and the guardrails confidence of an accepted
-        document."""
+        document: the auto-accept score when the request sent no guardrails threshold (the lowest accepted
+        probability of its pages, as `document.confidence` of a document the model accepted)."""
         fields = structuring.get("fields") or {}
         number = fields.get("nomor_npwp") if _has_value(fields.get("nomor_npwp")) else None
         name = next((fields[key] for key in NAME_FIELDS if _has_value(fields.get(key))), None)
@@ -62,7 +62,12 @@ class ConfidenceService:
         blocks = (ocr or {}).get("blocks") or []
         scores = [float(block["confidence"]) for block in blocks if block.get("confidence") is not None]
 
-        document = (guardrails or {}).get("document") or {}
+        report = guardrails or {}
+        document = report.get("document") or {}
+        if report.get("auto_accepted"):
+            guardrail_probability = report["score"]
+        else:
+            guardrail_probability = document.get("confidence") if document.get("verdict") == "accepted" else None
         return {
             "npwp": re.sub(r"\D", "", str(number["value"])) if number else None,
             "npwp_score": number.get("confidence") if number else None,
@@ -72,5 +77,5 @@ class ConfidenceService:
             "avg_doc_score": round(sum(scores) / len(scores), 6) if scores else None,
             "min_doc_score": min(scores) if scores else None,
             "flag": bool(structuring.get("flag", False)),
-            "guardrail_probability": document.get("confidence") if document.get("verdict") == "accepted" else None,
+            "guardrail_probability": guardrail_probability,
         }

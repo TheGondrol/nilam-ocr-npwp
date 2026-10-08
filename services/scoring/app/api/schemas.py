@@ -106,20 +106,25 @@ class ScoredField(BaseModel):
     value: str | None = Field(
         ..., description="The field's value; null when not found", examples=["12.345.678.9-012.345"]
     )
-    confidence: Literal[0, 1] = Field(
+    confidence: int | float = Field(
         ...,
-        description="1 when the trust model's probability reached `threshold`, else 0 (also 0 when not found)",
-        examples=[1],
+        ge=0,
+        le=1,
+        description=(
+            "With a `threshold`: 1 when the trust model's probability reached it, else 0. Without one: that "
+            "probability itself (4 decimals). 0 when not found"
+        ),
+        examples=[1, 0.9731],
     )
-    threshold: float = Field(
+    threshold: float | None = Field(
         ...,
         ge=0,
         le=1,
         description=(
             "The threshold this field was decided with: its `column_confidence_threshold` from the central "
-            "orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`"
+            "orchestrator; null when it sent none for the field (`confidence` is then the probability)"
         ),
-        examples=[0.5],
+        examples=[0.5, None],
     )
 
 
@@ -128,7 +133,8 @@ class ScoringJobResult(FieldConfidences):
         None,
         description=(
             "The `extract-ocr` fields as scoring decided them (`nomor_npwp`, `nama`: the person's name, or the "
-            "company's registered name): value, 0/1 confidence, and the threshold used. The outcome row "
+            "company's registered name): value, confidence, and the threshold used (null: no threshold, the "
+            "confidence is the probability). The outcome row "
             "(`ORCHESTRATION_OUTCOME_TABLE`) carries the same values. Null for a result stored before it existed"
         ),
         examples=[
@@ -183,7 +189,7 @@ class ScoringDirectRequest(BaseModel):
     )
     column_confidence_threshold: dict[str, float] | None = Field(
         None,
-        description=f"{COLUMN_THRESHOLD_DESCRIPTION}. Decides the 0/1 `confidence` of `fields` in the answer",
+        description=f"{COLUMN_THRESHOLD_DESCRIPTION}. Decides the `confidence` of `fields` in the answer",
         examples=[{"all_field": 0.8}, {"nomor_npwp": 0.9, "nama": 0.5}],
     )
 

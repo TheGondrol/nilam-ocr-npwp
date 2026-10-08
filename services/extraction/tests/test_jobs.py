@@ -210,10 +210,10 @@ async def test_a_stale_job_of_an_inline_upload_fails_with_a_reason():
     assert next_stage.payloads == []
 
 
-def _submit_with_sequence(client, auth, request_id, sequence):
+def _submit_with_sequence(client, auth, request_id, sequence, guardrails=GUARDRAILS):
     data = {
         "request_id": request_id,
-        "guardrails": json.dumps(GUARDRAILS),
+        "guardrails": json.dumps(guardrails),
         "pipeline_name_sequence": json.dumps(sequence),
     }
     return client.post("/v1/extraction/jobs", headers=auth, data=data, files=image_upload("npwp.jpg"))
@@ -230,6 +230,19 @@ def test_a_sequence_ending_here_stops_with_the_ocr_result_as_the_answer(harness,
     assert next_stage.payloads == [], "nothing is handed on after the last service"
     [done] = callback.calls
     assert (done["stage"], done["status"], done["final"], done["result"]) == ("OCR", "DONE", True, job["result"])
+    assert (done["guardrails"], job["guardrails"]) == (0, 0)
+
+
+def test_the_last_stage_sends_the_auto_accept_score_as_guardrails(harness, auth):
+    client, callback, _ = harness
+    # The central orchestrator sent no guardrails threshold: the orchestrator NPWP accepted the document anyway.
+    guardrails = {**GUARDRAILS, "auto_accepted": True, "score": 0.4213}
+
+    assert _submit_with_sequence(client, auth, "REQ_auto", ["guardrails", "extraction"], guardrails).status_code == 202
+
+    job = wait_for_job(client, "/v1/extraction/jobs/REQ_auto")
+    [done] = callback.calls
+    assert (done["final"], done["guardrails"], job["guardrails"]) == (True, 0.4213, 0.4213)
 
 
 def test_a_longer_sequence_is_handed_on_with_the_job(harness, auth):
@@ -241,7 +254,9 @@ def test_a_longer_sequence_is_handed_on_with_the_job(harness, auth):
     job = wait_for_job(client, "/v1/extraction/jobs/REQ_seq_on")
     [payload] = next_stage.payloads
     assert payload["pipeline_name_sequence"] == sequence
-    assert [(c["stage"], c["status"], c.get("final")) for c in callback.calls] == [("OCR", "DONE", None)]
+    assert [(c["stage"], c["status"], c.get("final"), c.get("guardrails")) for c in callback.calls] == [
+        ("OCR", "DONE", None, None)
+    ]
     assert job["pipeline_name_sequence"] == sequence
 
 

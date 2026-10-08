@@ -4,6 +4,7 @@ from typing import Any
 
 from ocr_common.clients.fetch_url import STRICT_URL_POLICY, FetchUrlError, UrlPolicy, fetch
 from ocr_common.errors import BadRequest
+from ocr_common.npwp import guardrails_value
 from ocr_common.pipeline import EXTRACTION, HandoffPayload, StagePipeline, Work, chain, stored
 from ocr_common.simulation import simulated_delay_seconds
 from ocr_common.types import OcrResult
@@ -54,6 +55,7 @@ class ExtractionJobService:
             request_id,
             work,
             **chain(sequence, EXTRACTION, handoff),
+            guardrails=guardrails_value(guardrails),
             input={
                 "guardrails": guardrails,
                 "file_url": source if isinstance(source, str) else None,
@@ -82,7 +84,12 @@ class ExtractionJobService:
             sequence,
             input.get("column_confidence_threshold"),
         )
-        await self._pipeline.resume(request_id, work, **chain(sequence, EXTRACTION, handoff))
+        await self._pipeline.resume(
+            request_id,
+            work,
+            **chain(sequence, EXTRACTION, handoff),
+            guardrails=guardrails_value(input.get("guardrails")),
+        )
 
     async def get(self, request_id: str) -> dict[str, Any]:
         return await self._pipeline.get(request_id)

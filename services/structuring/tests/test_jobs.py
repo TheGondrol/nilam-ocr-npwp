@@ -221,11 +221,12 @@ def test_a_sequence_ending_here_stops_with_the_structuring_result_as_the_answer(
     assert (job["status"], job["pipeline_name_sequence"]) == ("DONE", sequence)
     assert next_stage.payloads == [], "scoring is not part of this request"
     [done] = callback.calls
-    assert (done["stage"], done["status"], done["final"], done["result"]) == (
+    assert (done["stage"], done["status"], done["final"], done["result"], done["guardrails"]) == (
         "STRUCTURING",
         "DONE",
         True,
         job["result"],
+        0,
     )
 
 

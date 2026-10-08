@@ -1,6 +1,7 @@
 """The thresholds the central orchestrator sends with a request: the guardrails threshold goes to the guardrails
-service, the per-field ones travel down to scoring and decide the `confidence` of the answer; without them,
-the services' own defaults hold."""
+service, the per-field ones travel down to scoring and decide the `confidence` of the answer. Without a guardrails
+threshold the document is accepted whatever the model says and `guardrails` is its accepted probability; a field
+without a threshold has the trust model's probability as its confidence."""
 
 import json
 from dataclasses import replace
@@ -41,22 +42,23 @@ def test_the_central_orchestrators_thresholds_reach_guardrails_and_the_pipeline(
     assert stub_extraction.submitted[0]["column_thresholds"] == {"nomor_npwp": 0.9, "nama": 0.5}
     # nomor_npwp 0.7296 < 0.9, nama 0.9471 >= 0.5
     assert _confidences(response.json()) == {"nomor_npwp": 0, "nama": 1}
+    assert response.json()["guardrails"] == 0
 
 
-def test_without_thresholds_the_services_defaults_hold(client, auth, stub_guardrails, stub_extraction):
+def test_without_thresholds_the_answer_has_the_probabilities(client, auth, stub_guardrails, stub_extraction):
     response = _submit(client, auth)
 
     assert response.status_code == 200
-    assert "threshold" not in stub_guardrails.checked[0], "guardrails keeps its own threshold"
+    assert "threshold" not in stub_guardrails.checked[0]
     assert stub_extraction.submitted[0]["column_thresholds"] is None
-    # FIELD_CONFIDENCE_THRESHOLD 0.5 for both
-    assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 1}
+    assert _confidences(response.json()) == {"nomor_npwp": 0.7296, "nama": 0.9471}
+    assert response.json()["guardrails"] == 0.9821
 
 
-def test_a_field_left_out_of_column_confidence_threshold_uses_the_default(client, auth):
+def test_a_field_left_out_of_column_confidence_threshold_keeps_its_probability(client, auth):
     response = _submit(client, auth, column_confidence_threshold=json.dumps({"nama": 0.95}))
 
-    assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 0}
+    assert _confidences(response.json()) == {"nomor_npwp": 0.7296, "nama": 0}
 
 
 def test_all_field_sets_every_field_and_a_fields_own_key_wins(client, auth, stub_extraction):
@@ -120,9 +122,9 @@ def test_the_get_answers_with_the_thresholds_stored_with_the_job(client, auth, s
     assert _confidences(response.json()) == {"nomor_npwp": 0, "nama": 1}
 
 
-def test_the_get_of_a_job_without_thresholds_uses_the_default(client, auth, stub_waiter):
+def test_the_get_of_a_job_without_thresholds_has_the_probabilities(client, auth, stub_waiter):
     stub_waiter.snapshot_outcome = DONE
 
     response = client.get(f"/v1/extract-ocr/{RID}", headers=auth)
 
-    assert _confidences(response.json()) == {"nomor_npwp": 1, "nama": 1}
+    assert _confidences(response.json()) == {"nomor_npwp": 0.7296, "nama": 0.9471}

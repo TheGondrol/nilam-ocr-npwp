@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from ocr_common.npwp import COMPLETED_MESSAGE, REJECTED_CODE, contract_fields
+from ocr_common.npwp import COMPLETED_MESSAGE, GUARDRAILS_REJECTED, REJECTED_CODE, contract_fields, guardrails_value
 from ocr_common.pipeline import EXTRACTION, GUARDRAILS, SERVICE_OF_STAGE, STAGE_SCORING, STATUS_DONE, STATUS_FAILED
 from ocr_common.web.envelope import envelope
 
@@ -17,7 +17,7 @@ def extract_body(
     request_id: str | None,
     data: Mapping[str, Any] | None = None,
     errors: str | None = None,
-    guardrails: int | None = None,
+    guardrails: int | float | None = None,
     pipeline_last_stage: str | None = None,
 ) -> dict[str, Any]:
     """The extract-ocr answer: the standard envelope plus `pipeline_last_stage` and `guardrails`. The HTTP status
@@ -40,22 +40,32 @@ def last_stage(outcome: dict[str, Any]) -> str | None:
     return EXTRACTION if outcome.get("job") else None
 
 
+def answer_guardrails(outcome: dict[str, Any]) -> int | float:
+    """`guardrails` of a request that passed: the one kept with its first stage's job (a GET), else the one of the
+    guardrails report the outcome carries (a POST); 0 when guardrails did not run."""
+    kept = outcome.get("guardrails")
+    if kept is not None:
+        return kept
+    value = guardrails_value(outcome)
+    return 0 if value is None else value
+
+
 def extract_response(
     outcome: dict[str, Any],
     *,
     request_id: str,
-    threshold: float,
     column_thresholds: Mapping[str, float] | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """`threshold` is FIELD_CONFIDENCE_THRESHOLD, used for a field `column_thresholds` (the central
-    orchestrator's column_confidence_threshold) leaves out."""
+    """`column_thresholds` is the central orchestrator's column_confidence_threshold: a field it leaves out gets
+    the trust model's probability as its confidence. A request without a guardrails threshold passed whatever
+    the model said, and its `guardrails` is the accepted probability (`answer_guardrails`)."""
     stage_name = last_stage(outcome)
     if not outcome["passed"]:
         body = extract_body(
             400,
             outcome["reason"],
             errors=REJECTED_CODE,
-            guardrails=1,
+            guardrails=GUARDRAILS_REJECTED,
             request_id=request_id,
             pipeline_last_stage=stage_name,
         )
@@ -63,12 +73,13 @@ def extract_response(
     pipeline = outcome["pipeline"] or {}
     if pipeline.get("status") == STATUS_REJECTED:
         # A rejecting check of the structuring rules: answered like a guardrails rejection, with the
-        # rules' own Indonesian reason as the message.
+        # rules' own Indonesian reason as the message. `guardrails` stays 1 also without a guardrails threshold:
+        # the central orchestrator recognises a rejection by it.
         return 400, extract_body(
             400,
             pipeline["error_message"],
             errors=REJECTED_CODE,
-            guardrails=1,
+            guardrails=GUARDRAILS_REJECTED,
             request_id=request_id,
             pipeline_last_stage=stage_name,
         )
@@ -76,10 +87,10 @@ def extract_response(
         # Scoring ended the request: the contract's fields. An earlier last service of the
         # pipeline_name_sequence: its result as it is.
         result = outcome["result"]
-        data = (
-            contract_fields(result, threshold, column_thresholds) if pipeline.get("stage") == STAGE_SCORING else result
+        data = contract_fields(result, None, column_thresholds) if pipeline.get("stage") == STAGE_SCORING else result
+        return 200, extract_body(
+            200, COMPLETED_MESSAGE, data=data, guardrails=answer_guardrails(outcome), request_id=request_id
         )
-        return 200, extract_body(200, COMPLETED_MESSAGE, data=data, guardrails=0, request_id=request_id)
     if pipeline.get("status") == STATUS_FAILED:
         stage = pipeline["stage"]
         message = pipeline.get("error_message") or f"{stage} stage failed"
@@ -87,7 +98,7 @@ def extract_response(
             422,
             message,
             errors=f"{stage}_FAILED",
-            guardrails=0,
+            guardrails=answer_guardrails(outcome),
             request_id=request_id,
             pipeline_last_stage=stage_name,
         )

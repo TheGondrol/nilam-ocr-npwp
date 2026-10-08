@@ -48,6 +48,12 @@ def test_a_completed_callback_is_the_200_answer_with_its_data():
     }
 
 
+def test_a_completed_callback_without_a_guardrails_threshold_keeps_the_accepted_probability():
+    body = stage_callback_body(RID, STAGE_SCORING, "DONE", result={}, final=True, answer=DATA, guardrails=0.9821)
+
+    assert (callback_row(body) or {})["guardrails"] == 0.9821
+
+
 def test_a_rejection_callback_is_the_400_answer():
     assert callback_row(REJECTED) == {
         "status_code": 400,

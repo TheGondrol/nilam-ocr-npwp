@@ -116,7 +116,8 @@ def guardrails_results_table(metadata: MetaData, table_prefix: str = "") -> Tabl
     """`nilam_guardrails_results`: one row per guardrails verdict, written by the orchestrator NPWP, the rejected
     documents included (they never reach a stage table). Append-only: the same request_id sent again is
     judged again. `threshold_source` says whose threshold decided: `request` (the central orchestrator's,
-    sent with the request) or `service` (the guardrails service's own). `pipeline_name_sequence` is the
+    sent with the request), `service` (the guardrails service's own), or `none` (the request sent none: accepted
+    whatever the model said, `verdict` is the service's own). `pipeline_name_sequence` is the
     request's (null: the full pipeline), so the orchestrator's GET can answer a request that never reached a
     stage: guardrails only, or rejected here."""
     name = f"{TABLE_PREFIX}{table_prefix}guardrails_results"
@@ -165,7 +166,8 @@ def ocr_results_table(metadata: MetaData, table_prefix: str = "") -> Table:
         Column("data", JSON_TYPE, nullable=True),
         Column("errors", Text, nullable=True),
         Column("pipeline_last_stage", Text, nullable=True),
-        Column("guardrails", Integer, nullable=True),
+        # 0 / 1, or the accepted probability when the request sent no guardrails threshold (0019).
+        Column("guardrails", Float, nullable=True),
         Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
         Index(f"idx_{name}_request_id", "request_id"),
         schema=PIPELINE_SCHEMA,

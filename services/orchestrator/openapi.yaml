@@ -204,7 +204,8 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | the fields | `0` | null | null |
+        | Finished | 200 | the fields | `0`, or the accepted probability without a guardrails threshold
+        | null | null |
 
         | Still running | 202 | null | null | null | null |
 
@@ -214,8 +215,8 @@ paths:
         | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
         |
 
-        | A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED` |
-        the service that failed |
+        | A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        | the service that failed |
 
 
         The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running,
@@ -230,21 +231,21 @@ paths:
 
 
         `data` holds `nomor_npwp` and `nama` as `{value, confidence}`; `nama` is the taxpayer''s name,
-        or the registered name on a company''s card. `confidence` is `1` when the ML team''s trust model
-        gives the value a probability of being correct of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by
-        default), else `0`.
+        or the registered name on a company''s card. `confidence` is the ML team''s trust model''s probability
+        that the value is correct (a float, 4 decimals), or `1` / `0` when the central orchestrator sent
+        a threshold for the field (below). `0` when there is no value.
 
 
         **Thresholds from the central orchestrator, per request, all optional.** `guardrails_confidence_threshold`
-        (`{"acc_rej": 0.8}`, keyed by guardrails name; this pipeline has one, `acc_rej`: a page passes
-        when the model''s accepted probability reaches it, and is rejected below it) replaces the guardrails
-        threshold for this document; left out, the guardrails service''s own is used (`GUARDRAILS_THRESHOLD_URL`,
-        else `GUARDRAILS_THRESHOLD`, else the model''s 0.5). `column_confidence_threshold` (`{"all_field":
-        0.8}` for every field, or per field `{"nomor_npwp": 0.9, "nama": 0.5}`, a field''s own key winning
-        over `all_field`) sets the trust probability for `confidence: 1`, always on the accept side; a
-        field it leaves out, or the whole field omitted, uses `FIELD_CONFIDENCE_THRESHOLD` (0.5). A threshold
-        that cannot be read, or an unknown key in either, answers `422` `INVALID_THRESHOLD` and nothing
-        runs.
+        (`{"acc_rej": 0.8}`, keyed by guardrails name; this pipeline has one, `acc_rej`): a page passes
+        when the model''s accepted probability reaches it, and is rejected below it, and `guardrails`
+        is `0` / `1`. Left out, the document is accepted whatever the model says, and `guardrails` is
+        the model''s accepted probability, the lowest of its pages (a float). `column_confidence_threshold`
+        (`{"all_field": 0.8}` for every field, or per field `{"nomor_npwp": 0.9, "nama": 0.5}`, a field''s
+        own key winning over `all_field`) sets the trust probability for `confidence: 1`, always on the
+        accept side; a field it leaves out, or every field when it is omitted, gets the probability itself.
+        The callback carries the same `data` and `guardrails`. A threshold that cannot be read, or an
+        unknown key in either, answers `422` `INVALID_THRESHOLD` and nothing runs.
 
 
         **Rejected by the structuring rules**: the ML team''s rules reject a document that is blurred
@@ -470,7 +471,8 @@ paths:
 
         |---|---|---|---|---|---|
 
-        | Finished | 200 | the fields | `0` | null | null |
+        | Finished | 200 | the fields | `0`, or the accepted probability without a guardrails threshold
+        | null | null |
 
         | Still running | 202 | null | null | null | null |
 
@@ -480,8 +482,8 @@ paths:
         | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
         |
 
-        | A stage failed | 422 | null | `0` | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED` |
-        the service that failed |
+        | A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
+        | the service that failed |
 
 
         The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running,
@@ -732,7 +734,9 @@ components:
           description: 'From the central orchestrator: the guardrails threshold for this document, between
             0 and 1 (exclusive), on the model''s accepted probability: a page passes when it reaches the
             threshold, and is rejected below it. A JSON object keyed by guardrails name; this pipeline
-            has one, `acc_rej`. Omitted: the guardrails service''s own threshold. A JSON object string'
+            has one, `acc_rej`. Omitted: the document is accepted whatever the model says, and the answer''s
+            `guardrails` is the model''s accepted probability (the lowest of its pages) instead of 0 /
+            1. A JSON object string'
           examples:
           - '{"acc_rej": 0.8}'
         column_confidence_threshold:
@@ -743,8 +747,8 @@ components:
           description: 'Per field, from the central orchestrator: the trust model''s probability that
             the field''s value is correct must reach it for the field''s `confidence` to be `1` (else
             `0`), always on the accept side. Keys: `all_field` (every field), `nomor_npwp`, `nama`; a
-            field''s own key wins over `all_field`, and a field left out (or the whole map omitted) uses
-            `FIELD_CONFIDENCE_THRESHOLD`. A JSON object string'
+            field''s own key wins over `all_field`. A field left out (or the whole map omitted) gets that
+            probability itself as `confidence`, a float from 0 to 1. A JSON object string'
           examples:
           - '{"all_field": 0.8}'
           - '{"nomor_npwp": 0.9, "nama": 0.5}'
@@ -763,16 +767,17 @@ components:
           examples:
           - 12.345.678.9-012.345
         confidence:
-          type: integer
-          enum:
-          - 0
-          - 1
+          anyOf:
+          - type: integer
+          - type: number
           title: Confidence
-          description: 1 when the ML team's trust model gives this value a probability of being correct
-            of at least `FIELD_CONFIDENCE_THRESHOLD` (0.5 by default); 0 when it is lower, or when there
-            is no value
+          description: 'With a threshold for this field in `column_confidence_threshold` (its own key,
+            or `all_field`): 1 when the ML team''s trust model gives this value a probability of being
+            correct of at least that threshold, else 0. Without one: that probability itself, a float
+            from 0 to 1 (4 decimals). 0 when there is no value'
           examples:
           - 1
+          - 0.9731
       type: object
       required:
       - confidence
@@ -900,16 +905,17 @@ components:
         guardrails:
           anyOf:
           - type: integer
-            enum:
-            - 0
-            - 1
+          - type: number
           - type: 'null'
           title: Guardrails
-          description: '0: the document passed the guardrails model (and the pipeline ran); 1: it was
-            rejected by the guardrails model or by the structuring rules. Null on 202, and when the request
-            was refused before the check'
+          description: 'With `guardrails_confidence_threshold`: 0 the document passed the guardrails model
+            (and the pipeline ran). Without it the document is accepted whatever the model says, and this
+            is the model''s accepted probability (the lowest of its pages), a float from 0 to 1 (4 decimals).
+            1: rejected, by the guardrails model (only with a threshold) or by the structuring rules.
+            Null on 202, and when the request was refused before the check'
           examples:
           - 0
+          - 0.9821
       type: object
       required:
       - status_code

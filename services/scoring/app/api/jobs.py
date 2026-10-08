@@ -42,9 +42,10 @@ _JOB = {"request_id": REQUEST_ID_EXAMPLE, "stage": "SCORING", "created_at": "202
         "runs the trust model, stores the result (`nilam_scoring_results`), and POSTs the `SCORING` callback, which "
         "carries the **final result** of the request.\n\n"
         "The outcome is two per-field confidences. There is no document-level score and no approve / reject "
-        "decision. Each confidence is also turned into `0`/`1` with the field's `column_confidence_threshold` "
-        "from the central orchestrator, else `FIELD_CONFIDENCE_THRESHOLD`, and stored with the result (`fields`, "
-        "with the threshold used); the outcome row (`ORCHESTRATION_OUTCOME_TABLE`) carries the same values."
+        "decision. A confidence is turned into `0`/`1` when the central orchestrator sent a "
+        "`column_confidence_threshold` for the field, else it stays the probability; both are stored with the "
+        "result (`fields`, with the threshold used or null); the outcome row (`ORCHESTRATION_OUTCOME_TABLE`) "
+        "carries the same values."
     ),
     responses={
         202: success_examples(

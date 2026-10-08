@@ -3,9 +3,11 @@ from typing import cast
 import pytest
 
 from ocr_common.npwp import (
+    auto_accept,
     column_thresholds_from_json,
     contract_fields,
     guardrails_threshold_from_json,
+    guardrails_value,
     parse_column_thresholds,
     parse_guardrails_threshold,
 )
@@ -64,7 +66,7 @@ def test_the_guardrails_threshold_is_read_from_its_object_keyed_by_guardrails_na
 
 
 @pytest.mark.parametrize("raw", [None, "", "   ", "{}"])
-def test_no_guardrails_threshold_means_the_guardrails_services_own(raw):
+def test_no_guardrails_threshold_means_none_was_sent(raw):
     assert guardrails_threshold_from_json(raw) is None
 
 
@@ -93,3 +95,42 @@ def test_each_field_uses_its_own_threshold_else_the_default():
 
     assert (fields["nomor_npwp"]["confidence"], fields["nama"]["confidence"]) == (0, 1)
     assert contract_fields(RESULT, 0.5)["nomor_npwp"]["confidence"] == 1
+
+
+# --- without thresholds: auto accept and probabilities ---------------------------------------------------------
+
+TWO_PAGES = {
+    "passed": False,
+    "reason": "Document rejected by guardrails: 1/2 page(s) rejected (confidence 0.70)",
+    "document": {"verdict": "reject", "confidence": 0.7, "n_pages": 2, "n_approve": 1, "n_reject": 1},
+    "pages": [
+        {"page_index": 0, "proba_approve": 0.96123, "proba_reject": 0.03877, "verdict": "accepted"},
+        {"page_index": 1, "proba_approve": 0.3, "proba_reject": 0.7, "verdict": "reject"},
+    ],
+}
+
+
+def test_auto_accept_passes_the_document_with_its_lowest_accepted_probability():
+    report = auto_accept(TWO_PAGES)
+
+    assert (report["passed"], report["reason"], report["auto_accepted"], report["score"]) == (True, None, True, 0.3)
+    assert report["document"] == TWO_PAGES["document"], "the service's own verdict is kept"
+    assert guardrails_value(report) == 0.3
+
+
+def test_guardrails_value_is_0_1_with_a_threshold_and_none_without_a_report():
+    assert guardrails_value({**TWO_PAGES, "passed": True}) == 0
+    assert guardrails_value(TWO_PAGES) == 1
+    assert guardrails_value(None) is None
+
+
+def test_without_a_threshold_each_field_has_its_trust_probability():
+    assert contract_fields(RESULT) == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
+    }
+    # A threshold for one field: that one is 0/1, the other keeps its probability.
+    assert contract_fields(RESULT, None, {"nama": 0.95}) == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0},
+    }

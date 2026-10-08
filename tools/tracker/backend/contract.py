@@ -1,17 +1,20 @@
 """Pemeriksa kontrak callback: apakah body yang dikirim pipeline ke Orkestrasi pusat sesuai kesepakatan.
 
-Acuannya kontrak "Callback Hasil OCR" Orkestrasi pusat (2 Okt 2026) dengan jawaban mereka 5 Okt 2026, seperti
+Acuannya kontrak "Callback Hasil OCR" Orkestrasi pusat (2 Okt 2026) dengan jawaban mereka 5 Okt 2026 dan perubahan
+8 Okt 2026 (tanpa threshold: probabilitas, bukan 0 / 1), seperti
 yang dibangun `result_callback_body` (libs/ocr_common/ocr_common/pipeline/callbacks.py). Bukan bagian C di
 docs/confluence/spesifikasi-api-ocr-npwp.xml: bagian itu masih versi sebelum kesepakatan.
 
 Format result (/v1/ocr-callback, yang dipakai di dev), satu per request saat request berakhir:
 
-    selesai   {"request_id", "status": "completed", "result": {...}, "guardrails": 0}
+    selesai   {"request_id", "status": "completed", "result": {...}, "guardrails": 0 | 0.9821}
     ditolak   {"request_id", "status": "completed", "result": null, "guardrails": 1, "message", "error_code"?}
     gagal     {"request_id", "status": "failed", "error_code": "<STAGE>_FAILED", "message"}
 
 `result` yang selesai sama persis dengan `data` jawaban 200 extract-ocr request yang sama; kalau pipeline berakhir
-di scoring: tepat `nomor_npwp` dan `nama`, masing-masing `{value: string | null, confidence: 0 | 1}`.
+di scoring: tepat `nomor_npwp` dan `nama`, masing-masing `{value: string | null, confidence}`. `confidence` 0 / 1
+kalau pusat mengirim `column_confidence_threshold` untuk field itu, selain itu probabilitas trust model (0..1).
+`guardrails` 0 kalau pusat mengirim `guardrails_confidence_threshold`, selain itu probabilitas diterima (0..1).
 
 Format stage (/v1/callbacks/stage, default lokal) bukan kontrak pusat; yang diperiksa hanya bentuknya dan bahwa
 data internal (`answer`, `traceparent`) tidak ikut terkirim.
@@ -31,6 +34,9 @@ CONTRACT_FIELDS = ("nomor_npwp", "nama")
 # Disimpan pipeline untuk dirinya sendiri di body outbox; tidak boleh ikut terkirim.
 INTERNAL_KEYS = ("answer", "traceparent")
 
+# 0 dengan threshold guardrails dari pusat; tanpa threshold, probabilitas diterima dokumen itu.
+GUARDRAILS_COMPLETED_RULE = "guardrails = 0 (integer), atau probabilitas 0..1 tanpa threshold guardrails"
+
 COMPLETED_KEYS = {"request_id", "status", "result", "guardrails"}
 REJECTED_KEYS = COMPLETED_KEYS | {"message", "error_code"}
 FAILED_KEYS = {"request_id", "status", "error_code", "message", "result", "guardrails"}
@@ -45,6 +51,13 @@ def _check(rule: str, ok: bool, detail: str = "", *, level: str = FAIL) -> dict[
 def _is_int(value: Any, *allowed: int) -> bool:
     """Integer JSON (bukan boolean, bukan 0.0) dengan salah satu nilai `allowed`."""
     return type(value) is int and value in allowed
+
+
+def _score(value: Any) -> bool:
+    """Integer 0 / 1, atau probabilitas float 0..1 (bukan boolean)."""
+    if type(value) is int:
+        return value in (0, 1)
+    return type(value) is float and 0 <= value <= 1
 
 
 def _text(value: Any) -> bool:
@@ -118,12 +131,12 @@ def check_result_callback(
 
 
 def _completed(body: dict[str, Any], ends_at_scoring: bool) -> list[dict[str, str]]:
-    result = body.get("result")
+    result, guardrails = body.get("result"), body.get("guardrails")
     checks = [
         _check(
-            "guardrails = 0 (integer)",
-            _is_int(body.get("guardrails"), 0),
-            f"guardrails: {_show(body.get('guardrails'))}",
+            GUARDRAILS_COMPLETED_RULE,
+            _is_int(guardrails, 0) or (type(guardrails) is float and _score(guardrails)),
+            f"guardrails: {_show(guardrails)}",
         ),
         _check("result berupa object", isinstance(result, dict), f"result: {_show(result)}"),
         _only_keys(body, COMPLETED_KEYS),
@@ -144,15 +157,15 @@ def _completed(body: dict[str, Any], ends_at_scoring: bool) -> list[dict[str, st
 
 
 def _contract_field(name: str, field: Any) -> dict[str, str]:
-    rule = f"result.{name} = {{value: string | null, confidence: 0 | 1}}"
+    rule = f"result.{name} = {{value: string | null, confidence: 0 | 1 | probabilitas}}"
     if not isinstance(field, dict) or sorted(field) != ["confidence", "value"]:
         return _check(rule, False, _show(field))
     value, confidence = field["value"], field["confidence"]
     problems = []
     if value is not None and not isinstance(value, str):
         problems.append(f"value {_show(value)}")
-    if not _is_int(confidence, 0, 1):
-        problems.append(f"confidence {_show(confidence)} (harus integer 0 atau 1, bukan probabilitas)")
+    if not _score(confidence):
+        problems.append(f"confidence {_show(confidence)} (harus integer 0 / 1, atau probabilitas 0..1)")
     return _check(rule, not problems, "; ".join(problems))
 
 

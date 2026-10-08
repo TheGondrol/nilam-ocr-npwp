@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 SOURCE_REQUEST = "request"  # the central orchestrator sent the threshold with the request
 SOURCE_SERVICE = "service"  # the guardrails service used its own
+# The central orchestrator sent none: accepted whatever the model said (`npwp.auto_accept`). `verdict` is still the
+# guardrails service's own, under its threshold; `passed` is true.
+SOURCE_NONE = "none"
 
 
 class GuardrailsVerdict(TypedDict):
@@ -101,7 +104,7 @@ class SqlGuardrailsLog:
                     verdict=document.get("verdict"),
                     confidence=document.get("confidence"),
                     threshold=document.get("threshold"),
-                    threshold_source=SOURCE_REQUEST if threshold_from_request else SOURCE_SERVICE,
+                    threshold_source=_source(report, threshold_from_request),
                     n_pages=document.get("n_pages"),
                     reason=report.get("reason"),
                     pipeline_name_sequence=list(sequence) if sequence else None,
@@ -126,3 +129,9 @@ class SqlGuardrailsLog:
             return None
         sequence = row.pipeline_name_sequence
         return {"report": dict(row.report), "sequence": list(sequence) if isinstance(sequence, list) else None}
+
+
+def _source(report: dict[str, Any], threshold_from_request: bool) -> str:
+    if report.get("auto_accepted"):
+        return SOURCE_NONE
+    return SOURCE_REQUEST if threshold_from_request else SOURCE_SERVICE

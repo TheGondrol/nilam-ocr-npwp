@@ -163,8 +163,8 @@ Sejak 1 Oktober 2026 jawaban tidak lagi membawa `document_type`, `job_status`, d
 | `document_type` | tidak | default `npwp`; selain `npwp` dijawab 400 `UNSUPPORTED_DOCUMENT_TYPE` |
 | `file` / `file_url` | salah satu | JPEG, PNG, PDF, maksimal **2,5 MB** (lebih besar: **413**) dan maksimal **2 halaman** (lebih: **400**), keduanya dengan `message` berbahasa Indonesia yang bisa langsung ditampilkan ke pengguna, diperiksa sebelum model jalan (permintaan ML engineer, 23 Sep 2026). PDF dinilai per halaman |
 | `pipeline_name_sequence` | tidak | array of string: service yang dijalankan, berurutan. Default: keempatnya (lihat di bawah) |
-| `guardrails_confidence_threshold` | tidak | JSON object per guardrails, `{"acc_rej": 0.8}`: pipeline ini punya satu guardrails, `acc_rej` (accept/reject), jadi hanya key itu yang valid. Nilainya angka di antara 0 dan 1 (eksklusif): threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold, ditolak kalau di bawahnya (`guardrails: 1`). Tidak dikirim: threshold guardrails sendiri (`GUARDRAILS_THRESHOLD_URL`, lalu `GUARDRAILS_THRESHOLD`, lalu 0.5) |
-| `column_confidence_threshold` | tidak | JSON object, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya, `0` kalau di bawahnya. Key `all_field` berlaku untuk semua field (`{"all_field": 0.8}`); key per field `nomor_npwp` / `nama` boleh dipakai sebagai gantinya atau bersamaan, dan key per field menang atas `all_field`. Field yang tidak disebut, atau field ini tidak dikirim: `FIELD_CONFIDENCE_THRESHOLD` (0.5) |
+| `guardrails_confidence_threshold` | tidak | JSON object per guardrails, `{"acc_rej": 0.8}`: pipeline ini punya satu guardrails, `acc_rej` (accept/reject), jadi hanya key itu yang valid. Nilainya angka di antara 0 dan 1 (eksklusif): threshold model guardrails untuk dokumen ini saja, pada probabilitas accept: halaman lolos kalau probabilitas accept ≥ threshold (`guardrails: 0`), ditolak kalau di bawahnya (`guardrails: 1`). **Tidak dikirim** (kesepakatan 8 Okt 2026): dokumen **selalu diterima** apa pun kata model, dan `guardrails` di jawaban berisi **probabilitas accept** model (float 4 desimal, halaman terendah), bukan 0 / 1 |
+| `column_confidence_threshold` | tidak | JSON object, nilai 0–1, selalu sisi accept: `confidence` field itu `1` kalau probabilitas trust model ≥ nilainya, `0` kalau di bawahnya. Key `all_field` berlaku untuk semua field (`{"all_field": 0.8}`); key per field `nomor_npwp` / `nama` boleh dipakai sebagai gantinya atau bersamaan, dan key per field menang atas `all_field`. Field yang tidak disebut, atau field ini tidak dikirim sama sekali: `confidence` field itu berisi **probabilitas trust model** (float 4 desimal, 0–1), bukan 0 / 1 (kesepakatan 8 Okt 2026) |
 
 Threshold yang tidak bisa dibaca (bukan JSON object, nilai di luar rentang atau bukan angka, key guardrails selain `acc_rej`, atau key field selain `all_field` / `nomor_npwp` / `nama`) dijawab **422
 `INVALID_THRESHOLD`** dengan `message` yang menyebut key atau nilai mana yang salah, dan tidak ada yang dijalankan. Contoh lengkap:
@@ -175,9 +175,11 @@ Threshold yang tidak bisa dibaca (bukan JSON object, nilai di luar rentang atau 
     guardrails_confidence_threshold  = {"acc_rej":0.8}
     column_confidence_threshold      = {"all_field":0.8}
 
-Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`).
-`column_confidence_threshold` ikut disimpan bersama job, jadi `GET /v1/extract-ocr/{request_id}` menjawab dengan
-`confidence` yang sama dengan jawaban `POST`-nya.
+Threshold guardrails yang dipakai tercatat di laporan guardrails (`document.threshold`); tanpa threshold dari
+kalian laporan itu ditandai `auto_accepted: true` dengan `score` (= `guardrails` di jawaban), dan
+`nilam_guardrails_results.threshold_source` berisi `none`. `column_confidence_threshold` dan nilai `guardrails`
+ikut disimpan bersama job, jadi `GET /v1/extract-ocr/{request_id}` menjawab dengan `confidence` dan `guardrails`
+yang sama dengan jawaban `POST`-nya, dan callback membawa nilai yang sama juga.
 
 **Memilih service: `pipeline_name_sequence`.** Isinya nama service yang dijalankan, berurutan:
 `guardrails`, `extraction`, `structuring`, `scoring`. Kirim sebagai field form berulang
@@ -226,7 +228,8 @@ ditinggalkan pod yang mati. Presigned URL karena itu harus hidup lebih lama dari
 (`PIPELINE_JOB_LEASE_SECONDS`, 5 menit). Host-nya harus terdaftar di `FILE_URL_ALLOWED_HOSTS`
 service (atau, kalau itu kosong, resolve ke alamat publik), dan redirect tidak diikuti.
 
-Selesai dalam waktu tunggu, **200**:
+Selesai dalam waktu tunggu, **200**. Dengan kedua threshold dikirim
+(`{"acc_rej": 0.8}`, `{"all_field": 0.8}`):
 
     {
       "status_code": 200,
@@ -242,10 +245,24 @@ Selesai dalam waktu tunggu, **200**:
       "guardrails": 0
     }
 
+Tanpa threshold sama sekali, nilai yang sama berupa probabilitas:
+
+    {
+      ...
+      "data": {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471}
+      },
+      ...
+      "guardrails": 0.9821
+    }
+
 - `nama` = nama wajib pajak, atau nama badan pada kartu perusahaan.
-- `confidence` = `1` kalau trust model ML memberi probabilitas benar minimal threshold field itu
-  (`column_confidence_threshold`, kalau tidak dikirim `FIELD_CONFIDENCE_THRESHOLD`, default 0.5), `0` kalau
-  di bawahnya atau field tidak ditemukan.
+- `confidence` = dengan threshold untuk field itu (`column_confidence_threshold`): `1` kalau trust model ML
+  memberi probabilitas benar minimal threshold itu, `0` kalau di bawahnya. Tanpa threshold untuk field itu:
+  probabilitasnya sendiri (float, 4 desimal). `0` kalau field tidak ditemukan.
+- `guardrails` = `0` kalau `guardrails_confidence_threshold` dikirim; tanpa itu probabilitas accept model
+  guardrails (float, halaman terendah). Penolakan (400) selalu `1`.
 - Flag dari aturan extraction ML engineer **tidak** ada di `data`: flag itu internal, masuk sebagai
   input trust model. Dari 11 flag, hanya 2 yang ditoleransi (nama satu kata, huruf di nomor NPWP):
   nilainya tetap dikembalikan dan confidence-nya sudah memperhitungkan flag itu. Sembilan lainnya
@@ -291,6 +308,8 @@ callback `FAILED`. `errors` menyebut tahapnya, `message` alasannya:
      "data": null, "errors": "OCR_FAILED", "request_id": "REQ_001",
      "pipeline_last_stage": "extraction", "guardrails": 0}
 
+(`guardrails` seperti pada 200: probabilitas accept kalau `guardrails_confidence_threshold` tidak dikirim.)
+
 Error lain (envelope standar). `errors` selalu kode yang stabil; `message` teks yang bisa berubah:
 
 | Kode | `errors` | Arti | Pipeline jalan? |
@@ -332,7 +351,7 @@ tidak datang.
 | selesai | 200 | `data` | null |
 | masih berjalan | 202 | – | null |
 | ditolak aturan structuring | 400 | `guardrails: 1`, `pipeline_last_stage: structuring` | `DOWNSTREAM_VALIDATION_ERROR` |
-| ditolak model guardrails | 400 | `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
+| ditolak model guardrails (hanya kalau `guardrails_confidence_threshold` dikirim) | 400 | `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
 | `[guardrails]` saja, lolos | 200 | laporan guardrails sebagai `data` | null |
 | satu tahap gagal | 422 | `pipeline_last_stage`: tahap yang gagal | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |
 | tidak dikenal | 404 | – | `REQUEST_ID_NOT_FOUND` |
@@ -422,8 +441,10 @@ sekitar `PIPELINE_WAIT_SECONDS`), jadi callback selalu dikirim; Orkestrasi menja
 request yang sudah dijawab 200 dengan `200 "Result already recorded"`.
 
 Selesai: `result` sama persis dengan `data` jawaban 200 `extract-ocr` untuk request yang sama
-(dengan urutan penuh: `nomor_npwp` dan `nama` dengan confidence 0/1 hasil threshold request itu;
-`pipeline_name_sequence` yang berakhir sebelum `scoring`: hasil service terakhirnya apa adanya):
+(dengan urutan penuh: `nomor_npwp` dan `nama` dengan confidence 0/1 hasil threshold request itu, atau
+probabilitas untuk field tanpa threshold; `pipeline_name_sequence` yang berakhir sebelum `scoring`: hasil service
+terakhirnya apa adanya). `guardrails` juga sama dengan jawaban 200: `0`, atau probabilitas accept kalau
+`guardrails_confidence_threshold` tidak dikirim:
 
     {
       "request_id": "OCR_9cb01af2-493d-446d-b191-af120333f6d0",

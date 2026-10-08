@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
 from ocr_common.config import DEFAULT_JOB_LEASE_SECONDS
+from ocr_common.npwp import guardrails_value
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage
 from ocr_common.pipeline.outcomes import StageOutcome
 
@@ -28,9 +29,13 @@ class JobRecord(TypedDict):
     # The pipeline_name_sequence the job was submitted with (None for jobs from before it existed: the
     # full pipeline). Read by the orchestrator to know which stage ends the request.
     pipeline_name_sequence: list[str] | None
-    # The central orchestrator's per-field thresholds (None: FIELD_CONFIDENCE_THRESHOLD for every field). Read by
-    # the orchestrator to answer a GET with the same confidences as the POST.
+    # The central orchestrator's per-field thresholds (None: no field has one, every confidence is the trust
+    # model's probability). Read by the orchestrator to answer a GET with the same confidences as the POST.
     column_confidence_threshold: dict[str, float] | None
+    # The answer's `guardrails`, from the guardrails report the job was submitted with (`npwp.guardrails_value`):
+    # 0, or the accepted probability when the request sent no guardrails threshold; None without a report. Read
+    # by the orchestrator to answer a GET with the same `guardrails` as the POST.
+    guardrails: int | float | None
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,12 @@ def stored_column_thresholds(input: dict[str, Any] | None) -> dict[str, float] |
     return dict(thresholds) if isinstance(thresholds, dict) and thresholds else None
 
 
+def stored_guardrails(input: dict[str, Any] | None) -> int | float | None:
+    """The answer's `guardrails` for the guardrails report stored in a job's `input`, if any."""
+    report = (input or {}).get("guardrails")
+    return guardrails_value(report) if isinstance(report, dict) else None
+
+
 def stored_sequence(input: dict[str, Any] | None) -> list[str] | None:
     """The pipeline_name_sequence stored in a job's `input`, if any."""
     sequence = (input or {}).get("pipeline_name_sequence")
@@ -124,6 +135,7 @@ class InMemoryJobRepository:
                 "updated_at": now,
                 "pipeline_name_sequence": stored_sequence(input),
                 "column_confidence_threshold": stored_column_thresholds(input),
+                "guardrails": stored_guardrails(input),
             }
             self._inputs[request_id] = input
             return True
@@ -138,6 +150,7 @@ class InMemoryJobRepository:
                 updated_at=now,
                 pipeline_name_sequence=stored_sequence(input),
                 column_confidence_threshold=stored_column_thresholds(input),
+                guardrails=stored_guardrails(input),
             )
             self._inputs[request_id] = input
             return True

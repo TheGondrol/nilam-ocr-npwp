@@ -123,10 +123,19 @@ class JobStatusBase(BaseModel):
         None,
         description=(
             "The central orchestrator's per-field thresholds the job was submitted with (`nomor_npwp`, `nama`; "
-            "an `all_field` it sent is already spread over them); null when none were given: "
-            "`FIELD_CONFIDENCE_THRESHOLD` for every field"
+            "an `all_field` it sent is already spread over them); null when none were given: every field's "
+            "confidence is then the trust model's probability"
         ),
         examples=[{"nomor_npwp": 0.9, "nama": 0.5}],
+    )
+    guardrails: int | float | None = Field(
+        None,
+        description=(
+            "The `guardrails` of the request's extract-ocr answer, from the guardrails report the job was submitted "
+            "with: `0` when the document passed with the central orchestrator's threshold, the model's accepted "
+            "probability when it sent none; null when guardrails did not run"
+        ),
+        examples=[0.9821],
     )
 
 

@@ -61,6 +61,22 @@ class GuardrailsResult(_Forwarded):
     reason: str | None = Field(None, description="Why it was rejected; null when passed", examples=[None])
     document: GuardrailsDocument | None = Field(None, description="Verdict for the document as a whole")
     pages: list[GuardrailsPage] = Field(default_factory=list, description="One entry per page, in page order")
+    auto_accepted: bool | None = Field(
+        None,
+        description=(
+            "true: the central orchestrator sent no guardrails threshold, so the document passed whatever the model "
+            "said (`document.verdict` stays the guardrails service's own)"
+        ),
+        examples=[True],
+    )
+    score: float | None = Field(
+        None,
+        ge=0,
+        le=1,
+        description="With `auto_accepted`: the model's accepted probability, the lowest of its pages; the answer's "
+        "`guardrails`",
+        examples=[0.9821],
+    )
 
 
 class BoundingBoxPayload(_Forwarded):

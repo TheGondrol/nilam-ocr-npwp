@@ -50,13 +50,14 @@ def test_the_structuring_output_is_scored_now_and_nothing_is_recorded(client, au
     result = body["data"]
     assert set(result) == {"npwp_confidence", "name_confidence", "fields", "payload"}
     assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
+    # No column_confidence_threshold: each field's confidence is the trust probability, with no threshold.
     assert result["fields"] == {
         "nomor_npwp": {
             "value": "12.345.678.9-012.345",
-            "confidence": int(result["npwp_confidence"] >= 0.5),
-            "threshold": 0.5,
+            "confidence": round(result["npwp_confidence"], 4),
+            "threshold": None,
         },
-        "nama": {"value": "BUDI SANTOSO", "confidence": int(result["name_confidence"] >= 0.5), "threshold": 0.5},
+        "nama": {"value": "BUDI SANTOSO", "confidence": round(result["name_confidence"], 4), "threshold": None},
     }
     payload = result["payload"]
     assert payload["npwp"] == "123456789012345"

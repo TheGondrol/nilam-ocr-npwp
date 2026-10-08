@@ -6,7 +6,7 @@ from ocr_common.testing import image_upload
 from app.config import get_settings
 from app.main import app
 from app.services.pipeline_waiter import STATUS_REJECTED, WaitOutcome
-from tests.conftest import ACCEPTED_REPORT, JPEG, STRUCTURING_RESULT
+from tests.conftest import ACCEPTED_REPORT, JPEG, STRUCTURING_RESULT, WITH_GUARDRAILS_THRESHOLD
 
 TOO_MANY_PAGES = "Jumlah halaman melebihi batas, pastikan hanya mengunggah dokumen NPWP"
 
@@ -29,27 +29,49 @@ def test_health_has_no_backends(client):
 def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, stub_guardrails, stub_extraction):
     response = _submit(client, auth)
 
+    # No thresholds sent: the trust model's probabilities as the confidences, the accepted probability as guardrails.
     assert response.status_code == 200
     assert response.json() == {
         "status_code": 200,
         "status_desc": "OK",
         "message": "OCR extraction completed successfully",
         "data": {
-            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 1},
-            "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+            "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+            "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
         },
         "errors": None,
         "request_id": "OCR_1",
-        "guardrails": 0,
+        "guardrails": 0.9821,
         "pipeline_last_stage": None,
     }
     assert stub_guardrails.checked == [{"request_id": "OCR_1", "filename": "npwp.jpg", "content_type": "image/jpeg"}]
     [handed] = stub_extraction.submitted
-    assert handed["guardrails"]["passed"] is True
+    assert (handed["guardrails"]["passed"], handed["guardrails"]["auto_accepted"]) == (True, True)
+
+
+def test_with_both_thresholds_the_answer_has_0_1_flags(client, auth, stub_guardrails):
+    response = _submit(client, auth, **WITH_GUARDRAILS_THRESHOLD, column_confidence_threshold='{"all_field": 0.8}')
+
+    body = response.json()
+    assert (response.status_code, body["guardrails"]) == (200, 0)
+    assert body["data"] == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+    }
+    assert stub_guardrails.checked[0]["threshold"] == 0.5
+
+
+def test_without_a_guardrails_threshold_a_document_the_model_rejects_is_accepted(client, auth, stub_extraction):
+    response = _submit(client, auth, filename="notnpwp.jpg")
+
+    # The model's accepted probability of that document (its only page) is the answer's guardrails.
+    assert (response.status_code, response.json()["guardrails"]) == (200, 0.1179)
+    [handed] = stub_extraction.submitted
+    assert (handed["guardrails"]["document"]["verdict"], handed["guardrails"]["score"]) == ("reject", 0.1179)
 
 
 def test_rejection_by_the_guardrails_model_is_400_with_guardrails_0(client, auth, stub_extraction, stub_waiter):
-    response = _submit(client, auth, filename="notnpwp.jpg")
+    response = _submit(client, auth, filename="notnpwp.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert response.status_code == 400
     assert response.json() == {
@@ -240,13 +262,15 @@ def test_guardrails_only_answers_with_the_report_as_it_is(client, auth, stub_ext
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0, None)
-    assert body["data"] == ACCEPTED_REPORT
+    assert (body["status_code"], body["guardrails"], body["errors"]) == (200, 0.9821, None)
+    assert body["data"] == {**ACCEPTED_REPORT, "auto_accepted": True, "score": 0.9821}
     assert stub_extraction.submitted == [] and stub_waiter.calls == []
 
 
-def test_guardrails_only_still_rejects(client, auth):
-    response = _submit(client, auth, filename="notnpwp.jpg", pipeline_name_sequence=["guardrails"])
+def test_guardrails_only_still_rejects_with_a_threshold(client, auth):
+    response = _submit(
+        client, auth, filename="notnpwp.jpg", pipeline_name_sequence=["guardrails"], **WITH_GUARDRAILS_THRESHOLD
+    )
 
     assert response.status_code == 400
     assert (response.json()["errors"], response.json()["guardrails"]) == ("DOWNSTREAM_VALIDATION_ERROR", 1)
@@ -348,7 +372,7 @@ def test_pipeline_last_stage_names_the_service_of_an_error_and_is_null_on_succes
 
 
 def test_a_guardrails_rejection_comes_from_guardrails(client, auth):
-    response = _submit(client, auth, filename="notnpwp.jpg")
+    response = _submit(client, auth, filename="notnpwp.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert (response.status_code, response.json()["pipeline_last_stage"]) == (400, "guardrails")
 

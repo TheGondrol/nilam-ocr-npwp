@@ -8,7 +8,6 @@ from ocr_common.web.security import verify_api_key
 
 from app.api.schemas import ScoringDirectRequest, ScoringDirectResponse
 from app.api.scoring import CONFIDENCE_PAYLOAD_EXAMPLE
-from app.config import Settings, get_settings
 from app.dependencies import get_confidence_service
 from app.services.confidence_service import ConfidenceService
 
@@ -37,8 +36,9 @@ _RESULT_EXAMPLE = {
         "from them, runs the trust model, and answers with the scoring result in the body. Nothing is recorded: "
         "no `nilam_scoring_jobs` row, no callback, no outcome row, so it never touches the orchestrator's data.\n\n"
         "The answer is exactly what `GET /v1/scoring/jobs/{request_id}` reports as `result`: the two "
-        "probabilities, the 0/1 decision per field with the threshold used (`column_confidence_threshold` of "
-        "the request, else `FIELD_CONFIDENCE_THRESHOLD`), and the exact payload that was scored. `ocr` left out "
+        "probabilities, each field's confidence with the threshold used (`column_confidence_threshold` of the "
+        "request: 0/1; none for the field: the probability itself), and the exact payload that was scored. `ocr` "
+        "left out "
         "gives null document scores, `guardrails` left out gives a null guardrails probability; the model's "
         "imputer fills both."
     ),
@@ -55,7 +55,6 @@ async def score_direct(
     request: Request,
     body: ScoringDirectRequest,
     service: ConfidenceService = Depends(get_confidence_service),
-    settings: Settings = Depends(get_settings),
 ):
     guardrails = body.guardrails.model_dump(exclude_unset=True) if body.guardrails is not None else None
     ocr = body.ocr.model_dump() if body.ocr is not None else None
@@ -64,7 +63,6 @@ async def score_direct(
         guardrails,
         ocr,
         body.structuring.model_dump(),
-        settings.field_confidence_threshold,
         body.column_confidence_threshold,
     )
     return envelope(200, "Success", data, body.request_id or get_request_id(request))

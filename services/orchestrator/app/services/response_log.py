@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class ResponseLog(Protocol):
-    async def record(self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | None) -> None:
+    async def record(
+        self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | float | None
+    ) -> None:
         """Append the answer `body` (the extract-ocr envelope) sent with HTTP `status_code`."""
         ...
 
@@ -27,7 +29,9 @@ class ResponseLog(Protocol):
 class NoResponseLog:
     """Without DATABASE_URL (local runs, tests): nothing is kept."""
 
-    async def record(self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | None) -> None:
+    async def record(
+        self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | float | None
+    ) -> None:
         return None
 
 
@@ -37,13 +41,17 @@ class SqlResponseLog:
         self.table = ocr_results_table(MetaData(), table_prefix)
         self._timeout = timeout
 
-    async def record(self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | None) -> None:
+    async def record(
+        self, request_id: str, status_code: int, body: dict[str, Any], *, guardrails: int | float | None
+    ) -> None:
         try:
             await asyncio.wait_for(self._insert(request_id, status_code, body, guardrails), self._timeout)
         except Exception:  # noqa: BLE001 - best-effort, see the module docstring
             logger.exception("nilam_ocr_results: answer %d to %s not recorded", status_code, request_id)
 
-    async def _insert(self, request_id: str, status_code: int, body: dict[str, Any], guardrails: int | None) -> None:
+    async def _insert(
+        self, request_id: str, status_code: int, body: dict[str, Any], guardrails: int | float | None
+    ) -> None:
         async with get_engine(self._url).begin() as conn:
             await write_ocr_result(
                 conn,

@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import Table, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from ocr_common.npwp import COMPLETED_MESSAGE
+from ocr_common.npwp import COMPLETED_MESSAGE, GUARDRAILS_PASSED, GUARDRAILS_REJECTED
 from ocr_common.pipeline.callbacks import RESULT_COMPLETED, result_callback_body
 from ocr_common.pipeline.database import get_engine
 from ocr_common.pipeline.repository import stored_sequence
@@ -28,12 +28,6 @@ from ocr_common.pipeline.sequence import GUARDRAILS, SERVICE_OF_STAGE
 from ocr_common.web.envelope import STATUS_DESC
 
 logger = logging.getLogger(__name__)
-
-# `guardrails`, as in the extract-ocr answer: 0 passed, 1 rejected (by the guardrails model or the structuring
-# rules); null when the request left guardrails out.
-GUARDRAILS_PASSED = 0
-GUARDRAILS_REJECTED = 1
-
 
 async def write_ocr_result(
     conn: AsyncConnection,
@@ -44,7 +38,7 @@ async def write_ocr_result(
     *,
     data: dict[str, Any] | None = None,
     errors: str | None = None,
-    guardrails: int | None = None,
+    guardrails: int | float | None = None,
     pipeline_last_stage: str | None = None,
 ) -> None:
     """Append one answer of `request_id` as a new row (the table is append-only)."""
@@ -66,16 +60,17 @@ async def write_ocr_result(
 
 def callback_row(body: dict[str, Any]) -> dict[str, Any] | None:
     """The row of a per-stage callback body that ends the request, as the extract-ocr answer of the same outcome:
-    completed 200 with the result as `data`, rejected 400 `DOWNSTREAM_VALIDATION_ERROR` (`guardrails` 1), failed
-    422 `<STAGE>_FAILED`. `pipeline_last_stage` is the service whose callback it is (on a failed hand-off, the
-    stage that never received the job). None for a body that does not end the request."""
+    completed 200 with the result as `data` and the callback's `guardrails` (0, or the accepted probability), rejected
+    400 `DOWNSTREAM_VALIDATION_ERROR` (`guardrails` 1), failed 422 `<STAGE>_FAILED`. `pipeline_last_stage` is the
+    service whose callback it is (on a failed hand-off, the stage that never received the job). None for a body that
+    does not end the request."""
     sent = result_callback_body(body)
     if sent is None:
         return None
     stage = str(body["stage"])
     service = SERVICE_OF_STAGE.get(stage, stage.lower())
     if sent["status"] == RESULT_COMPLETED and sent.get("result") is not None:
-        status_code, message, errors, guardrails = 200, COMPLETED_MESSAGE, None, GUARDRAILS_PASSED
+        status_code, message, errors, guardrails = 200, COMPLETED_MESSAGE, None, sent["guardrails"]
     elif sent["status"] == RESULT_COMPLETED:
         status_code, message, errors, guardrails = 400, sent.get("message"), sent.get("error_code"), GUARDRAILS_REJECTED
     else:

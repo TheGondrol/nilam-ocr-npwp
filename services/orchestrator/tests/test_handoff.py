@@ -9,7 +9,7 @@ from ocr_common.clients.remote import RemoteModelClient
 from app.clients.extraction import ExtractionJobClient
 from app.dependencies import get_extraction_client
 from app.main import app
-from tests.conftest import JPEG
+from tests.conftest import JPEG, WITH_GUARDRAILS_THRESHOLD
 
 RID = "REQ_orchestrator_jobs"
 
@@ -60,11 +60,11 @@ def extraction():
     app.dependency_overrides.pop(get_extraction_client, None)
 
 
-def _submit(client, auth, filename="npwp.jpg"):
+def _submit(client, auth, filename="npwp.jpg", **form):
     return client.post(
         "/v1/extract-ocr",
         headers=auth,
-        data={"request_id": RID, "document_type": "npwp"},
+        data={"request_id": RID, "document_type": "npwp", **form},
         files={"file": (filename, JPEG, "image/jpeg")},
     )
 
@@ -94,7 +94,7 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["guardrails"]) == (200, 0)
+    assert (body["status_code"], body["guardrails"]) == (200, 0.9821)
 
     [sent] = handler.requests
     assert sent.url.path == "/v1/extraction/jobs"
@@ -105,6 +105,8 @@ def test_accepted_document_is_handed_to_the_ocr_stage(client, auth, extraction):
     guardrails = json.loads(fields["guardrails"])
     assert guardrails["passed"] is True
     assert guardrails["document"]["verdict"] == "accepted"
+    # No guardrails threshold was sent: the stages carry the auto-accept score down to the final callback.
+    assert (guardrails["auto_accepted"], guardrails["score"]) == (True, 0.9821)
     assert "job" not in guardrails
     assert file_bytes == JPEG
 
@@ -134,7 +136,7 @@ def test_a_document_without_guardrails_is_handed_over_without_a_guardrails_field
 def test_rejected_document_stops_here(client, auth, extraction):
     handler = extraction(_accepted)
 
-    response = _submit(client, auth, filename="notnpwp.jpg")
+    response = _submit(client, auth, filename="notnpwp.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert response.status_code == 400
     body = response.json()

@@ -63,10 +63,10 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
     assert result["fields"] == {
         "nomor_npwp": {
             "value": "12.345.678.9-012.345",
-            "confidence": int(result["npwp_confidence"] >= 0.5),
-            "threshold": 0.5,
+            "confidence": round(result["npwp_confidence"], 4),
+            "threshold": None,
         },
-        "nama": {"value": "BUDI SANTOSO", "confidence": int(result["name_confidence"] >= 0.5), "threshold": 0.5},
+        "nama": {"value": "BUDI SANTOSO", "confidence": round(result["name_confidence"], 4), "threshold": None},
     }
     assert 0 <= result["npwp_confidence"] <= 1 and 0 <= result["name_confidence"] <= 1
     assert result["payload"]["npwp"] == "123456789012345"
@@ -77,7 +77,7 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
 
     assert len(callback.calls) == 1
     call = callback.calls[0]
-    assert (call["stage"], call["status"]) == ("SCORING", "DONE")
+    assert (call["stage"], call["status"], call["guardrails"]) == ("SCORING", "DONE", 0)
     assert call["result"] == {
         "fields": {
             "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.96},
@@ -89,6 +89,27 @@ def test_submit_returns_202_then_scores_and_sends_final_result(harness, auth):
         "flag": True,
         "flag_reason": "Nama hanya terdiri dari 1 kata, mohon dicek kembali",
     }
+
+
+def test_an_auto_accepted_document_sends_its_score_and_feeds_it_to_the_model(harness, auth):
+    client, callback = harness
+    # No guardrails threshold was sent: accepted whatever the model said (it would have rejected this one).
+    guardrails = {
+        "passed": True,
+        "reason": None,
+        "document": {"verdict": "reject", "confidence": 0.88, "n_pages": 1},
+        "pages": [{"page_index": 0, "proba_approve": 0.12, "proba_reject": 0.88, "verdict": "reject"}],
+        "auto_accepted": True,
+        "score": 0.12,
+    }
+
+    client.post("/v1/scoring/jobs", headers=auth, json={**_payload("REQ_auto"), "guardrails": guardrails})
+
+    job = wait_for_job(client, "/v1/scoring/jobs/REQ_auto")
+    assert (job["status"], job["guardrails"]) == ("DONE", 0.12)
+    assert job["result"]["payload"]["guardrail_probability"] == 0.12
+    [call] = callback.calls
+    assert (call["final"], call["guardrails"]) == (True, 0.12)
 
 
 def test_same_request_id_is_not_processed_twice(harness, auth):
@@ -216,7 +237,7 @@ class FixedConfidence(ConfidenceService):
 def outcome_harness():
     repository = RecordingRepository()
     pipeline = StagePipeline(stage=STAGE_SCORING, repository=repository, callback=RecordingCallback())
-    service = ScoringJobService(pipeline, FixedConfidence(get_trust_model()), 0.5)
+    service = ScoringJobService(pipeline, FixedConfidence(get_trust_model()))
     app.dependency_overrides[get_job_service] = lambda: service
     with make_client(app) as client:
         yield client, repository, service
@@ -236,7 +257,7 @@ def test_column_confidence_threshold_sets_each_fields_confidence(outcome_harness
     }
 
 
-def test_a_field_left_out_uses_field_confidence_threshold(outcome_harness, auth):
+def test_a_field_left_out_keeps_its_trust_probability(outcome_harness, auth):
     client, repository, _ = outcome_harness
 
     client.post("/v1/scoring/jobs", headers=auth, json={**_payload("REQ_none")})
@@ -248,8 +269,8 @@ def test_a_field_left_out_uses_field_confidence_threshold(outcome_harness, auth)
     wait_for_job(client, "/v1/scoring/jobs/REQ_none")
     wait_for_job(client, "/v1/scoring/jobs/REQ_nama")
 
-    assert [repository.outcomes["REQ_none"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [1, 1]
-    assert [repository.outcomes["REQ_nama"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [1, 0]
+    assert [repository.outcomes["REQ_none"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [0.8, 0.6]
+    assert [repository.outcomes["REQ_nama"][name]["confidence"] for name in ("nomor_npwp", "nama")] == [0.8, 0]
 
 
 async def test_a_stale_job_is_run_again_with_its_stored_column_thresholds(outcome_harness):
@@ -284,10 +305,10 @@ def test_the_0_1_decision_is_stored_with_the_result_and_matches_the_outcome_row(
     client.post("/v1/scoring/jobs", headers=auth, json=body)
     job = wait_for_job(client, "/v1/scoring/jobs/REQ_store")
 
-    # FixedConfidence: npwp 0.8 (< 0.9 given), name 0.6 (>= FIELD_CONFIDENCE_THRESHOLD 0.5)
+    # FixedConfidence: npwp 0.8 (< 0.9 given), name 0.6 (no threshold: the probability itself)
     assert job["result"]["fields"] == {
         "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0, "threshold": 0.9},
-        "nama": {"value": "BUDI SANTOSO", "confidence": 1, "threshold": 0.5},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.6, "threshold": None},
     }
     assert repository.outcomes["REQ_store"] == {
         name: {"value": field["value"], "confidence": field["confidence"]}

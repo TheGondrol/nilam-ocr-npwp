@@ -3,8 +3,6 @@ from typing import cast
 from ocr_common.npwp import contract_fields
 from ocr_common.types import FinalResult
 
-from app.config import get_settings
-from app.main import app
 from tests.conftest import JPEG
 
 RID = "REQ_contract"
@@ -50,6 +48,22 @@ def test_missing_value_or_score_gives_confidence_0():
     }
 
 
+def test_without_a_threshold_the_confidence_is_the_trust_probability():
+    fields = contract_fields(_result("12.345.678.9-012.345", "BUDI SANTOSO", None, 0.729649, 0.49))
+    assert fields == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.49},
+    }
+
+
+def test_a_threshold_for_one_field_leaves_the_other_its_probability():
+    fields = contract_fields(_result("12.345.678.9-012.345", "BUDI SANTOSO", None, 0.7296, 0.49), None, {"nama": 0.4})
+    assert fields == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
+    }
+
+
 def test_company_card_reports_the_registered_name_as_nama():
     fields = contract_fields(_result("01.234.567.8-901.000", None, "PT CIPTA KARYA MANDIRI", 0.9, 0.8), 0.5)
     assert fields["nama"] == {"value": "PT CIPTA KARYA MANDIRI", "confidence": 1}
@@ -81,16 +95,3 @@ def test_unsupported_document_type_is_400_before_anything_runs(client, auth, stu
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
 
 
-def test_confidence_threshold_can_be_changed(client, auth):
-    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(
-        update={"field_confidence_threshold": 0.8}
-    )
-    try:
-        response = _submit(client, auth)
-    finally:
-        app.dependency_overrides.pop(get_settings, None)
-
-    assert response.json()["data"] == {
-        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0},
-        "nama": {"value": "BUDI SANTOSO", "confidence": 1},
-    }

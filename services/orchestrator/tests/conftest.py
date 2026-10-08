@@ -23,6 +23,9 @@ ACCEPTED_REPORT = {
     "document": {"verdict": "accepted", "confidence": 0.9821, "n_pages": 1, "n_approve": 1, "n_reject": 0},
     "pages": [{"page_index": 0, "proba_approve": 0.9821, "proba_reject": 0.0179, "verdict": "accepted"}],
 }
+# The guardrails threshold the central orchestrator may send: with it the model can reject, and `guardrails` is 0 / 1.
+# Without it every document is accepted (`npwp.auto_accept`) and `guardrails` is the accepted probability.
+WITH_GUARDRAILS_THRESHOLD = {"guardrails_confidence_threshold": '{"acc_rej": 0.5}'}
 REJECTED_REPORT = {
     "passed": False,
     "reason": "Document rejected by guardrails: 1/1 page(s) rejected (confidence 0.88)",

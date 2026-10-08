@@ -67,7 +67,7 @@ class ResponseLogMiddleware:
         await log.record(request_id, status_code, body, guardrails=_guardrails(scope, body))
 
 
-def _guardrails(scope: Scope, body: dict[str, Any]) -> int | None:
+def _guardrails(scope: Scope, body: dict[str, Any]) -> int | float | None:
     """The answer's `guardrails`, or None when the request's sequence left guardrails out."""
     sequence = (scope.get("state") or {}).get(SEQUENCE_STATE)
     if sequence is not None and GUARDRAILS not in sequence:

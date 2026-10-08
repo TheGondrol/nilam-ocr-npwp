@@ -23,8 +23,8 @@ ALL_FIELDS_KEY = "all_field"
 COLUMN_THRESHOLD_DESCRIPTION = (
     "Per field, from the central orchestrator: the trust model's probability that the field's value is correct "
     "must reach it for the field's `confidence` to be `1` (else `0`), always on the accept side. Keys: "
-    "`all_field` (every field), `nomor_npwp`, `nama`; a field's own key wins over `all_field`, and a field "
-    "left out (or the whole map omitted) uses `FIELD_CONFIDENCE_THRESHOLD`"
+    "`all_field` (every field), `nomor_npwp`, `nama`; a field's own key wins over `all_field`. A field left out "
+    "(or the whole map omitted) gets that probability itself as `confidence`, a float from 0 to 1"
 )
 # The guardrails of this pipeline, as the central orchestrator names them in `guardrails_confidence_threshold`.
 # This repo runs one guardrails model (accept / reject), keyed `acc_rej`; the object form leaves room for more.
@@ -32,9 +32,17 @@ GUARDRAILS_KEYS = ("acc_rej",)
 GUARDRAILS_THRESHOLD_DESCRIPTION = (
     "From the central orchestrator: the guardrails threshold for this document, between 0 and 1 (exclusive), "
     "on the model's accepted probability: a page passes when it reaches the threshold, and is rejected below "
-    "it. A JSON object keyed by guardrails name; this pipeline has one, `acc_rej`. Omitted: the guardrails "
-    "service's own threshold"
+    "it. A JSON object keyed by guardrails name; this pipeline has one, `acc_rej`. Omitted: the document is "
+    "accepted whatever the model says, and the answer's `guardrails` is the model's accepted probability (the "
+    "lowest of its pages) instead of 0 / 1"
 )
+# `guardrails` of an answer: 0 the document passed the guardrails model with the central orchestrator's threshold,
+# 1 it was rejected (by that model, or by the structuring rules).
+GUARDRAILS_PASSED = 0
+GUARDRAILS_REJECTED = 1
+# Floats in an answer (an accepted probability, a field's trust probability) keep this many decimals, like the
+# guardrails report's `confidence`.
+SCORE_DECIMALS = 4
 
 
 def parse_column_thresholds(value: Any) -> dict[str, float] | None:
@@ -126,22 +134,41 @@ def guardrails_threshold_from_json(raw: str | None) -> float | None:
     return parse_guardrails_threshold(value)
 
 
+def auto_accept(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The guardrails report of a request that sent no `guardrails_confidence_threshold`: accepted whatever the
+    model said (`auto_accepted`), with `score` the model's accepted probability, the lowest of its pages (both
+    guardrails backends report every page). The service's own verdict stays in `document`."""
+    score = min((float(page["proba_approve"]) for page in report.get("pages") or []), default=0.0)
+    return {**report, "passed": True, "reason": None, "auto_accepted": True, "score": round(score, SCORE_DECIMALS)}
+
+
+def guardrails_value(report: Mapping[str, Any] | None) -> int | float | None:
+    """`guardrails` of an answer for this guardrails report: its `score` (a float) when the request sent no
+    threshold (`auto_accept`), else 0 passed / 1 rejected; None without a report (guardrails did not run)."""
+    if not report:
+        return None
+    if report.get("auto_accepted"):
+        return report["score"]
+    return GUARDRAILS_PASSED if report.get("passed", True) else GUARDRAILS_REJECTED
+
+
 def contract_fields(
-    result: FinalResult, threshold: float, column_thresholds: Mapping[str, float] | None = None
+    result: FinalResult, threshold: float | None = None, column_thresholds: Mapping[str, float] | None = None
 ) -> ContractData:
     """The `data` of the orchestrator's `extract-ocr` contract: `nomor_npwp` and `nama` (the person's
-    name, or the company's registered name) with `confidence` 1 when the trust model's probability
-    reaches the field's threshold, else 0. A field's threshold is its entry in `column_thresholds`
-    (the central orchestrator's `column_confidence_threshold`), else `threshold`. The structuring
-    rules' flag stays internal: it is already in the trust model's probability, and a document with a
-    rejecting flag never gets this far."""
+    name, or the company's registered name). A field with a threshold (its entry in `column_thresholds`,
+    the central orchestrator's `column_confidence_threshold`, else `threshold`) has `confidence` 1 when the
+    trust model's probability reaches it, else 0; a field without one has that probability itself, a float.
+    The structuring rules' flag stays internal: it is already in the trust model's probability, and a
+    document with a rejecting flag never gets this far."""
     return contract_data(scored_fields(result, threshold, column_thresholds))
 
 
 def scored_fields(
-    result: FinalResult, threshold: float, column_thresholds: Mapping[str, float] | None = None
+    result: FinalResult, threshold: float | None = None, column_thresholds: Mapping[str, float] | None = None
 ) -> dict[str, ScoredField]:
-    """`contract_fields` plus the threshold each field was decided with: what the scoring stage stores."""
+    """`contract_fields` plus the threshold each field was decided with (None: the probability is the
+    confidence): what the scoring stage stores."""
     fields = result["fields"]
     scoring = result["scoring"]
     columns = column_thresholds or {}
@@ -158,7 +185,7 @@ def scored_fields(
 
 
 def contract_data(fields: Mapping[str, ScoredField]) -> ContractData:
-    """The `extract-ocr` `data` of stored scored fields: value and 0/1 confidence, without the threshold."""
+    """The `extract-ocr` `data` of stored scored fields: value and confidence, without the threshold."""
     return {
         "nomor_npwp": {"value": fields["nomor_npwp"]["value"], "confidence": fields["nomor_npwp"]["confidence"]},
         "nama": {"value": fields["nama"]["value"], "confidence": fields["nama"]["confidence"]},
@@ -169,10 +196,14 @@ def _has_value(field: Mapping[str, Any] | None) -> bool:
     return bool(field and field.get("value") is not None and str(field["value"]).strip())
 
 
-def _field(field: Mapping[str, Any] | None, score: float | None, threshold: float) -> ContractField:
+def _field(field: Mapping[str, Any] | None, score: float | None, threshold: float | None) -> ContractField:
+    """A field without a value, or without a trust probability, has `confidence` 0 either way."""
     value = field["value"] if field and _has_value(field) else None
-    confident = value is not None and score is not None and score >= threshold
-    return {"value": value, "confidence": 1 if confident else 0}
+    if value is None or score is None:
+        return {"value": value, "confidence": 0}
+    if threshold is None:
+        return {"value": value, "confidence": round(float(score), SCORE_DECIMALS)}
+    return {"value": value, "confidence": 1 if score >= threshold else 0}
 
 
 def final_result(

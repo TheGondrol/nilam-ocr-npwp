@@ -81,7 +81,7 @@ class ScoringResult(FieldConfidences):
     """The stored result of the scoring stage: the confidences plus the exact payload that was scored."""
 
     payload: NotRequired[dict[str, Any]]
-    # The extract-ocr fields as scoring decided them (0/1 confidence and the threshold that decided it);
+    # The extract-ocr fields as scoring decided them (confidence and the threshold that decided it, if any);
     # missing on results stored before it existed.
     fields: NotRequired[dict[str, "ScoredField"]]
 
@@ -106,18 +106,20 @@ class FinalResult(TypedDict):
 
 class ScoredField(TypedDict):
     """A field of the `extract-ocr` contract as the scoring stage decided it and stored it: the value, the
-    0/1 confidence, and the threshold the trust model's probability was compared with."""
+    confidence, and the threshold the trust model's probability was compared with (None: no threshold was
+    sent for the field, so the confidence is that probability)."""
 
     value: str | None
-    confidence: int
-    threshold: float
+    confidence: int | float
+    threshold: float | None
 
 
 class ContractField(TypedDict):
-    """A field in the orchestrator's `extract-ocr` contract: the value and a 0/1 confidence flag."""
+    """A field in the orchestrator's `extract-ocr` contract: the value and its confidence, 0 / 1 when the
+    central orchestrator sent a threshold for the field, else the trust model's probability (a float)."""
 
     value: str | None
-    confidence: int
+    confidence: int | float
 
 
 class ContractData(TypedDict):

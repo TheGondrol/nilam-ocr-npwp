@@ -115,7 +115,16 @@ export default function OcrResultsCard({ requestId, data, loading, onRefresh }) 
           <div className="space-y-4">
             {rows.map((row, idx) => {
               const gr = row.guardrails
-              const grText = gr === 0 ? '0 (Lolos / Pass)' : gr === 1 ? '1 (Ditolak / Rejected)' : 'NULL (Dilewati)'
+              // Tanpa guardrails_confidence_threshold dari pusat: dokumen selalu lolos dan guardrails = probabilitas
+              // diterima (float). 1 hanya berarti ditolak pada jawaban 400.
+              const grText =
+                gr == null
+                  ? 'NULL (Dilewati)'
+                  : gr === 1 && row.status_code === 400
+                  ? '1 (Ditolak / Rejected)'
+                  : gr === 0
+                  ? '0 (Lolos / Pass)'
+                  : `${gr} (probabilitas diterima, tanpa threshold)`
 
               return (
                 <div

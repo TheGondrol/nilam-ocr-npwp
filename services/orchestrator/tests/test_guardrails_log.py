@@ -4,11 +4,12 @@ fails never fails the request."""
 import pytest
 from sqlalchemy import MetaData, select
 
+from ocr_common.npwp import auto_accept
 from ocr_common.pipeline.database import dispose_engines, get_engine
 from ocr_common.pipeline.tables import guardrails_results_table
 
 from app.services.guardrails_log import SqlGuardrailsLog
-from tests.conftest import ACCEPTED_REPORT, JPEG, REJECTED_REPORT
+from tests.conftest import ACCEPTED_REPORT, JPEG, REJECTED_REPORT, WITH_GUARDRAILS_THRESHOLD
 
 RID = "OCR_guardrails_log"
 
@@ -29,14 +30,17 @@ def test_an_accepted_document_is_recorded_with_whose_threshold_decided(client, a
     _submit(client, auth, guardrails_confidence_threshold='{"acc_rej": 0.3}')
     _submit(client, auth)
 
-    assert [(r["request_id"], r["report"]["passed"], r["threshold_from_request"]) for r in guardrails_log.records] == [
-        (RID, True, True),
-        (RID, True, False),
+    records = guardrails_log.records
+    assert [
+        (r["report"]["passed"], r["threshold_from_request"], r["report"].get("auto_accepted")) for r in records
+    ] == [
+        (True, True, None),
+        (True, False, True),
     ]
 
 
 def test_a_rejected_document_is_recorded_too(client, auth, guardrails_log):
-    response = _submit(client, auth, filename="blur.jpg")
+    response = _submit(client, auth, filename="blur.jpg", **WITH_GUARDRAILS_THRESHOLD)
 
     assert response.status_code == 400
     [record] = guardrails_log.records
@@ -99,6 +103,17 @@ async def test_the_verdict_is_written_with_its_threshold_and_the_whole_report(da
     assert len(accepted["ds"]) == 8
 
 
+async def test_an_auto_accepted_verdict_says_no_threshold_was_sent(database):
+    url, table = database
+
+    await SqlGuardrailsLog(url).record(RID, auto_accept(REJECTED_REPORT), threshold_from_request=False)
+
+    [row] = await _rows(url, table)
+    # Passed whatever the model said: the service's own verdict is kept, the source says nobody sent a threshold.
+    assert (row["passed"], row["verdict"], row["threshold_source"], row["reason"]) == (True, "reject", "none", None)
+    assert row["report"]["score"] == 0.1179
+
+
 async def test_a_write_that_fails_is_logged_and_does_not_raise(tmp_path, caplog):
     url = f"sqlite+aiosqlite:///{tmp_path / 'empty.db'}"  # no table: the insert fails
 
@@ -152,7 +167,7 @@ def _get(client, auth):
 
 
 def test_the_get_of_a_document_rejected_by_guardrails_answers_like_its_post(client, auth, stub_waiter):
-    posted = _submit(client, auth, filename="blur.jpg")
+    posted = _submit(client, auth, filename="blur.jpg", **WITH_GUARDRAILS_THRESHOLD)
     stub_waiter.snapshot_outcome = None  # no stage has a job
 
     response = _get(client, auth)
@@ -175,8 +190,8 @@ def test_the_get_of_a_guardrails_only_request_answers_with_the_report(client, au
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["status_code"], body["guardrails"], body["pipeline_last_stage"]) == (200, 0, None)
-    assert body["data"] == posted.json()["data"] == ACCEPTED_REPORT
+    assert (body["status_code"], body["guardrails"], body["pipeline_last_stage"]) == (200, 0.9821, None)
+    assert body["data"] == posted.json()["data"] == {**ACCEPTED_REPORT, "auto_accepted": True, "score": 0.9821}
 
 
 def test_a_request_that_passed_but_never_reached_a_stage_is_404(client, auth, stub_waiter):

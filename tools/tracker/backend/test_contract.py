@@ -2,7 +2,7 @@
 pemeriksa dan pengirim tidak bisa diam-diam berbeda pendapat. Jalankan: python -m pytest tools/tracker/backend"""
 
 import pytest
-from contract import FAIL, PASS, WARN, check_result_callback, check_stage_callback
+from contract import FAIL, GUARDRAILS_COMPLETED_RULE, PASS, WARN, check_result_callback, check_stage_callback
 
 from ocr_common.pipeline.callbacks import REJECTED_CODE, result_callback_body, stage_callback_body
 
@@ -51,18 +51,26 @@ def test_what_the_pipeline_sends_passes(body, answer, kind):
     assert (report["kind"], report["verdict"]) == (kind, PASS), report["checks"]
 
 
-def test_raw_probabilities_instead_of_0_1_fail():
-    body = {**_completed(), "result": {"nomor_npwp": {"value": "x", "confidence": 0.9926}, "nama": DATA["nama"]}}
+def test_probabilities_without_thresholds_pass():
+    """Tanpa threshold dari pusat (8 Okt 2026): confidence dan guardrails berupa probabilitas."""
+    result = {"nomor_npwp": {"value": "x", "confidence": 0.9926}, "nama": DATA["nama"]}
+    body = {**_completed(), "result": result, "guardrails": 0.9821}
+
+    assert _failing(check_result_callback(body, answer=_answer(200, data=result, guardrails=0.9821))) == []
+
+
+def test_a_confidence_outside_0_1_fails():
+    body = {**_completed(), "result": {"nomor_npwp": {"value": "x", "confidence": 1.5}, "nama": DATA["nama"]}}
 
     assert _failing(check_result_callback(body, answer=None)) == [
-        "result.nomor_npwp = {value: string | null, confidence: 0 | 1}"
+        "result.nomor_npwp = {value: string | null, confidence: 0 | 1 | probabilitas}"
     ]
 
 
 def test_a_boolean_is_not_the_integer_the_contract_asks_for():
     body = {**_completed(), "guardrails": False}
 
-    assert "guardrails = 0 (integer)" in _failing(check_result_callback(body))
+    assert GUARDRAILS_COMPLETED_RULE in _failing(check_result_callback(body))
 
 
 def test_the_old_shape_with_a_guardrails_report_and_nama_badan_fails():
@@ -73,7 +81,7 @@ def test_the_old_shape_with_a_guardrails_report_and_nama_badan_fails():
     }
 
     assert _failing(check_result_callback(body)) == [
-        "guardrails = 0 (integer)",
+        GUARDRAILS_COMPLETED_RULE,
         "result berisi tepat nomor_npwp dan nama",
     ]
 
