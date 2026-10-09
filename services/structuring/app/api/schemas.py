@@ -115,9 +115,10 @@ class StructuringJobRequest(BaseModel):
     def _sequence_includes_this_stage(cls, value: list[str] | None) -> list[str] | None:
         return checked_sequence(value, STRUCTURING)
 
-    @field_validator("column_confidence_threshold")
+    # Before the type check: a null column (no threshold) is dropped by the parser, not refused as a non-number.
+    @field_validator("column_confidence_threshold", mode="before")
     @classmethod
-    def _known_fields(cls, value: dict[str, float] | None) -> dict[str, float] | None:
+    def _known_fields(cls, value: Any) -> dict[str, float] | None:
         return parse_column_thresholds(value)
 
 

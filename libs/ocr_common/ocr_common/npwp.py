@@ -24,7 +24,8 @@ COLUMN_THRESHOLD_DESCRIPTION = (
     "Per field, from the central orchestrator: the trust model's probability that the field's value is correct "
     "must reach it for the field's `confidence` to be `1` (else `0`), always on the accept side. Keys: "
     "`all_field` (every field), `nomor_npwp`, `nama`; a field's own key wins over `all_field`. A field left out "
-    "(or the whole map omitted) gets that probability itself as `confidence`, a float from 0 to 1"
+    "or null (or the whole map omitted, or `all_field` null) gets that probability itself as `confidence`, a "
+    "float from 0 to 1"
 )
 # The guardrails of this pipeline, as the central orchestrator names them in `guardrails_confidence_threshold`.
 # This repo runs one guardrails model (accept / reject), keyed `acc_rej`; the object form leaves room for more.
@@ -50,7 +51,13 @@ def parse_column_thresholds(value: Any) -> dict[str, float] | None:
     """`column_confidence_threshold` checked: None, or an object whose keys are `CONTRACT_FIELDS` or
     `ALL_FIELDS_KEY` and whose values are numbers from 0 to 1. `all_field` is spread over every contract
     field, a field's own key winning, so the result only has field names. Raises ValueError with the reason
-    otherwise."""
+    otherwise.
+
+    A null value is no threshold (9 Oct 2026, like `{"guardrails": null}`): the central orchestrator may send a
+    column it has no threshold for as null, and that column must keep the trust model's probability as its
+    `confidence`, as if it were left out. A field's own null wins over `all_field` (`{"all_field": 0.8, "nama":
+    null}`: `nama` keeps its probability); a null `all_field` sets nothing; a null under an unknown key is
+    ignored. A number under an unknown key is still refused."""
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -58,6 +65,8 @@ def parse_column_thresholds(value: Any) -> dict[str, float] | None:
             "column_confidence_threshold must be a JSON object, "
             'e.g. {"all_field": 0.8} or {"nomor_npwp": 0.9, "nama": 0.5}'
         )
+    without = {name for name, threshold in value.items() if threshold is None and name in CONTRACT_FIELDS}
+    value = {name: threshold for name, threshold in value.items() if threshold is not None}
     unknown = sorted(set(value) - set(CONTRACT_FIELDS) - {ALL_FIELDS_KEY})
     if unknown:
         raise ValueError(
@@ -71,6 +80,8 @@ def parse_column_thresholds(value: Any) -> dict[str, float] | None:
     if ALL_FIELDS_KEY in given:
         thresholds.update(dict.fromkeys(CONTRACT_FIELDS, given.pop(ALL_FIELDS_KEY)))
     thresholds.update(given)
+    for name in without:
+        thresholds.pop(name, None)
     return thresholds or None
 
 

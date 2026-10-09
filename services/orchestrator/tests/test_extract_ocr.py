@@ -58,6 +58,18 @@ def test_the_central_orchestrators_null_guardrails_threshold_is_auto_accept(clie
     assert handed["guardrails"]["auto_accepted"] is True
 
 
+def test_null_column_thresholds_keep_the_probabilities(client, auth, stub_guardrails, stub_extraction):
+    response = _submit(client, auth, column_confidence_threshold='{"all_field": null}')
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0.7296},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
+    }
+    [handed] = stub_extraction.submitted
+    assert handed["column_thresholds"] is None
+
+
 def test_with_both_thresholds_the_answer_has_0_1_flags(client, auth, stub_guardrails):
     response = _submit(client, auth, **WITH_GUARDRAILS_THRESHOLD, column_confidence_threshold='{"all_field": 0.8}')
 

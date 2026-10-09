@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -96,9 +96,10 @@ class ScoringJobRequest(BaseModel):
     def _sequence_includes_this_stage(cls, value: list[str] | None) -> list[str] | None:
         return checked_sequence(value, SCORING)
 
-    @field_validator("column_confidence_threshold")
+    # Before the type check: a null column (no threshold) is dropped by the parser, not refused as a non-number.
+    @field_validator("column_confidence_threshold", mode="before")
     @classmethod
-    def _known_fields(cls, value: dict[str, float] | None) -> dict[str, float] | None:
+    def _known_fields(cls, value: Any) -> dict[str, float] | None:
         return parse_column_thresholds(value)
 
 
@@ -193,9 +194,10 @@ class ScoringDirectRequest(BaseModel):
         examples=[{"all_field": 0.8}, {"nomor_npwp": 0.9, "nama": 0.5}],
     )
 
-    @field_validator("column_confidence_threshold")
+    # Before the type check: a null column (no threshold) is dropped by the parser, not refused as a non-number.
+    @field_validator("column_confidence_threshold", mode="before")
     @classmethod
-    def _known_fields(cls, value: dict[str, float] | None) -> dict[str, float] | None:
+    def _known_fields(cls, value: Any) -> dict[str, float] | None:
         return parse_column_thresholds(value)
 
 

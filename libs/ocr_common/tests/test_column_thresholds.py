@@ -35,9 +35,24 @@ def test_all_field_is_spread_over_every_field_and_a_fields_own_key_wins():
     assert parse_column_thresholds({"nama": 0.5, "all_field": 0.8}) == {"nomor_npwp": 0.8, "nama": 0.5}
 
 
-@pytest.mark.parametrize("raw", [None, "", "   ", "{}"])
+@pytest.mark.parametrize(
+    "raw",
+    [None, "", "   ", "{}", "null", '{"all_field": null}', '{"nomor_npwp": null, "nama": null}', '{"npwp": null}'],
+)
 def test_nothing_given_means_the_default_for_every_field(raw):
+    # Null is no threshold: every field keeps the trust model's probability as its confidence.
     assert column_thresholds_from_json(raw) is None
+
+
+def test_a_null_field_keeps_its_probability_even_next_to_all_field():
+    assert parse_column_thresholds({"all_field": 0.8, "nama": None}) == {"nomor_npwp": 0.8}
+    assert parse_column_thresholds({"all_field": None, "nama": 0.5}) == {"nama": 0.5}
+    assert parse_column_thresholds({"nomor_npwp": None, "nama": 0.5}) == {"nama": 0.5}
+    # Each field decided: nama without a threshold gets its probability, nomor_npwp 0 / 1.
+    assert contract_fields(RESULT, None, {"nomor_npwp": 0.8}) == {
+        "nomor_npwp": {"value": "12.345.678.9-012.345", "confidence": 0},
+        "nama": {"value": "BUDI SANTOSO", "confidence": 0.9471},
+    }
 
 
 @pytest.mark.parametrize(

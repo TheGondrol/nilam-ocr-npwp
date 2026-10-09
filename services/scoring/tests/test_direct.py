@@ -88,6 +88,16 @@ def test_column_confidence_threshold_decides_the_0_1_confidences(client, auth):
     assert (fields["nomor_npwp"]["threshold"], fields["nama"]["threshold"]) == (1.0, 1.0)
 
 
+def test_a_null_column_threshold_keeps_that_fields_probability(client, auth):
+    response = _post(client, auth, structuring=STRUCTURING, column_confidence_threshold={"all_field": 1, "nama": None})
+
+    assert response.status_code == 200
+    result = response.json()["data"]
+    fields = result["fields"]
+    assert (fields["nomor_npwp"]["confidence"], fields["nomor_npwp"]["threshold"]) == (0, 1.0)
+    assert (fields["nama"]["confidence"], fields["nama"]["threshold"]) == (round(result["name_confidence"], 4), None)
+
+
 @pytest.mark.parametrize(
     "body",
     [

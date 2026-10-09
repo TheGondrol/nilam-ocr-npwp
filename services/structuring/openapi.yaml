@@ -1680,8 +1680,9 @@ components:
           description: 'Per field, from the central orchestrator: the trust model''s probability that
             the field''s value is correct must reach it for the field''s `confidence` to be `1` (else
             `0`), always on the accept side. Keys: `all_field` (every field), `nomor_npwp`, `nama`; a
-            field''s own key wins over `all_field`. A field left out (or the whole map omitted) gets that
-            probability itself as `confidence`, a float from 0 to 1. Only carried on to scoring'
+            field''s own key wins over `all_field`. A field left out or null (or the whole map omitted,
+            or `all_field` null) gets that probability itself as `confidence`, a float from 0 to 1. Only
+            carried on to scoring'
           examples:
           - nama: 0.5
             nomor_npwp: 0.9
