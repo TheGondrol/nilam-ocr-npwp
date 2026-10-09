@@ -734,9 +734,10 @@ components:
           description: 'From the central orchestrator: the guardrails threshold for this document, between
             0 and 1 (exclusive), on the model''s accepted probability: a page passes when it reaches the
             threshold, and is rejected below it. A JSON object keyed by guardrails name; this pipeline
-            has one, `acc_rej`. Omitted: the document is accepted whatever the model says, and the answer''s
-            `guardrails` is the model''s accepted probability (the lowest of its pages) instead of 0 /
-            1. A JSON object string'
+            has one, `acc_rej`. Omitted, empty, or only null values (e.g. `{"guardrails": null}`, what
+            the central orchestrator sends when its client gave none): the document is accepted whatever
+            the model says, and the answer''s `guardrails` is the model''s accepted probability (the lowest
+            of its pages) instead of 0 / 1. A JSON object string'
           examples:
           - '{"acc_rej": 0.8}'
         column_confidence_threshold:

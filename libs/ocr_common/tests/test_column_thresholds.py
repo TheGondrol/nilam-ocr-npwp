@@ -65,9 +65,26 @@ def test_the_guardrails_threshold_is_read_from_its_object_keyed_by_guardrails_na
     assert parse_guardrails_threshold({"acc_rej": 0.3}) == 0.3
 
 
-@pytest.mark.parametrize("raw", [None, "", "   ", "{}"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        "",
+        "   ",
+        "{}",
+        "null",
+        '{"guardrails": null}',
+        '{"acc_rej": null}',
+        '{"guardrails": null, "acc_rej": null}',
+    ],
+)
 def test_no_guardrails_threshold_means_none_was_sent(raw):
+    # `{"guardrails": null}` is what the central orchestrator forwards when its client sent no threshold.
     assert guardrails_threshold_from_json(raw) is None
+
+
+def test_a_null_next_to_a_threshold_leaves_the_threshold():
+    assert guardrails_threshold_from_json('{"guardrails": null, "acc_rej": 0.8}') == 0.8
 
 
 @pytest.mark.parametrize(
@@ -77,6 +94,7 @@ def test_no_guardrails_threshold_means_none_was_sent(raw):
         ("{not json", "valid JSON"),
         ("[0.3]", "JSON object"),
         ('{"accept": 0.3}', "unknown guardrails accept"),
+        ('{"guardrails": 0.8}', "unknown guardrails guardrails"),
         ('{"acc_rej": 0.3, "blur": 0.3}', "unknown guardrails blur"),
         ('{"acc_rej": "tinggi"}', "must be a number"),
         ('{"acc_rej": true}', "must be a number"),

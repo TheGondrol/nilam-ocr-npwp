@@ -32,9 +32,10 @@ GUARDRAILS_KEYS = ("acc_rej",)
 GUARDRAILS_THRESHOLD_DESCRIPTION = (
     "From the central orchestrator: the guardrails threshold for this document, between 0 and 1 (exclusive), "
     "on the model's accepted probability: a page passes when it reaches the threshold, and is rejected below "
-    "it. A JSON object keyed by guardrails name; this pipeline has one, `acc_rej`. Omitted: the document is "
-    "accepted whatever the model says, and the answer's `guardrails` is the model's accepted probability (the "
-    "lowest of its pages) instead of 0 / 1"
+    "it. A JSON object keyed by guardrails name; this pipeline has one, `acc_rej`. Omitted, empty, or only null "
+    'values (e.g. `{"guardrails": null}`, what the central orchestrator sends when its client gave none): the '
+    "document is accepted whatever the model says, and the answer's `guardrails` is the model's accepted "
+    "probability (the lowest of its pages) instead of 0 / 1"
 )
 # `guardrails` of an answer: 0 the document passed the guardrails model with the central orchestrator's threshold,
 # 1 it was rejected (by that model, or by the structuring rules).
@@ -97,11 +98,16 @@ def column_thresholds_from_json(raw: str | None) -> dict[str, float] | None:
 def parse_guardrails_threshold(value: Any) -> float | None:
     """`guardrails_confidence_threshold` checked: None, or an object with exactly the key `acc_rej` (the one
     guardrails of this pipeline) and a number strictly between 0 and 1, which is returned. Raises ValueError
-    with the reason otherwise."""
+    with the reason otherwise.
+
+    A null value is no threshold, whatever its key: the central orchestrator sends `{"guardrails": null}` when its
+    client gave none (9 Oct 2026), and that must be auto accept like an omitted field. A number under any key but
+    `acc_rej` is still refused, so a threshold central thinks it applied is never dropped silently."""
     if value is None:
         return None
     if not isinstance(value, dict):
         raise ValueError('guardrails_confidence_threshold must be a JSON object, e.g. {"acc_rej": 0.8}')
+    value = {name: threshold for name, threshold in value.items() if threshold is not None}
     unknown = sorted(set(value) - set(GUARDRAILS_KEYS))
     if unknown:
         raise ValueError(

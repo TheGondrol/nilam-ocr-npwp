@@ -49,6 +49,15 @@ def test_extract_ocr_follows_the_central_orchestrators_contract(client, auth, st
     assert (handed["guardrails"]["passed"], handed["guardrails"]["auto_accepted"]) == (True, True)
 
 
+def test_the_central_orchestrators_null_guardrails_threshold_is_auto_accept(client, auth, stub_extraction):
+    # What central forwards when its client sent no threshold: the same as leaving the field out.
+    response = _submit(client, auth, filename="notnpwp.jpg", guardrails_confidence_threshold='{"guardrails": null}')
+
+    assert (response.status_code, response.json()["guardrails"]) == (200, 0.1179)
+    [handed] = stub_extraction.submitted
+    assert handed["guardrails"]["auto_accepted"] is True
+
+
 def test_with_both_thresholds_the_answer_has_0_1_flags(client, auth, stub_guardrails):
     response = _submit(client, auth, **WITH_GUARDRAILS_THRESHOLD, column_confidence_threshold='{"all_field": 0.8}')
 
