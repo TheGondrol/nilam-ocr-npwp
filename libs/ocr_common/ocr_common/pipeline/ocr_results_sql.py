@@ -29,6 +29,7 @@ from ocr_common.web.envelope import STATUS_DESC
 
 logger = logging.getLogger(__name__)
 
+
 async def write_ocr_result(
     conn: AsyncConnection,
     table: Table,

@@ -1220,8 +1220,9 @@ chaos.configure(
 
 
 if __name__ == "__main__":
-    import uvicorn
     from pathlib import Path
+
+    import uvicorn
 
     app_dir = str(Path(__file__).resolve().parent)
     uvicorn.run(
@@ -1231,4 +1232,3 @@ if __name__ == "__main__":
         reload=True,
         app_dir=app_dir,
     )
-

@@ -76,7 +76,7 @@ def parse_column_thresholds(value: Any) -> dict[str, float] | None:
     given = {
         name: _threshold_number("column_confidence_threshold", name, threshold) for name, threshold in value.items()
     }
-    thresholds = {}
+    thresholds: dict[str, float] = {}
     if ALL_FIELDS_KEY in given:
         thresholds.update(dict.fromkeys(CONTRACT_FIELDS, given.pop(ALL_FIELDS_KEY)))
     thresholds.update(given)

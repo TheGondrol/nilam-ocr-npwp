@@ -87,8 +87,8 @@ class StagePipeline:
         if claimed:
             self.runner.spawn(
                 self._run(
-                request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection, guardrails
-            )
+                    request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection, guardrails
+                )
             )
         else:
             record = await self.repository.get(request_id)

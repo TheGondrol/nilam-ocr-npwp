@@ -93,5 +93,3 @@ def test_unsupported_document_type_is_400_before_anything_runs(client, auth, stu
     )
     assert "document_type" not in body
     assert stub_guardrails.checked == [] and stub_extraction.submitted == []
-
-

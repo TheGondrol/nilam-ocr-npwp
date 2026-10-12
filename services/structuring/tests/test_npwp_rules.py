@@ -227,8 +227,8 @@ def test_kpp_table_v2_counts_the_historical_codes_as_valid(tmp_path, monkeypatch
 
 
 def test_the_delivered_reference_tables_are_used_by_default():
-    """kode_wilayah_v2.json (8063 kecamatan, active + inactive) and kpp_codes_v2.json (352 offices + 6 historical codes) of the ML team
-    live in data/."""
+    """kode_wilayah_v2.json (8063 kecamatan, active + inactive) and kpp_codes_v2.json (352 offices + 6 historical
+    codes) of the ML team live in data/."""
     assert structure(_card("3301 0130 1001 0006"))["flag"] is False
     assert structure(_card("3399 9930 1001 0006"))["flag_reason"] == npwp_rules.FLAG_INVALID_KECAMATAN
     assert structure(_card("48.903.841.4-012.000"))["flag"] is False

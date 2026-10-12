@@ -22,6 +22,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import subprocess
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -29,8 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import re
-import subprocess
 import httpx
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
@@ -945,8 +945,8 @@ async def s_postgres_down(run: Run) -> None:
         await run.note(
             "Orkestrasi pusat menerima dua keadaan akhir berbeda untuk request_id yang sama",
             f"berurutan: {', '.join(stats['statuses'])}. Saat database putus, tahap melaporkan FAILED langsung, lalu "
-            "sistem auto-recovery menjalankan ulang job yang sama dan bisa melaporkan DONE. Pusat harus menerima DONE yang datang "
-            "setelah FAILED (keadaan terakhir menang).",
+            "sistem auto-recovery menjalankan ulang job yang sama dan bisa melaporkan DONE. Pusat harus menerima DONE "
+            "yang datang setelah FAILED (keadaan terakhir menang).",
             level="warn",
         )
     await run.expect_outbox_drained(rid, 60)
@@ -1255,8 +1255,7 @@ async def upload_scenario_images(files: list[UploadFile] = File(...)) -> dict[st
         "saved": saved,
         "images": [p.name for p in all_imgs],
         "image_files": [
-            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]}
-            for p in all_imgs
+            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]} for p in all_imgs
         ],
     }
 
@@ -1272,8 +1271,7 @@ async def delete_scenario_image(name: str) -> dict[str, Any]:
     return {
         "images": [p.name for p in all_imgs],
         "image_files": [
-            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]}
-            for p in all_imgs
+            {"name": p.name, "size": p.stat().st_size, "sample": p.parent == ctx["images_dir"]} for p in all_imgs
         ],
     }
 
