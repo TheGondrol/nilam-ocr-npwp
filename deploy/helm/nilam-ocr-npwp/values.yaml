@@ -258,6 +258,15 @@ service:
   # pipeline memakai Service per komponen.
   entrypoint:
     enabled: true
+  # Service `<release>-public` bertipe LoadBalancer dengan port yang sama (orchestrator, 8034), untuk pemanggil
+  # di luar cluster. Tanpa annotation: IP publik internet, HTTP tanpa TLS, dijaga X-API-Key saja. Untuk IP
+  # internal VPC: annotations {networking.gke.io/load-balancer-type: Internal}. loadBalancerSourceRanges kosong =
+  # semua alamat. externalTrafficPolicy Local menjaga IP asal pemanggil (log, NetworkPolicy ipBlock).
+  public:
+    enabled: false
+    annotations: {}
+    loadBalancerSourceRanges: []
+    externalTrafficPolicy: Local
 
 # Ingress default-deny untuk semua pod release; tiap service hanya menerima dari pemanggilnya
 # (dihitung dari upstreams). Service ber-entrypoint menerima dari clientNamespaces dan dari semua

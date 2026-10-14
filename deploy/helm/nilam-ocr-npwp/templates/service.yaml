@@ -51,3 +51,36 @@ spec:
     {{- end }}
     {{- end }}
 {{- end }}
+{{- if .Values.service.public.enabled }}
+---
+# Pintu masuk yang sama dengan IP load balancer GCP, untuk pemanggil di luar cluster. Terpisah dari Service
+# `<release>` supaya alamat dalam cluster yang dipakai Orkestrasi pusat tidak berubah.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nilam-ocr-npwp.fullname" . }}-public
+  labels:
+    {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: public
+  {{- with .Values.service.public.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: {{ .Values.service.public.externalTrafficPolicy }}
+  {{- with .Values.service.public.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- range $name, $svc := .Values.services }}
+    {{- if and $svc.enabled $svc.entrypoint }}
+    - name: {{ $name }}
+      port: {{ $svc.port }}
+      targetPort: {{ $name }}
+    {{- end }}
+    {{- end }}
+{{- end }}

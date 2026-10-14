@@ -40,6 +40,7 @@ langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Ork
 | Deployment `<release>-<svc>` | ya | `services.<svc>.replicaCount`, `resources`, `terminationGracePeriodSeconds` |
 | Service `<release>-<svc>` | ya | `service.type`, `service.annotations` |
 | Service `<release>` (pintu masuk) | tidak; port dari service ber-`entrypoint` | `service.entrypoint.enabled` |
+| Service `<release>-public` (LoadBalancer, pintu masuk dari luar cluster) | tidak; port yang sama dengan `<release>` | `service.public.{enabled,annotations,loadBalancerSourceRanges,externalTrafficPolicy}`; di dev menyala sejak 14 Okt 2026 dengan IP publik internet tanpa batas IP asal |
 | ConfigMap `<release>-<svc>` | ya | `environment`, `orchestration`, `commonEnv`, `services.<svc>.env`, `upstreams` |
 | PodDisruptionBudget | ya | `podDisruptionBudget.{enabled,maxUnavailable}` |
 | HorizontalPodAutoscaler | hanya yang `autoscaling.enabled` | `services.<svc>.autoscaling.{minReplicas,maxReplicas,targetCPUUtilizationPercentage}` |

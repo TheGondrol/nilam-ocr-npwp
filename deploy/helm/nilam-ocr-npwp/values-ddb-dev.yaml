@@ -51,6 +51,13 @@ apm:
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
 
+# Orchestrator di IP publik internet (14 Okt 2026, permintaan tim): http://<EXTERNAL-IP>:8034/v1/extract-ocr dari
+# mana saja, sengaja tanpa batas IP asal. HTTP tanpa TLS, hanya X-API-Key yang menjaga, dan endpoint -test
+# (TESTING_ENDPOINTS) ikut terbuka. IP: kubectl -n nilam-ocr-npwp get svc nilam-ocr-npwp-public.
+service:
+  public:
+    enabled: true
+
 networkPolicy:
   # Namespace Orkestrasi di cluster dev. Cluster ini memakai LEGACY_DATAPATH tanpa
   # network policy enforcement, jadi policy hanya terpasang, belum ditegakkan.

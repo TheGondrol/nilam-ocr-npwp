@@ -46,6 +46,13 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ . | quote }}
         {{- end }}
+        {{- if $.Values.service.public.enabled }}
+        # Pemanggil lewat Service `<release>-public`; externalTrafficPolicy Local menjaga IP asalnya.
+        {{- range (default (list "0.0.0.0/0") $.Values.service.public.loadBalancerSourceRanges) }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- end }}
         {{- else }}
         {{- range $callers }}
         - podSelector:
