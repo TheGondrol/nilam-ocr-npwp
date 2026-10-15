@@ -1,6 +1,8 @@
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from elasticapm.traces import execution_context
 from sqlalchemy import select, update
@@ -8,10 +10,17 @@ from sqlalchemy.exc import OperationalError
 
 from ocr_common.clients.remote import RemoteClientError
 from ocr_common.config import PipelineSettings
-from ocr_common.errors import ServiceError
+from ocr_common.errors import ServiceError, UpstreamTimeout, UpstreamUnavailable
 from ocr_common.pipeline import STAGE_OCR, STAGE_STRUCTURING, InMemoryJobRepository, StagePipeline, database
 from ocr_common.pipeline.callbacks import NOT_READY_RETRIES, TRACE_PARENT_KEY
-from ocr_common.pipeline.outbox import KIND_CALLBACK, KIND_HANDOFF, OutboxRelay, callback_message
+from ocr_common.pipeline.outbox import (
+    KIND_CALLBACK,
+    KIND_HANDOFF,
+    LAST_ERROR_MAX_CHARS,
+    OutboxRelay,
+    _prepend,
+    callback_message,
+)
 from ocr_common.pipeline.outbox_sql import SqlOutbox
 from ocr_common.pipeline.outbox_status import OutboxStatusResponse, outbox_status, outbox_status_responses
 from ocr_common.pipeline.repository_sql import SqlJobRepository
@@ -80,6 +89,19 @@ async def _run(pipeline, *, fails: bool = False) -> None:
         callback_result=lambda result: {"final": True},
     )
     await pipeline.runner.drain(5)
+
+
+_ATTEMPT = re.compile(r"^attempt (\d+) at \d\d:\d\d:\d\dZ, \d+s after it was queued: ")
+
+
+def _last_errors(row: dict) -> list[str]:
+    """The lines of `last_error`, newest first, without their `attempt <n> at <time>, <age> after ...` prefix;
+    checks the attempt numbers count down from the row's `attempts`."""
+    lines = row["last_error"].split("\n")
+    matches = [_ATTEMPT.match(line) for line in lines]
+    numbers = [int(match.group(1)) if match else None for match in matches]
+    assert numbers == list(range(row["attempts"], row["attempts"] - len(lines), -1))
+    return [_ATTEMPT.sub("", line) for line in lines]
 
 
 def _relay(stage, *, callback=None, next_stage=None, **kwargs) -> OutboxRelay:
@@ -157,7 +179,7 @@ async def test_a_callback_the_orchestrator_cannot_take_is_retried_without_holdin
 
     [row] = await _rows(stage.outbox)
     assert (row["kind"], row["attempts"], row["failed_at"]) == (KIND_CALLBACK, 1, None)
-    assert row["last_error"] == "orchestration is unavailable"
+    assert _last_errors(row) == ["orchestration is unavailable (503) -> retry in 1s"]
     assert row["next_attempt_at"] > datetime.now(UTC).replace(tzinfo=None)
     assert next_stage.bodies == [PAYLOAD]
 
@@ -171,7 +193,7 @@ async def test_a_callback_the_orchestrator_rejects_becomes_a_dead_letter_that_st
 
     [row] = await _rows(stage.outbox)
     assert row["failed_at"] is not None
-    assert row["last_error"] == "stage: unexpected value"
+    assert _last_errors(row) == ["stage: unexpected value (422) -> dead letter: a 422 is final, it is not sent again"]
     assert row["payload"]["status"] == "FAILED"
 
     assert await relay.deliver_due() == 0, "a dead letter is never claimed again"
@@ -194,6 +216,11 @@ async def test_a_callback_that_keeps_failing_is_retried_until_it_is_too_old(pipe
     [row] = await _rows(stage.outbox)
     assert row["failed_at"] is not None
     assert row["attempts"] == 2
+    assert _last_errors(row) == [
+        "orchestration is unavailable (503) -> dead letter: still failing 3601s after it was queued, past the 600s "
+        "limit",
+        "orchestration is unavailable (503) -> retry in 1s",
+    ]
 
 
 def test_backoff_grows_exponentially_up_to_the_cap():
@@ -215,7 +242,7 @@ async def test_a_handoff_the_next_stage_refuses_becomes_a_failed_callback(pipeli
         [row for row in await _rows(stage.outbox) if not row["failed_at"]],
     )
     assert [row["kind"] for row in dead] == [KIND_HANDOFF]
-    assert dead[0]["last_error"] == "Unknown document_type"
+    assert _last_errors(dead[0]) == ["Unknown document_type (400) -> dead letter: a 400 is final, it is not sent again"]
     assert replacement["kind"] == KIND_CALLBACK
     assert replacement["payload"]["stage"] == STAGE_STRUCTURING
     assert replacement["payload"]["status"] == "FAILED"
@@ -453,6 +480,13 @@ async def test_a_callback_the_orchestrator_has_not_recorded_yet_is_sent_again_a_
     [row] = await _rows(stage.outbox)
     assert row["failed_at"] is not None
     assert row["attempts"] == NOT_READY_RETRIES + 1
+    lines = _last_errors(row)
+    assert len(lines) == NOT_READY_RETRIES + 1
+    assert lines[0] == (
+        "orchestration answered 409 RESULT_NOT_READY: Job belum tercatat -> dead letter: still RESULT_NOT_READY "
+        f"after {NOT_READY_RETRIES} retries"
+    )
+    assert lines[-1] == "orchestration answered 409 RESULT_NOT_READY: Job belum tercatat -> retry in 1.5s"
 
 
 async def test_any_other_409_to_a_callback_is_a_dead_letter_at_once(pipeline):
@@ -580,6 +614,7 @@ async def test_every_delivery_is_one_structured_log_event_without_the_payload(pi
     assert (callback["outbox"]["target"], callback["outbox"]["status_code"]) == ("orchestration", 503)
     assert callback["outbox"]["error"] == "orchestration is unavailable"
     assert callback["outbox"]["retry_in_seconds"] > 0
+    assert callback["outbox"]["detail"].endswith("orchestration is unavailable (503) -> retry in 1s")
     assert "NPWP" not in str(_events(caplog)), "the payload never goes into a log line"
 
 
@@ -597,3 +632,93 @@ async def test_a_dead_letter_is_an_error_event_and_a_release_is_logged_too(pipel
     assert dead["outbox"]["status_code"] == 422
     released = next(e for e in _events(caplog) if e["event"]["action"] == "released")
     assert released["outbox"] == {"stage": STAGE_OCR, "released": 1, "of_request_id": RID}
+
+
+class Errors:
+    """A sender that fails with each of `errors` in turn."""
+
+    def __init__(self, *errors: Exception):
+        self.errors = list(errors)
+
+    async def send(self, body: dict) -> bool:
+        raise self.errors.pop(0)
+
+
+async def test_last_error_keeps_the_timeout_under_the_409_that_ended_the_callback(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    relay = _relay(
+        stage,
+        callback=Errors(
+            UpstreamTimeout("orchestration result callback timed out after 10.0s"),
+            RemoteClientError(409, "Job already failed", "RESULT_CONFLICT"),
+        ),
+    )
+
+    await relay.deliver_due()
+    await _due_now(stage.outbox)
+    await relay.deliver_due()
+
+    [row] = await _rows(stage.outbox)
+    assert row["failed_at"] is not None
+    assert _last_errors(row) == [
+        "orchestration answered 409 RESULT_CONFLICT: Job already failed (the central orchestrator already closed this "
+        "request, e.g. its callback deadline after the 202 passed) -> dead letter: a 409 is final, "
+        "it is not sent again",
+        "orchestration result callback timed out after 10.0s, no answer in time (orchestration may still have "
+        "received it) -> retry in 1s",
+    ]
+
+
+async def test_last_error_says_why_the_receiver_could_not_be_reached(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    unavailable = UpstreamUnavailable("orchestration result callback is unavailable")
+    unavailable.__cause__ = httpx.ConnectError("[Errno 111] Connection refused")
+
+    await _relay(stage, callback=Errors(unavailable)).deliver_due()
+
+    [row] = await _rows(stage.outbox)
+    assert _last_errors(row) == [
+        "orchestration result callback is unavailable (ConnectError: [Errno 111] Connection refused) -> retry in 1s"
+    ]
+
+
+async def test_a_code_the_central_orchestrator_did_not_send_gets_no_hint(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+
+    await _relay(stage, callback=Errors(RemoteClientError(409, "Job already failed"))).deliver_due()
+
+    [row] = await _rows(stage.outbox)
+    assert _last_errors(row) == [
+        "orchestration answered 409: Job already failed -> dead letter: a 409 is final, it is not sent again"
+    ]
+
+
+async def test_a_released_dead_letter_adds_its_new_attempts_above_the_old_lines(pipeline):
+    stage, _ = pipeline
+    await _run(stage, fails=True)
+    await _relay(stage, callback=Errors(ServiceError(422, "stage: unexpected value"))).deliver_due()
+    await stage.outbox.release(STAGE_OCR, RID)
+
+    await _relay(stage, callback=Errors(ServiceError(503, "orchestration is unavailable"))).deliver_due()
+
+    [row] = await _rows(stage.outbox)
+    assert _last_errors(row) == [
+        "orchestration is unavailable (503) -> retry in 2s",
+        "stage: unexpected value (422) -> dead letter: a 422 is final, it is not sent again",
+    ]
+
+
+def test_last_error_drops_the_oldest_lines_past_its_limit():
+    previous = "\n".join(f"line {n} " + "x" * 90 for n in range(40, 0, -1))
+
+    text = _prepend("newest", previous)
+
+    assert len(text) <= LAST_ERROR_MAX_CHARS
+    lines = text.split("\n")
+    assert lines[0] == "newest"
+    assert lines[1].startswith("line 40 ")
+    assert all(len(line) > 90 for line in lines[1:]), "only whole lines are dropped"
+    assert _prepend("x" * (LAST_ERROR_MAX_CHARS + 10), None) == "x" * LAST_ERROR_MAX_CHARS

@@ -14,10 +14,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ocr_common.errors import InternalError, ServiceError
+from ocr_common.clients.remote import RemoteClientError
+from ocr_common.errors import InternalError, ServiceError, UpstreamTimeout, UpstreamUnavailable
 from ocr_common.pipeline.callbacks import (
     NOT_READY_DELAY_SECONDS,
     NOT_READY_RETRIES,
+    RESULT_NOT_READY,
     TRACE_PARENT_KEY,
     not_ready,
     stage_callback_body,
@@ -45,6 +47,16 @@ DEFAULT_CALLBACK_MAX_AGE_SECONDS = 600.0
 DEFAULT_STALE_AFTER_SECONDS = 300.0
 STOP_DELIVERY_SECONDS = 5.0
 WATCH_INTERVAL_SECONDS = 60.0
+# `last_error` keeps one line per failed attempt, newest first, so a timeout is not lost under the 409 that
+# followed it; the oldest lines go first when it grows past this.
+LAST_ERROR_MAX_CHARS = 2000
+# What the central orchestrator's 4xx codes to a callback mean (its contract, 2 and 5 Oct 2026), added to
+# `last_error` so a dead letter says why without the contract at hand.
+CENTRAL_CODE_HINTS = {
+    "RESULT_CONFLICT": "the central orchestrator already closed this request, e.g. its callback deadline after the "
+    "202 passed",
+    "CALLBACK_NOT_EXPECTED": "the central orchestrator has this document type in poll mode and takes no callback",
+}
 
 
 @dataclass(frozen=True)
@@ -293,14 +305,16 @@ class OutboxRelay:
                     sent = await self._send(row)
                 except ServiceError as exc:
                     delay = self._retry_in(row, exc)
+                    detail = self._failure(row, exc, target, delay)
+                    last_error = _prepend(detail, row.last_error)
                     if delay is not None:
-                        await self._outbox.retry_later(row.id, delay, exc.message)
+                        await self._outbox.retry_later(row.id, delay, last_error)
                         result = apm.RETRY
                     else:
                         result = apm.DEAD
-                    self._log_delivery(row, result, target, error=exc, retry_in=delay)
+                    self._log_delivery(row, result, target, error=exc, retry_in=delay, detail=detail)
                     if result == apm.DEAD:
-                        await self._give_up(row, exc.message)
+                        await self._give_up(row, exc.message, last_error)
                 else:
                     await self._outbox.done(row.id)
                     result = apm.DELIVERED if sent else apm.SKIPPED
@@ -318,6 +332,7 @@ class OutboxRelay:
         *,
         error: ServiceError | None = None,
         retry_in: float | None = None,
+        detail: str | None = None,
     ) -> None:
         """One log event per delivery (`event.dataset: outbox`, searchable in Elasticsearch): what was sent where,
         which attempt, and what came of it. Never the payload: it carries the document's fields."""
@@ -336,6 +351,10 @@ class OutboxRelay:
         if error is not None:
             outbox["error"] = error.message
             outbox["status_code"] = error.status_code
+            if isinstance(error, RemoteClientError) and error.remote_code:
+                outbox["remote_code"] = error.remote_code
+        if detail is not None:
+            outbox["detail"] = detail
         if retry_in is not None:
             outbox["retry_in_seconds"] = round(retry_in, 1)
         failed = result in (apm.RETRY, apm.DEAD)
@@ -362,6 +381,23 @@ class OutboxRelay:
             return NOT_READY_DELAY_SECONDS
         return None
 
+    def _failure(self, row: Row[Any], exc: ServiceError, target: str | None, retry_in: float | None) -> str:
+        """The `last_error` line of this failed attempt: when, what the receiver did (its status and error code,
+        a timeout, or no connection), and what the relay does about it: retry, or give up and why."""
+        age = self._age(row)
+        outcome = f"retry in {retry_in:g}s" if retry_in is not None else f"dead letter: {self._why_dead(row, exc, age)}"
+        when = f"attempt {row.attempts} at {datetime.now(UTC):%H:%M:%S}Z, {age:.0f}s after it was queued"
+        return f"{when}: {_describe(exc, target or 'orchestration')} -> {outcome}"
+
+    def _why_dead(self, row: Row[Any], exc: ServiceError, age: float) -> str:
+        """Why `_retry_in` gave up on `row` (it returned None)."""
+        if exc.status_code >= 500:
+            max_age = self._callback_max_age if row.kind == KIND_CALLBACK else self._max_age
+            return f"still failing {age:.0f}s after it was queued, past the {max_age:.0f}s limit"
+        if row.kind == KIND_CALLBACK and not_ready(exc):
+            return f"still {RESULT_NOT_READY} after {NOT_READY_RETRIES} retries"
+        return f"a {exc.status_code} is final, it is not sent again"
+
     def _backoff(self, attempts: int) -> float:
         return min(self._retry_delay * 2 ** max(attempts - 1, 0), self._max_backoff)
 
@@ -374,8 +410,10 @@ class OutboxRelay:
         await self._next_stage.send(row.payload["body"])
         return True
 
-    async def _give_up(self, row: Row[Any], reason: str) -> None:
-        """Turn the message into a dead letter (logged as a `dead` delivery by `_deliver`)."""
+    async def _give_up(self, row: Row[Any], reason: str, last_error: str) -> None:
+        """Turn the message into a dead letter (logged as a `dead` delivery by `_deliver`), keeping `last_error`.
+        A dead hand-off is replaced by a FAILED callback whose message is the receiver's `reason` only: that one
+        goes to the central orchestrator."""
         replacement = None
         if row.kind == KIND_HANDOFF:
             next_stage = row.payload["next_stage"]
@@ -384,4 +422,33 @@ class OutboxRelay:
                 await self._handoff_failed(row.request_id, next_stage, message)
             if self._callbacks:
                 replacement = callback_message(row.request_id, next_stage, "FAILED", error_message=message)
-        await self._outbox.give_up(row, reason, replacement)
+        await self._outbox.give_up(row, last_error, replacement)
+
+
+def _describe(exc: ServiceError, target: str) -> str:
+    """What `target` did with the message, from the error its client raised: answered with a status (and its
+    own error code), did not answer in time, or could not be reached."""
+    if isinstance(exc, RemoteClientError):
+        code = f" {exc.remote_code}" if exc.remote_code else ""
+        text = f"{target} answered {exc.status_code}{code}: {exc.message}"
+        hint = CENTRAL_CODE_HINTS.get(exc.remote_code or "") if target == "orchestration" else None
+        return f"{text} ({hint})" if hint else text
+    if isinstance(exc, UpstreamTimeout):
+        return f"{exc.message}, no answer in time ({target} may still have received it)"
+    if isinstance(exc, UpstreamUnavailable):
+        cause = exc.__cause__
+        if cause is None:
+            return exc.message
+        return f"{exc.message} ({type(cause).__name__}{f': {cause}' if str(cause) else ''})"
+    if isinstance(exc, InternalError):
+        return exc.message
+    return f"{exc.message} ({exc.status_code})"
+
+
+def _prepend(line: str, previous: str | None) -> str:
+    """`line` above the earlier attempts' lines, the oldest dropped past `LAST_ERROR_MAX_CHARS`."""
+    text = f"{line}\n{previous}" if previous else line
+    if len(text) <= LAST_ERROR_MAX_CHARS:
+        return text
+    cut = text.rfind("\n", 0, LAST_ERROR_MAX_CHARS)
+    return text[:cut] if cut > 0 else text[:LAST_ERROR_MAX_CHARS]
