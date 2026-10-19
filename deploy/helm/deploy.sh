@@ -7,8 +7,11 @@ DEPLOY_ENV="${DEPLOY_ENV:-ddb-dev}"
 VALUES="$CHART/values-$DEPLOY_ENV.yaml"
 RELEASE="${RELEASE:-nilam-ocr-npwp}"
 NAMESPACE="${NAMESPACE:-nilam-ocr-npwp}"
-REGISTRY="${REGISTRY:-asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribrain-dev-gar-temp-01}"
-IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
+# Nexus BRI: satu folder per aplikasi, satu image per service (<registry>/<service>:<tag>).
+REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
+# NEXUS_USERNAME / NEXUS_PASSWORD untuk push dan untuk pull secret di cluster (file rahasia, tidak di-commit).
+NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
+PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 TIMEOUT="${TIMEOUT:-10m}"
 # Python with ocr_common's dependencies (the repo's .venv), to fetch the models from GCS before a build.
@@ -21,7 +24,7 @@ usage() {
   cat <<EOF
 Pemakaian: deploy/helm/deploy.sh [opsi] <service...|all>
 
-Build image service yang disebut, push ke Artifact Registry, lalu helm upgrade
+Build image service yang disebut, push ke Nexus ($REGISTRY), lalu helm upgrade
 release $RELEASE dengan tag baru hanya untuk service tersebut. Tiap service adalah
 Deployment sendiri ($RELEASE-<service>), jadi hanya pod service itu yang diganti.
 
@@ -46,8 +49,11 @@ Opsi:
   -y, --yes       tanpa konfirmasi
   -h, --help      tampilkan bantuan ini
 
+Kredensial Nexus dari \$NEXUS_ENV (default nexus.env di root repo): dipakai untuk push, dan untuk pull secret
+\$PULL_SECRET yang dibuat/diperbarui di namespace sebelum helm upgrade.
+
 Environment: DEPLOY_ENV (default ddb-dev -> values-ddb-dev.yaml), RELEASE, NAMESPACE, PY (Python .venv),
-REGISTRY, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
+REGISTRY, NEXUS_ENV, PULL_SECRET, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
 untuk rollback, default 5).
 
 Contoh:
@@ -95,9 +101,7 @@ for tool in git helm kubectl; do
   command -v "$tool" >/dev/null || die "$tool tidak ditemukan di PATH"
 done
 if [[ $SKIP_BUILD -eq 0 ]]; then
-  for tool in docker gcloud; do
-    command -v "$tool" >/dev/null || die "$tool tidak ditemukan di PATH"
-  done
+  command -v docker >/dev/null || die "docker tidak ditemukan di PATH"
 fi
 
 cd "$ROOT"
@@ -131,7 +135,16 @@ if [[ -z "$TAG" ]]; then
   fi
 fi
 
-image_ref() { echo "$REGISTRY/$IMAGE_PREFIX-$1:$TAG"; }
+image_ref() { echo "$REGISTRY/$1:$TAG"; }
+
+# NEXUS_USERNAME / NEXUS_PASSWORD dari $NEXUS_ENV (KEY=VALUE), tanpa menjalankan file itu sebagai skrip.
+nexus_value() { sed -n "s/^$1=//p" "$NEXUS_ENV" | tail -n1 | tr -d '\r'; }
+if [[ $DRY_RUN -eq 0 ]]; then
+  [[ -f "$NEXUS_ENV" ]] || die "kredensial Nexus tidak ada: $NEXUS_ENV (NEXUS_USERNAME, NEXUS_PASSWORD)"
+  NEXUS_USERNAME="$(nexus_value NEXUS_USERNAME)"
+  NEXUS_PASSWORD="$(nexus_value NEXUS_PASSWORD)"
+  [[ -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]] || die "NEXUS_USERNAME / NEXUS_PASSWORD kosong di $NEXUS_ENV"
+fi
 
 if [[ $BUILD_ONLY -eq 0 ]]; then
   CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
@@ -190,8 +203,8 @@ if [[ $SKIP_BUILD -eq 0 && $DRY_RUN -eq 0 ]]; then
   DOCKER_TMP_CONFIG="$(mktemp -d)"
   trap 'rm -rf "$DOCKER_TMP_CONFIG"' EXIT
   log "Login ke ${REGISTRY%%/*}"
-  gcloud auth print-access-token \
-    | docker --config "$DOCKER_TMP_CONFIG" login -u oauth2accesstoken --password-stdin "https://${REGISTRY%%/*}" >/dev/null
+  printf '%s' "$NEXUS_PASSWORD" \
+    | docker --config "$DOCKER_TMP_CONFIG" login -u "$NEXUS_USERNAME" --password-stdin "${REGISTRY%%/*}" >/dev/null
 
   for svc in "${SERVICES[@]}"; do
     log "Push $svc"
@@ -225,6 +238,13 @@ if [[ "$(helm version --template '{{.Version}}')" == v3.* ]]; then
 else
   HELM_ARGS+=(--wait=watcher --rollback-on-failure)
 fi
+
+# Pull secret untuk Nexus (chart: imagePullSecrets). Dibuat/diperbarui tiap deploy, jadi ganti password Nexus
+# cukup ubah nexus.env lalu deploy lagi.
+log "Pull secret $PULL_SECRET (${REGISTRY%%/*})"
+kubectl -n "$NAMESPACE" create secret docker-registry "$PULL_SECRET" --docker-server="${REGISTRY%%/*}" \
+  --docker-username="$NEXUS_USERNAME" --docker-password="$NEXUS_PASSWORD" --dry-run=client -o yaml \
+  | kubectl apply -f - >/dev/null
 
 log "helm upgrade"
 helm "${HELM_ARGS[@]}"

@@ -8,8 +8,12 @@ SOURCE_KEY="${SOURCE_KEY:-DATABASE_URL}"
 TARGET_KEY="${TARGET_KEY:-DATABASE_URL_CLOUDSQL}"
 ALEMBIC_KEY="${ALEMBIC_KEY:-DATABASE_URL}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-nilam-ocr-npwp}"
-REGISTRY="${REGISTRY:-asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribrain-dev-gar-temp-01}"
-IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
+# Folder Nexus yang sama dengan deploy.sh; image migrasi = <registry>/migrate:<tag>.
+REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
+NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
+# Pull secret yang dibuat deploy.sh di namespace ini.
+PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
+APP_NAME="nilam-ocr-npwp"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 # Node dev yang rusak (lihat affinity di values-ddb-dev.yaml): Job ini juga menghindarinya.
 AVOID_NODE="${AVOID_NODE:-gke-gc-ddb-dev-gke-c-gc-dgv-dev-ndp-c-42b3b8a0-l5uf}"
@@ -38,7 +42,9 @@ database yang tidak terjangkau dari laptop).
 
 Job memakai service account $SERVICE_ACCOUNT, jadi login IAM ke Cloud SQL lewat Workload Identity
 kalau anotasinya terpasang (lihat deploy/helm/README.md, "Pindah ke Cloud SQL").
-Environment: NAMESPACE, SECRET, SOURCE_KEY, TARGET_KEY, ALEMBIC_KEY, REGISTRY, TIMEOUT.
+Login Nexus dari \$NEXUS_ENV (NEXUS_USERNAME / NEXUS_PASSWORD); pod menarik image dengan pull secret
+\$PULL_SECRET yang dibuat deploy.sh.
+Environment: NAMESPACE, SECRET, SOURCE_KEY, TARGET_KEY, ALEMBIC_KEY, REGISTRY, NEXUS_ENV, PULL_SECRET, TIMEOUT.
 USAGE
 }
 
@@ -76,7 +82,7 @@ case "$TASK" in
   *) usage; exit 1 ;;
 esac
 
-for tool in git kubectl docker gcloud; do
+for tool in git kubectl docker; do
   command -v "$tool" >/dev/null || die "$tool tidak ditemukan di PATH"
 done
 cd "$ROOT"
@@ -89,10 +95,17 @@ for key in "${KEYS[@]}"; do
   [[ -n "$(kubectl -n "$NAMESPACE" get secret "$SECRET" -o "jsonpath={.data.$key}")" ]] \
     || die "Secret $SECRET belum punya $key (lihat deploy/helm/README.md, \"Pindah ke Cloud SQL\")"
 done
+kubectl -n "$NAMESPACE" get secret "$PULL_SECRET" >/dev/null 2>&1 \
+  || die "pull secret $PULL_SECRET belum ada di $NAMESPACE: jalankan deploy/helm/deploy.sh sekali (ia yang membuatnya)"
+[[ -f "$NEXUS_ENV" ]] || die "kredensial Nexus tidak ada: $NEXUS_ENV (NEXUS_USERNAME, NEXUS_PASSWORD)"
+nexus_value() { sed -n "s/^$1=//p" "$NEXUS_ENV" | tail -n1 | tr -d '\r'; }
+NEXUS_USERNAME="$(nexus_value NEXUS_USERNAME)"
+NEXUS_PASSWORD="$(nexus_value NEXUS_PASSWORD)"
+[[ -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]] || die "NEXUS_USERNAME / NEXUS_PASSWORD kosong di $NEXUS_ENV"
 
 TAG="$(git rev-parse --short HEAD)"
-IMAGE="$REGISTRY/$IMAGE_PREFIX-migrate:$TAG"
-JOB="$IMAGE_PREFIX-db-$TASK-$(date +%Y%m%d%H%M%S)"
+IMAGE="$REGISTRY/migrate:$TAG"
+JOB="$APP_NAME-db-$TASK-$(date +%Y%m%d%H%M%S)"
 
 log "Rencana"
 if [[ "$TASK" == copy ]]; then
@@ -115,8 +128,8 @@ log "Build + push $IMAGE"
 docker build --platform linux/amd64 -q -f db/Dockerfile -t "$IMAGE" . >/dev/null
 DOCKER_TMP_CONFIG="$(mktemp -d)"
 trap 'rm -rf "$DOCKER_TMP_CONFIG"' EXIT
-gcloud auth print-access-token \
-  | docker --config "$DOCKER_TMP_CONFIG" login -u oauth2accesstoken --password-stdin "https://${REGISTRY%%/*}" >/dev/null
+printf '%s' "$NEXUS_PASSWORD" \
+  | docker --config "$DOCKER_TMP_CONFIG" login -u "$NEXUS_USERNAME" --password-stdin "${REGISTRY%%/*}" >/dev/null
 docker --config "$DOCKER_TMP_CONFIG" push -q "$IMAGE" >/dev/null
 
 # The command as a YAML flow sequence, each argument double-quoted.
@@ -141,7 +154,7 @@ kind: Job
 metadata:
   name: $JOB
   labels:
-    app.kubernetes.io/name: $IMAGE_PREFIX
+    app.kubernetes.io/name: $APP_NAME
     app.kubernetes.io/component: db-$TASK
 spec:
   backoffLimit: 0
@@ -153,6 +166,7 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: $SERVICE_ACCOUNT
+      imagePullSecrets: [{name: $PULL_SECRET}]
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000  # appuser of db/Dockerfile, as podSecurityContext in values.yaml

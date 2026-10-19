@@ -9,11 +9,14 @@ terminationGracePeriodSeconds: 45
 environment: production
 
 image:
-  registry: asia-southeast2-docker.pkg.dev/common-cicd-dev-01/gc-bribrain-dev-gar-temp-01
+  # Nexus BRI, satu folder untuk aplikasi ini: image = <registry>/<service>:<tag>.
+  registry: new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp
   tag: ""
   pullPolicy: IfNotPresent
 
-imagePullSecrets: []
+# Dibuat/diperbarui deploy.sh dari nexus.env sebelum tiap helm upgrade.
+imagePullSecrets:
+  - name: nilam-ocr-npwp-nexus
 
 existingSecret: nilam-ocr-npwp-secrets
 secretKeys:
@@ -118,7 +121,7 @@ services:
   orchestrator:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-orchestrator
+      repository: orchestrator
       tag: ""
     port: 8034
     entrypoint: true
@@ -161,7 +164,7 @@ services:
   guardrails:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-guardrails
+      repository: guardrails
       tag: ""
     port: 8031
     entrypoint: false
@@ -203,7 +206,7 @@ services:
   extraction:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-extraction
+      repository: extraction
       tag: ""
     port: 8030
     entrypoint: false
@@ -239,7 +242,7 @@ services:
   structuring:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-structuring
+      repository: structuring
       tag: ""
     port: 8032
     entrypoint: false
@@ -264,7 +267,7 @@ services:
   scoring:
     enabled: true
     image:
-      repository: ms-bribrain-nilam-ocr-npwp-scoring
+      repository: scoring
       tag: ""
     port: 8033
     entrypoint: false
