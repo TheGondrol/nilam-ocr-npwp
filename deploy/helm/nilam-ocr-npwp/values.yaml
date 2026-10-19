@@ -33,22 +33,6 @@ secretKeys:
   # Client secret app Entra ID untuk identitas GCS (gcpWif di bawah); wajib di Secret begitu gcpWif.clientId diisi.
   gcpWifClientSecret: AZURE_CLIENT_SECRET
 
-# Buat Secret di atas dari GCP Secret Manager lewat External Secrets Operator.
-# Mati = Secret dibuat manual (lihat README). Butuh CRD ESO dan ClusterSecretStore di cluster.
-externalSecret:
-  enabled: false
-  apiVersion: external-secrets.io/v1
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gcp-secret-manager
-  remoteKeys:
-    apiKey: nilam-ocr-npwp-api-key
-    databaseUrl: nilam-ocr-npwp-database-url
-    orchestrationApiKey: nilam-ocr-npwp-orchestration-api-key
-    # Kosong = tidak diambil dari Secret Manager.
-    callbackKey: ""
-
 # Callback tahap ke Orkestrasi pusat, dikirim oleh ketiga tahap pipeline (bukan oleh orchestrator).
 # Kosong = tidak ada callback yang dikirim maupun diantrekan; hasil sampai ke Orkestrasi lewat tabelnya
 # sendiri (ORCHESTRATION_OUTCOME_TABLE dan/atau ORCHESTRATION_API_EVENTS_TABLE di commonEnv) dan

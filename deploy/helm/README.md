@@ -15,7 +15,7 @@ kecil/angka, tanpa `-`. URL antar service di dalam release memakai Service per k
 (`http://nilam-ocr-npwp-structuring:8032`).
 
 Ini satu-satunya jalur deploy; manifest Kustomize yang dulu ada di `deploy/k8s` sudah dihapus
-dan polanya (Deployment per service, NetworkPolicy, PDB, HPA, ExternalSecret) dibawa ke sini.
+dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
 
 ## Cluster tujuan
 
@@ -74,7 +74,6 @@ langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Ork
 | HorizontalPodAutoscaler | hanya yang `autoscaling.enabled` | `services.<svc>.autoscaling.{minReplicas,maxReplicas,targetCPUUtilizationPercentage}` |
 | NetworkPolicy | default-deny + satu per service | `networkPolicy.{enabled,clientNamespaces}` |
 | ServiceAccount | satu untuk semua | `serviceAccount.{create,name,annotations}` |
-| ExternalSecret | opsional, mati | `externalSecret.*` |
 
 Aturan NetworkPolicy dihitung dari `services.<svc>.upstreams`: guardrails dan extraction hanya
 menerima dari orchestrator, `structuring` dari extraction dan orchestrator, `scoring` dari structuring
@@ -111,8 +110,8 @@ URL-nya; extraction dan structuring: tahap berikutnya).
 
 ## Secret
 
-Dengan `externalSecret.enabled=false` (default) chart tidak membuat Secret. Buat sendiri sebelum
-atau sesudah install; pod menunggu sampai Secret ada.
+Chart tidak membuat Secret aplikasi (`existingSecret`). Buat sendiri sebelum install; `deploy.sh`
+menolak jalan kalau Secret itu belum ada di namespace.
 
 ```powershell
 kubectl -n nilam-ocr-npwp create secret generic nilam-ocr-npwp-secrets `
@@ -129,10 +128,6 @@ pemanggil, lalu jadikan `API_KEY` dan hapus dari `API_KEYS`; tiap langkah cukup 
 
 Setelah mengubah Secret, restart pod yang memakainya:
 `kubectl -n nilam-ocr-npwp rollout restart deploy -l app.kubernetes.io/instance=nilam-ocr-npwp`.
-
-Cluster dengan External Secrets Operator dan `ClusterSecretStore` bisa memakai
-`externalSecret.enabled=true`; Secret dengan nama `existingSecret` lalu diisi dari Secret Manager
-(nama key di `externalSecret.remoteKeys`). Cluster dev tidak punya CRD ESO.
 
 ## Model dari GCS
 
