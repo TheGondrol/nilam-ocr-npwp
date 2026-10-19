@@ -3,16 +3,36 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHART="$ROOT/deploy/helm/nilam-ocr-npwp"
-DEPLOY_ENV="${DEPLOY_ENV:-ddb-dev}"
+DEPLOY_ENV="${DEPLOY_ENV:-shared-dev}"
 VALUES="$CHART/values-$DEPLOY_ENV.yaml"
 RELEASE="${RELEASE:-nilam-ocr-npwp}"
-NAMESPACE="${NAMESPACE:-nilam-ocr-npwp}"
+# Cluster tujuan per environment. shared-dev: API server privat, jadi kubectl/helm lewat tunnel SOCKS di bastion
+# (IAP SSH) dengan kubeconfig sendiri; ~/.kube/config (context ddb) tidak disentuh.
+case "$DEPLOY_ENV" in
+  shared-dev)
+    NAMESPACE="${NAMESPACE:-nilam}"
+    GKE_PROJECT="${GKE_PROJECT:-shared-kubecluster-dev-01}"
+    GKE_CLUSTER="${GKE_CLUSTER:-gc-bigpool-dev-gke-cluster-01}"
+    GKE_REGION="${GKE_REGION:-asia-southeast2}"
+    BASTION="${BASTION:-gc-shared-dev-gce-bastion-01}"
+    BASTION_ZONE="${BASTION_ZONE:-asia-southeast2-a}"
+    PROXY_PORT="${PROXY_PORT:-18090}"
+    export KUBECONFIG="${SHARED_KUBECONFIG:-$HOME/.kube/config-$GKE_PROJECT}"
+    DEFAULT_CONTEXT="gke_${GKE_PROJECT}_${GKE_REGION}_${GKE_CLUSTER}"
+    ;;
+  ddb-dev)
+    NAMESPACE="${NAMESPACE:-nilam-ocr-npwp}"
+    BASTION=""
+    DEFAULT_CONTEXT="gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01"
+    ;;
+  *) printf 'ERROR: DEPLOY_ENV tidak dikenal: %s (shared-dev | ddb-dev)\n' "$DEPLOY_ENV" >&2; exit 1 ;;
+esac
 # Nexus BRI: satu folder per aplikasi, satu image per service (<registry>/<service>:<tag>).
 REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
 # NEXUS_USERNAME / NEXUS_PASSWORD untuk push dan untuk pull secret di cluster (file rahasia, tidak di-commit).
 NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
 PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
-EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
+EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-$DEFAULT_CONTEXT}"
 TIMEOUT="${TIMEOUT:-10m}"
 # Python with ocr_common's dependencies (the repo's .venv), to fetch the models from GCS before a build.
 PY="${PY:-python}"
@@ -45,6 +65,8 @@ Opsi:
                   <sha>-dirty-<waktu>. Hanya bersama --build-only: image ini tidak bisa di-deploy
   --skip-build    tanpa build/push; tag harus sudah ada di registry
   --build-only    build + push saja, tanpa helm upgrade
+  --install       izinkan instalasi pertama kali (release belum ada di namespace); butuh Secret
+                  \$existingSecret (nilam-ocr-npwp-secrets) sudah dibuat di namespace itu
   --dry-run       tampilkan diff manifest terhadap release yang berjalan, tanpa apply
   -y, --yes       tanpa konfirmasi
   -h, --help      tampilkan bantuan ini
@@ -52,7 +74,9 @@ Opsi:
 Kredensial Nexus dari \$NEXUS_ENV (default nexus.env di root repo): dipakai untuk push, dan untuk pull secret
 \$PULL_SECRET yang dibuat/diperbarui di namespace sebelum helm upgrade.
 
-Environment: DEPLOY_ENV (default ddb-dev -> values-ddb-dev.yaml), RELEASE, NAMESPACE, PY (Python .venv),
+Environment: DEPLOY_ENV (default shared-dev -> values-shared-dev.yaml, cluster gc-bigpool-dev-gke-cluster-01
+namespace nilam lewat tunnel bastion; ddb-dev -> values-ddb-dev.yaml, cluster gc-ddb-dev-gke-cluster-01
+namespace nilam-ocr-npwp), RELEASE, NAMESPACE, PROXY_PORT (tunnel shared-dev, default 18090), PY (Python .venv),
 REGISTRY, NEXUS_ENV, PULL_SECRET, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
 untuk rollback, default 5).
 
@@ -70,6 +94,8 @@ TAG=""
 ALLOW_DIRTY=0
 SKIP_BUILD=0
 BUILD_ONLY=0
+INSTALL=0
+RELEASE_EXISTS=1
 DRY_RUN=0
 ASSUME_YES=0
 SERVICES=()
@@ -80,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
+    --install) INSTALL=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -100,6 +127,9 @@ done
 for tool in git helm kubectl; do
   command -v "$tool" >/dev/null || die "$tool tidak ditemukan di PATH"
 done
+if [[ -n "$BASTION" && $BUILD_ONLY -eq 0 ]]; then
+  command -v gcloud >/dev/null || die "gcloud tidak ditemukan di PATH (tunnel ke $GKE_CLUSTER lewat $BASTION)"
+fi
 if [[ $SKIP_BUILD -eq 0 ]]; then
   command -v docker >/dev/null || die "docker tidak ditemukan di PATH"
 fi
@@ -146,12 +176,84 @@ if [[ $DRY_RUN -eq 0 ]]; then
   [[ -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]] || die "NEXUS_USERNAME / NEXUS_PASSWORD kosong di $NEXUS_ENV"
 fi
 
+# --- Tunnel (shared-dev) ----------------------------------------------------------------------------------------
+# gcloud compute ssh -D: SOCKS5 di 127.0.0.1:$PROXY_PORT, keluar dari bastion ke API server privat. Di Windows
+# gcloud menjalankan putty.exe sebagai child yang tidak ikut mati bersama gcloud, jadi yang dihentikan seluruh
+# process tree-nya (taskkill /T).
+TUNNEL_PID=""
+TUNNEL_LOG=""
+DOCKER_TMP_CONFIG=""
+cleanup() {
+  if [[ -n "$TUNNEL_PID" ]]; then
+    if [[ -r "/proc/$TUNNEL_PID/winpid" ]]; then
+      taskkill //F //T //PID "$(cat "/proc/$TUNNEL_PID/winpid")" >/dev/null 2>&1 || true
+    else
+      pkill -P "$TUNNEL_PID" 2>/dev/null || true
+      kill "$TUNNEL_PID" 2>/dev/null || true
+    fi
+    TUNNEL_PID=""
+  fi
+  [[ -n "$TUNNEL_LOG" ]] && rm -f "$TUNNEL_LOG"
+  [[ -n "$DOCKER_TMP_CONFIG" ]] && rm -rf "$DOCKER_TMP_CONFIG"
+  return 0
+}
+trap cleanup EXIT
+
+port_open() { (echo > "/dev/tcp/127.0.0.1/$PROXY_PORT") 2>/dev/null; }
+
+open_tunnel() {
+  port_open && die "port $PROXY_PORT sudah dipakai (tunnel lama yang masih hidup? di Windows: proses putty.exe). Hentikan dulu atau set PROXY_PORT."
+  log "Tunnel SOCKS lewat $BASTION (IAP) di 127.0.0.1:$PROXY_PORT"
+  TUNNEL_LOG="$(mktemp)"
+  # gcloud kadang timeout ke compute.googleapis.com (jaringan kantor: alamat IPv6 tanpa rute), jadi dicoba 3 kali.
+  local attempt
+  for attempt in 1 2 3; do
+    gcloud compute ssh "$BASTION" --zone "$BASTION_ZONE" --project "$GKE_PROJECT" --tunnel-through-iap \
+      --strict-host-key-checking=no -- -N -D "127.0.0.1:$PROXY_PORT" >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    for _ in $(seq 1 45); do
+      port_open && break
+      kill -0 "$TUNNEL_PID" 2>/dev/null || break
+      sleep 2
+    done
+    port_open && break
+    echo "  tunnel gagal (percobaan $attempt): $(grep -m1 -E 'ERROR|FATAL' "$TUNNEL_LOG" | cut -c1-200)" >&2
+    cleanup
+    TUNNEL_LOG="$(mktemp)"
+  done
+  port_open || { cat "$TUNNEL_LOG" >&2; die "tunnel ke $BASTION gagal 3 kali (perlu izin IAP + OS Login ke VM itu)"; }
+
+  log "Kubeconfig $GKE_CLUSTER -> $KUBECONFIG"
+  gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$GKE_REGION" --project "$GKE_PROJECT" >/dev/null 2>&1 \
+    || die "get-credentials $GKE_CLUSTER gagal"
+  kubectl config set-cluster "$(kubectl config current-context)" --proxy-url="socks5://127.0.0.1:$PROXY_PORT" >/dev/null
+  for attempt in 1 2 3; do
+    # Bukan /readyz: API server GKE ini menjawabnya NotFound walau tunnel jalan.
+    kubectl get namespace "$NAMESPACE" --request-timeout=30s >/dev/null 2>&1 && return 0
+    echo "  API server belum menjawab lewat tunnel (percobaan $attempt)" >&2
+    sleep 3
+  done
+  die "API server $GKE_CLUSTER tidak menjawab lewat tunnel"
+}
+
 if [[ $BUILD_ONLY -eq 0 ]]; then
+  [[ -n "$BASTION" ]] && open_tunnel
   CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
   [[ "$CONTEXT" == "$EXPECTED_CONTEXT" ]] \
     || die "kubectl context sekarang '$CONTEXT', diharapkan '$EXPECTED_CONTEXT'. Ganti context atau set EXPECTED_CONTEXT."
-  helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1 \
-    || die "release $RELEASE tidak ditemukan di namespace $NAMESPACE; install pertama kali lihat deploy/helm/README.md"
+  kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || die "namespace $NAMESPACE tidak ada di $CONTEXT (atau tidak boleh dibaca)"
+  if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
+    RELEASE_EXISTS=1
+  else
+    RELEASE_EXISTS=0
+    [[ $INSTALL -eq 1 ]] \
+      || die "release $RELEASE belum ada di namespace $NAMESPACE; instalasi pertama: tambahkan --install (lihat deploy/helm/README.md)"
+  fi
+  # Secret aplikasi (API key, DATABASE_URL, callback key, ...) tidak dibuat chart; harus sudah ada.
+  APP_SECRET="$(sed -n 's/^existingSecret: *//p' "$VALUES" | tail -n1)"
+  [[ -n "$APP_SECRET" ]] || APP_SECRET="$(sed -n 's/^existingSecret: *//p' "$CHART/values.yaml" | tail -n1)"
+  kubectl -n "$NAMESPACE" get secret "$APP_SECRET" >/dev/null 2>&1 \
+    || die "Secret $APP_SECRET belum ada di namespace $NAMESPACE (API_KEY, DATABASE_URL, ORCHESTRATION_*; lihat deploy/helm/README.md)"
 fi
 
 log "Rencana"
@@ -161,7 +263,7 @@ echo "  registry  : $REGISTRY"
 echo "  values    : ${VALUES#"$ROOT"/}"
 if [[ $BUILD_ONLY -eq 0 ]]; then
   echo "  cluster   : $CONTEXT"
-  echo "  release   : $RELEASE (namespace $NAMESPACE)"
+  echo "  release   : $RELEASE (namespace $NAMESPACE)$([[ $RELEASE_EXISTS -eq 0 ]] && echo ', INSTALASI PERTAMA')"
 fi
 [[ "$TAG" == *-dirty-* ]] && echo "  PERINGATAN: image dibangun dari working tree yang belum di-commit (--allow-dirty); jangan dipakai di produksi"
 
@@ -200,8 +302,7 @@ if [[ $SKIP_BUILD -eq 0 && $DRY_RUN -eq 0 ]]; then
       -t "$(image_ref "$svc")" .
   done
 
-  DOCKER_TMP_CONFIG="$(mktemp -d)"
-  trap 'rm -rf "$DOCKER_TMP_CONFIG"' EXIT
+  DOCKER_TMP_CONFIG="$(mktemp -d)"  # dihapus oleh cleanup (trap EXIT)
   log "Login ke ${REGISTRY%%/*}"
   printf '%s' "$NEXUS_PASSWORD" \
     | docker --config "$DOCKER_TMP_CONFIG" login -u "$NEXUS_USERNAME" --password-stdin "${REGISTRY%%/*}" >/dev/null
@@ -219,6 +320,11 @@ fi
 
 HELM_ARGS=(upgrade "$RELEASE" "$CHART" -n "$NAMESPACE" --reset-then-reuse-values -f "$VALUES" --timeout "$TIMEOUT"
   --history-max "$HISTORY_MAX")
+if [[ $RELEASE_EXISTS -eq 0 ]]; then
+  # Instalasi pertama: service yang tidak disebut tidak punya tag apa pun di cluster, jadi semuanya ikut.
+  [[ ${#SERVICES[@]} -eq ${#ALL_SERVICES[@]} ]] || die "instalasi pertama harus semua service: deploy.sh --install ... all"
+  HELM_ARGS+=(--install)
+fi
 for svc in "${SERVICES[@]}"; do
   HELM_ARGS+=(--set "services.$svc.image.tag=$TAG")
 done
@@ -226,7 +332,7 @@ done
 if [[ $DRY_RUN -eq 1 ]]; then
   log "Diff manifest (dry-run, tidak ada yang diubah)"
   current="$(mktemp)"; planned="$(mktemp)"
-  helm get manifest "$RELEASE" -n "$NAMESPACE" > "$current"
+  [[ $RELEASE_EXISTS -eq 1 ]] && helm get manifest "$RELEASE" -n "$NAMESPACE" > "$current"
   helm "${HELM_ARGS[@]}" --dry-run=server | sed -n '/^MANIFEST:/,/^NOTES:/p' | sed '1d;/^NOTES:/d' > "$planned"
   diff -u "$current" "$planned" && echo "  tidak ada perubahan"
   rm -f "$current" "$planned"

@@ -1,0 +1,59 @@
+# Dev di GKE shared: cluster gc-bigpool-dev-gke-cluster-01 (project shared-kubecluster-dev-01), namespace nilam.
+# deploy.sh memakainya dengan DEPLOY_ENV=shared-dev (default). API server cluster ini privat: deploy.sh membuka
+# tunnel lewat bastion gc-shared-dev-gce-bastion-01.
+#
+# Status jaringan dari pod di namespace nilam (diuji 19 Okt 2026): hanya Nexus yang terjangkau. Cloud SQL
+# (10.213.224.76:5432), PaddleOCR (10.213.128.67:8070), Elastic APM (10.213.128.39:8200), Logstash dan
+# Orkestrasi (Service di cluster ddb) belum. Sampai tim platform membukanya, pod menyala tetapi /health gagal
+# karena database tidak terjangkau.
+#
+# Tanpa GCS: model guardrails dan scoring ikut di dalam image (deploy.sh mengambilnya dari GCS di laptop saat
+# build), jadi pod tidak butuh identitas GCP. Identitas pod ke GCS di cluster ini belum jalan (SA node
+# gc-bribrain-dev-sac-gke-01 ditolak 403), jadi gcpWif dan *_MODEL_GCS_URI sengaja tidak dipakai.
+
+environment: production
+
+existingSecret: nilam-ocr-npwp-secrets
+
+orchestration:
+  # Orkestrasi pusat berjalan di cluster ddb (ocr-orchestration.ocr-dev.svc.cluster.local), nama itu tidak
+  # ada di cluster ini. Isi url dengan alamat yang terjangkau dari cluster shared, lalu nyalakan callback.
+  url: ""
+  callbackPath: /v1/ocr-callback
+  callbackFormat: result
+  callbackEnabled: false
+
+commonEnv:
+  ORCHESTRATION_API_EVENTS_TABLE: ""
+  PIPELINE_OUTBOX: "true"
+  TESTING_ENDPOINTS: "true"
+
+# APM mati (serverUrl kosong): server APM dev belum terjangkau dari cluster ini; agen yang terus timeout hanya
+# membuang CPU. Isi lagi seperti values-ddb-dev.yaml begitu jaringannya dibuka.
+apm:
+  serverUrl: ""
+
+# Belum ada client di cluster ini; Orkestrasi pusat ada di cluster lain.
+networkPolicy:
+  clientNamespaces: []
+
+service:
+  public:
+    enabled: false
+
+# Namespace nilam punya LimitRange (limit CPU maks 4x request, memori maks 3x request) dan ResourceQuota
+# (10 CPU / 10 Gi). HPA dimatikan supaya jumlah pod tetap dan muat di kuota.
+services:
+  orchestrator:
+    autoscaling:
+      enabled: false
+    # Memori 256Mi -> 1Gi (4x) ditolak LimitRange; 384Mi -> 1Gi = 2,7x.
+    resources:
+      requests:
+        memory: 384Mi
+  guardrails:
+    autoscaling:
+      enabled: false
+  extraction:
+    env:
+      EXTRACTION_OCR_URL: http://10.213.128.67:8070
