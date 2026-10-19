@@ -290,7 +290,7 @@ Di compose, URL antar service sudah di-override ke nama service (`http://structu
 
 Uji mode callback (opsional) tanpa orkestrator: `SMOKE_CALLBACK_PORT=8039 make smoke` membuat smoke script ikut menerima callback; arahkan ketiga service ke sana dengan `ORCHESTRATION_URL=http://host.docker.internal:8039` (container) atau `http://127.0.0.1:8039` (proses bare). Script memeriksa urutan `OCR → STRUCTURING → SCORING` dan menampilkan hasil akhir.
 
-Deploy ke GKE memakai chart Helm di [deploy/helm/README.md](deploy/helm/README.md): satu Deployment, Service, PDB, dan NetworkPolicy per service, HPA opsional untuk guardrails, Service `nilam-ocr-npwp` (hanya port 8034, orchestrator) sebagai pintu masuk Orkestrasi pusat (`deploy/helm/deploy.sh <service|all>`, migrasi lewat `migrate-db.sh`).
+Deploy ke GKE memakai chart Helm di [deploy/helm/README.md](deploy/helm/README.md): satu Deployment, Service, PDB, dan NetworkPolicy per service, HPA opsional untuk guardrails, Service `nilam-ocr-npwp-gateway` (hanya port 8034, orchestrator) sebagai pintu masuk Orkestrasi pusat (`deploy/helm/deploy.sh <service|all>`, migrasi lewat `migrate-db.sh`).
 
 ## Environment Variables
 
@@ -494,7 +494,7 @@ API key-nya sama dengan yang dipakai Orkestrasi (`API_KEY` di Secret `nilam-ocr-
 `X-API-Key`. Akses lewat port-forward ke orchestrator:
 
 ```bash
-kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp-orchestrator 8034:8034
 
 curl -X POST http://127.0.0.1:8034/v1/extract-ocr-test \
   -H "X-API-Key: $API_KEY" -F run_id=run1 -F file=@npwp.jpg
@@ -667,7 +667,7 @@ Pemeriksaan yang dijalankan sebelum commit dan sebelum deploy, semuanya dari lap
 | 2. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
 | 3. Status | `GET /v1/extract-ocr/{request_id}` di orchestrator: kontrak yang sama, tanpa menunggu |
 
-Tiap operasi membawa `servers` orchestrator: entry Service `nilam-ocr-npwp` dari namespace lain (variabel `namespace`, default `nilam-ocr-npwp`), Service komponen dari namespace yang sama, Compose, dan localhost; test menjaga bahwa server pertamanya entry Service di port 8034. Guardrails, `GET /v1/<tahap>/jobs/{request_id}`, panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`), dan helper sinkron sengaja tidak ikut: semuanya internal, ada di spec per service dan di `/docs` masing-masing.
+Tiap operasi membawa `servers` orchestrator: Service gateway `nilam-ocr-npwp-gateway` (variabel `namespace`, default `nilam`), Compose, dan localhost; test menjaga bahwa server pertamanya entry Service di port 8034. Guardrails, `GET /v1/<tahap>/jobs/{request_id}`, panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`), dan helper sinkron sengaja tidak ikut: semuanya internal, ada di spec per service dan di `/docs` masing-masing.
 
 Aturan penulisan yang dijaga test: setiap operasi punya `operationId` (dipakai generator klien: `extractOcr`, `getExtractOcr`), setiap respons 4xx/5xx punya contohnya sendiri, dan teks `Field(description=...)` berbahasa Inggris karena dibaca tim lain. Contoh di spec memakai data fiktif.
 

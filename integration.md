@@ -7,7 +7,7 @@ berjalan di cluster, apa yang dikirim balik, dan apa yang kami butuhkan dari kal
 service, **orchestrator** NPWP di port **8034** (`POST /v1/extract-ocr`, plus `GET` status baru).
 Kontraknya sama persis dengan `POST :8031/v1/extract-ocr` yang lama di guardrails; yang berubah hanya
 port-nya. Guardrails (8031) dan ketiga tahap pipeline sekarang internal: `:8031/v1/extract-ocr` sudah
-tidak ada, dan port 8030/8031 tidak lagi dibuka di Service `nilam-ocr-npwp`.
+tidak ada, dan port 8030/8031 tidak lagi dibuka di Service pintu masuk (`nilam-ocr-npwp-gateway`).
 
 Semua angka dan contoh respons di dokumen ini diambil dari request sungguhan ke service
 yang sedang berjalan, bukan karangan. Yang belum terbukti ditandai eksplisit.
@@ -31,20 +31,20 @@ setelah deploy berikutnya, yang kami kabari bersama waktu kalian pindah ke port 
 
 ## 2. Akses
 
-| Item | Nilai |
-|---|---|
-| Cluster | `gc-ddb-dev-gke-cluster-01` |
-| Project | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
-| Namespace | `nilam-ocr-npwp` |
-| Service (ClusterIP) | `nilam-ocr-npwp`: pintu masuk, hanya port 8034 (orchestrator) |
+| Item | Dev shared (tujuan) | Dev ddb (sekarang) |
+|---|---|---|
+| Cluster | `gc-bigpool-dev-gke-cluster-01` | `gc-ddb-dev-gke-cluster-01` |
+| Project | `shared-kubecluster-dev-01`, region `asia-southeast2` | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
+| Namespace | `nilam` | `nilam-ocr-npwp` |
+| Service (ClusterIP) | `nilam-ocr-npwp-gateway`: pintu masuk, hanya port 8034 (orchestrator) | sama |
 
-Satu-satunya alamat yang kalian pakai:
+Satu-satunya alamat yang kalian pakai (dulu `nilam-ocr-npwp`, tanpa `-gateway`):
 
-    http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034
+    http://nilam-ocr-npwp-gateway.<namespace>.svc.cluster.local:8034
 
-Di belakangnya, tiap service punya Deployment + Service sendiri (`nilam-ocr-npwp-<service>`):
-orchestrator (8034), guardrails (8031), extraction (8030), structuring (8032), scoring (8033). Selain
-orchestrator semuanya internal: hanya dipanggil orchestrator atau tahap sebelumnya.
+Di belakangnya, tiap service internal punya Deployment + Service sendiri (`nilam-ocr-npwp-<service>`):
+guardrails (8031), extraction (8030), structuring (8032), scoring (8033); hanya dipanggil orchestrator
+atau tahap sebelumnya. Orchestrator (8034) hanya terbuka lewat Service gateway.
 
 **Autentikasi.** Semua endpoint kecuali `/health` dan `/ready` memerlukan header:
 
@@ -60,7 +60,7 @@ tahu kami supaya ditambahkan. Kami belum bisa menguji panggilan dari namespace k
 
 **Dari laptop** (untuk coba-coba), cukup forward orchestrator:
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+    kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp-orchestrator 8034:8034
 
 ## 3. Alur
 
@@ -129,7 +129,7 @@ tahap-tahap pipeline (bagian 7).
 Kirim `request_id` plus dokumen sebagai `file` (multipart), **atau** sebagai `file_url`
 supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
-    curl -X POST http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034/v1/extract-ocr \
+    curl -X POST http://nilam-ocr-npwp-gateway.<namespace>.svc.cluster.local:8034/v1/extract-ocr \
       -H "X-API-Key: changeme" \
       -F "request_id=REQ_001" \
       -F "document_type=npwp" \
@@ -343,7 +343,7 @@ Kontrak yang sama dengan `POST`, tanpa menunggu: orchestrator membaca status tah
 dan scoring sekali, berurutan. Pakai untuk request yang dijawab 202, misalnya kalau callback-nya
 tidak datang.
 
-    curl http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
+    curl http://nilam-ocr-npwp-gateway.<namespace>.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
       -H "X-API-Key: changeme"
 
 | Keadaan | HTTP | isi | `errors` |
@@ -677,7 +677,7 @@ bagian 7). Itu sumber kebenaran paling detail; dokumen ini ringkasannya.
 
 Swagger UI orchestrator juga hidup di `/docs`:
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+    kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp-orchestrator 8034:8034
     # buka http://127.0.0.1:8034/docs
 
 Spec per service ada di `services/<nama>/openapi.yaml`.

@@ -48,7 +48,7 @@ spec:
           image: "{{ $.Values.image.registry }}/{{ $svc.image.repository }}:{{ include "nilam-ocr-npwp.imageTag" $component }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           ports:
-            # Nama port = nama service, supaya Service gabungan (targetPort per nama)
+            # Nama port = nama service, supaya Service gateway (targetPort per nama)
             # hanya mengarah ke pod yang benar.
             - name: {{ $name }}
               containerPort: {{ $svc.port }}

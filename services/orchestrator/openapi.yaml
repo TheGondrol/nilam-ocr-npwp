@@ -81,18 +81,13 @@ info:
 servers:
 - url: /
   description: This host (where this page is served)
-- url: http://nilam-ocr-npwp.{namespace}.svc.cluster.local:8034
-  description: 'GKE, from another namespace: the entry Service (the central orchestrator / gateway)'
+- url: http://nilam-ocr-npwp-gateway.{namespace}.svc.cluster.local:8034
+  description: 'GKE: the gateway Service (the central orchestrator calls this)'
   variables:
     namespace:
-      default: nilam-ocr-npwp
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
-- url: http://nilam-ocr-npwp-orchestrator.{namespace}.svc.cluster.local:8034
-  description: GKE, from inside the release's namespace (the other services of this pipeline)
-  variables:
-    namespace:
-      default: nilam-ocr-npwp
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)'
+      default: nilam
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, nilam-ocr-npwp
+        on ddb-dev)'
 - url: http://orchestrator:8034
   description: The Docker Compose network
 - url: http://127.0.0.1:8034

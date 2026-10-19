@@ -6,13 +6,15 @@ Satu Deployment, Service, ConfigMap, PodDisruptionBudget, dan NetworkPolicy per 
 Tiap service bisa di-scale dan di-restart sendiri; guardrails (torch, CPU-bound) punya HPA opsional, dan
 kalau ia kehabisan memori, tahap lain tidak ikut jatuh.
 
-Service `nilam-ocr-npwp` (tanpa akhiran) adalah pintu masuk yang dipublikasikan ke Orkestrasi pusat
+Service `nilam-ocr-npwp-gateway` adalah pintu masuk yang dipublikasikan ke Orkestrasi pusat
 ([integration.md](../../integration.md)): ia membuka port semua service ber-`entrypoint`, yaitu hanya
-orchestrator (8034). Selector-nya mencakup semua pod release, tetapi port itu memakai `targetPort`
+orchestrator (8034). Sampai 19 Okt 2026 namanya `nilam-ocr-npwp` dan orchestrator juga punya Service
+internal `nilam-ocr-npwp-orchestrator`; yang kedua dihapus karena tidak ada service lain yang memanggil
+orchestrator. Selector-nya mencakup semua pod release, tetapi port itu memakai `targetPort`
 bernama (`orchestrator`), dan Kubernetes hanya memasukkan pod yang punya nama port itu ke endpoint
 port tersebut. Karena nama service dipakai sebagai nama port, nama service maksimal 15 karakter, huruf
-kecil/angka, tanpa `-`. URL antar service di dalam release memakai Service per komponen
-(`http://nilam-ocr-npwp-structuring:8032`).
+kecil/angka, tanpa `-`. URL antar service di dalam release memakai Service internal per komponen
+(`http://nilam-ocr-npwp-structuring:8032`), yang hanya dibuat untuk service tanpa `entrypoint`.
 
 Ini satu-satunya jalur deploy; manifest Kustomize yang dulu ada di `deploy/k8s` sudah dihapus
 dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
@@ -66,9 +68,9 @@ langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Ork
 | Objek | Per service | Value |
 |---|---|---|
 | Deployment `<release>-<svc>` | ya | `services.<svc>.replicaCount`, `resources`, `terminationGracePeriodSeconds` |
-| Service `<release>-<svc>` | ya | `service.type`, `service.annotations` |
-| Service `<release>` (pintu masuk) | tidak; port dari service ber-`entrypoint` | `service.entrypoint.enabled` |
-| Service `<release>-public` (LoadBalancer, pintu masuk dari luar cluster) | tidak; port yang sama dengan `<release>` | `service.public.{enabled,annotations,loadBalancerSourceRanges,externalTrafficPolicy}`; di dev menyala sejak 14 Okt 2026 dengan IP publik internet tanpa batas IP asal |
+| Service internal `<release>-<svc>` | ya, kecuali service ber-`entrypoint` | `service.type`, `service.annotations` |
+| Service `<release>-gateway` (pintu masuk Orkestrasi pusat) | tidak; port dari service ber-`entrypoint` | `service.entrypoint.enabled` |
+| Service `<release>-public` (LoadBalancer, pintu masuk dari luar cluster) | tidak; port yang sama dengan `<release>-gateway` | `service.public.{enabled,annotations,loadBalancerSourceRanges,externalTrafficPolicy}`; di dev menyala sejak 14 Okt 2026 dengan IP publik internet tanpa batas IP asal |
 | ConfigMap `<release>-<svc>` | ya | `environment`, `orchestration`, `commonEnv`, `services.<svc>.env`, `upstreams` |
 | PodDisruptionBudget | ya | `podDisruptionBudget.{enabled,maxUnavailable}` |
 | HorizontalPodAutoscaler | hanya yang `autoscaling.enabled` | `services.<svc>.autoscaling.{minReplicas,maxReplicas,targetCPUUtilizationPercentage}` |
@@ -384,7 +386,7 @@ mengubah ConfigMap guardrails (tanpa `*_SERVICE_URL` dan `PIPELINE_WAIT_SECONDS`
 `checksum/config` me-roll pod guardrails walau guardrails tidak disebut. Image guardrails lama menolak
 start dengan ConfigMap itu (`ENVIRONMENT=production` dan `EXTRACTION_SERVICE_URL` default localhost),
 lalu `--atomic` me-rollback seluruh release. Tag global `values-ddb-dev.yaml` juga tidak punya image
-orchestrator. Sejak upgrade, entry Service `nilam-ocr-npwp` hanya membuka 8034: Orkestrasi pusat harus
+orchestrator. Sejak upgrade, entry Service (kini `nilam-ocr-npwp-gateway`) hanya membuka 8034: Orkestrasi pusat harus
 pindah dari `:8031/v1/extract-ocr` ke `:8034/v1/extract-ocr` pada saat yang sama. `helm rollback` ke
 revisi sebelumnya membuang port 8034 lagi, jadi Orkestrasi pusat harus kembali ke `:8031` kalau
 rollback.
@@ -430,9 +432,10 @@ KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01 kubectl -n nilam get pods
 
 ```powershell
 kubectl -n nilam-ocr-npwp get deploy,pods,svc,pdb,networkpolicy
-kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp-orchestrator 8034:8034
 curl http://localhost:8034/ready
 ```
 
-`port-forward` harus ke Service per komponen (atau `deploy/nilam-ocr-npwp-<service>`): pada Service
-pintu masuk `nilam-ocr-npwp`, kubectl memilih satu pod sembarang dari selector-nya.
+`port-forward` ke orchestrator memakai Deployment-nya (`deploy/nilam-ocr-npwp-orchestrator`), bukan Service
+gateway: selector gateway mencakup semua pod release, dan kubectl memilih satu pod sembarang darinya. Service
+lain bisa lewat Service internalnya (`svc/nilam-ocr-npwp-<service>`).

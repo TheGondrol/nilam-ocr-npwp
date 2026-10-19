@@ -88,10 +88,10 @@ commonEnv:
   # yang sama di tabel testing_*, tanpa callback dan tanpa menulis ke tabel Orkestrasi. Hanya untuk dev.
   TESTING_ENDPOINTS: "false"
 
-# Tiap service = satu Deployment + satu Service `<release>-<nama>` + satu ConfigMap.
-#   entrypoint : dipanggil dari luar release (Orkestrasi pusat). Ikut di Service gabungan `<release>`
-#                dan NetworkPolicy-nya menerima namespace di networkPolicy.clientNamespaces. Hanya
-#                orchestrator; yang lain internal.
+# Tiap service = satu Deployment + satu ConfigMap + satu Service internal `<release>-<nama>`.
+#   entrypoint : dipanggil dari luar release (Orkestrasi pusat). Terbuka lewat Service `<release>-gateway`
+#                (bukan Service internal) dan NetworkPolicy-nya menerima namespace di
+#                networkPolicy.clientNamespaces. Hanya orchestrator; yang lain internal.
 #   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
 #   database   : butuh DATABASE_URL tanpa konfigurasi Orkestrasi (orchestrator: tabel nilam_guardrails_results).
 #   rollingUpdate: {maxSurge, maxUnavailable} saat rollout; default 1 / 0 (pod baru siap dulu, tanpa jeda).
@@ -277,9 +277,9 @@ services:
 service:
   type: ClusterIP
   annotations: {}
-  # Service gabungan bernama `<release>` yang membuka port semua service ber-entrypoint (hanya
-  # orchestrator, 8034). Ini alamat yang dipublikasikan ke Orkestrasi pusat (integration.md); internal
-  # pipeline memakai Service per komponen.
+  # Service `<release>-gateway` yang membuka port semua service ber-entrypoint (hanya orchestrator, 8034).
+  # Ini alamat yang dipublikasikan ke Orkestrasi pusat (integration.md). Service per komponen
+  # (`<release>-<service>`) hanya untuk panggilan internal pipeline, jadi orchestrator tidak punya.
   entrypoint:
     enabled: true
   # Service `<release>-public` bertipe LoadBalancer dengan port yang sama (orchestrator, 8034), untuk pemanggil

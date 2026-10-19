@@ -169,32 +169,34 @@ def create_app(
     return app
 
 
-# The Helm chart's names (deploy/helm): the release and its namespace are both `nilam-ocr-npwp`, each
-# service is `<release>-<service>`, and `<release>` alone is the entry Service in front of the entry point.
+# The Helm chart's names (deploy/helm): release `nilam-ocr-npwp`; an internal service is `<release>-<service>`,
+# and the entry point (orchestrator) is only behind `<release>-gateway`, the Service the central orchestrator calls.
 RELEASE = "nilam-ocr-npwp"
+GATEWAY_SERVICE = f"{RELEASE}-gateway"
 _NAMESPACE = {
     "namespace": {
-        "default": RELEASE,
-        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp)",
+        "default": "nilam",
+        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, "
+        "nilam-ocr-npwp on ddb-dev)",
     }
 }
 
 
 def _cluster_servers(service_name: str, port: int, *, entrypoint: bool) -> list[dict[str, Any]]:
-    same_namespace = {
-        "url": f"http://{RELEASE}-{service_name}.{{namespace}}.svc.cluster.local:{port}",
-        "description": "GKE, from inside the release's namespace (the other services of this pipeline)",
-        "variables": _NAMESPACE,
-    }
-    if not entrypoint:
-        return [same_namespace]
+    if entrypoint:
+        return [
+            {
+                "url": f"http://{GATEWAY_SERVICE}.{{namespace}}.svc.cluster.local:{port}",
+                "description": "GKE: the gateway Service (the central orchestrator calls this)",
+                "variables": _NAMESPACE,
+            }
+        ]
     return [
         {
-            "url": f"http://{RELEASE}.{{namespace}}.svc.cluster.local:{port}",
-            "description": "GKE, from another namespace: the entry Service (the central orchestrator / gateway)",
+            "url": f"http://{RELEASE}-{service_name}.{{namespace}}.svc.cluster.local:{port}",
+            "description": "GKE, from inside the release's namespace (the other services of this pipeline)",
             "variables": _NAMESPACE,
-        },
-        same_namespace,
+        }
     ]
 
 
