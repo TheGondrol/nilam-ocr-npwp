@@ -79,6 +79,9 @@ def build_extraction_client(settings: Settings, *, testing: bool = False) -> Ext
         name="extraction service (testing)" if testing else "extraction service",
         headers={"X-API-Key": settings.extraction_api_key or settings.api_key},
         passthrough_client_errors=True,
+        # 503 as is (busy: SERVICE_BUSY with Retry-After, or unavailable), so it reaches the caller as
+        # DOWNSTREAM_UNAVAILABLE with the Retry-After, not as a 500.
+        passthrough_statuses=(503,),
     )
     return ExtractionJobClient(
         client,

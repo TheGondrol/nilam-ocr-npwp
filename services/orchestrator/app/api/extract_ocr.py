@@ -14,6 +14,7 @@ from ocr_common.npwp import (
     column_thresholds_from_json,
     guardrails_threshold_from_json,
 )
+from ocr_common.overload import retry_after_header
 from ocr_common.pipeline import DEFAULT_SEQUENCE, InvalidSequence, validate_sequence
 from ocr_common.web.intake import FileField, FileUrlField, read_image
 from ocr_common.web.request_id import adopt_request_id, reset_request_id
@@ -108,6 +109,16 @@ STAGE_ERROR_CODES = {
     503: "DOWNSTREAM_UNAVAILABLE",
     504: "DOWNSTREAM_TIMEOUT",
 }
+
+
+def _stage_error_answer(response: Response, exc: StageError, *, request_id: str) -> dict[str, Any]:
+    """`_stage_error_body` with its status, and the stage's `Retry-After` (a busy stage, an open circuit) passed on
+    so the central orchestrator knows when to send again."""
+    response.status_code = exc.status_code
+    retry_after = retry_after_header(exc.retry_after)
+    if retry_after:
+        response.headers["Retry-After"] = retry_after
+    return _stage_error_body(exc, request_id=request_id)
 
 
 def _stage_error_body(exc: StageError, *, request_id: str) -> dict[str, Any]:
@@ -357,8 +368,7 @@ async def extract_ocr(
             column_thresholds=column_thresholds,
         )
     except StageError as exc:
-        response.status_code = exc.status_code
-        return _stage_error_body(exc, request_id=request_id)
+        return _stage_error_answer(response, exc, request_id=request_id)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(outcome, request_id=request_id, column_thresholds=column_thresholds)
@@ -464,8 +474,7 @@ async def get_extract_ocr(
     try:
         outcome = await service.status(request_id)
     except StageError as exc:
-        response.status_code = exc.status_code
-        return _stage_error_body(exc, request_id=request_id)
+        return _stage_error_answer(response, exc, request_id=request_id)
     finally:
         reset_request_id(token)
     status_code, body = extract_response(

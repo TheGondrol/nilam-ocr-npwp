@@ -195,3 +195,24 @@ def test_the_entry_point_is_gone(client, auth):
         "/v1/extract-ocr", data={"request_id": "OCR_10"}, files=image_upload("npwp.jpg", _jpeg()), headers=auth
     )
     assert response.status_code == 404
+
+
+async def test_inference_beyond_the_bulkhead_is_503_busy():
+    """GUARDRAILS_MAX_CONCURRENCY + _MAX_QUEUE full: refused at once with Retry-After, the model is not run."""
+    from ocr_common.errors import SERVICE_BUSY
+    from ocr_common.overload import Bulkhead
+
+    classifier = StubClassifier((0.99, 0.01))
+    bulkhead = Bulkhead("guardrails-inference-test", 1, 0, retry_after=2.0)
+    held = bulkhead.reserve()
+    service = GuardrailsService(classifier, _settings(), bulkhead=bulkhead)
+
+    with pytest.raises(ServiceError) as exc:
+        await service.check("a.jpg", "image/jpeg", _jpeg())
+    assert (exc.value.status_code, exc.value.code, exc.value.retry_after) == (503, SERVICE_BUSY, 2.0)
+    assert classifier.seen_pages == 0
+
+    held.release()
+    report = await service.check("a.jpg", "image/jpeg", _jpeg())
+    assert report["passed"] is True
+    assert bulkhead.reserved == 0

@@ -6,11 +6,12 @@ the outbox), and report every failure as a `FAILED` job.
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from typing import Any
 
 from ocr_common.errors import InternalError, NotFound, ServiceError
 from ocr_common.npwp import REJECTED_CODE
+from ocr_common.overload import Bulkhead, Ticket
 from ocr_common.pipeline import metrics
 from ocr_common.pipeline.callbacks import NextStage, StageCallback
 from ocr_common.pipeline.outbox import Outbox, OutboxMessage, OutboxRelay, callback_message, handoff_message
@@ -52,11 +53,16 @@ class StagePipeline:
         runner: BackgroundRunner | None = None,
         callbacks: bool = True,
         metrics_stage: str | None = None,
+        bulkhead: Bulkhead | None = None,
     ):
         """`callbacks=False` when the orchestrator has no callback endpoint: no callback is sent or
         queued, and the outcome reaches the orchestrator through its table (ORCHESTRATION_OUTCOME_TABLE)
         and GET .../jobs/{request_id}. `metrics_stage` is the `stage` label of this pipeline's metrics,
-        `stage` by default; the testing pipeline uses its own so load tests stay out of the live numbers."""
+        `stage` by default; the testing pipeline uses its own so load tests stay out of the live numbers.
+
+        `bulkhead` bounds the jobs running and waiting (PIPELINE_MAX_CONCURRENCY / PIPELINE_MAX_QUEUE): a submit
+        beyond it is refused with 503 SERVICE_BUSY before the job is claimed, so nothing is left behind and the
+        caller can send it again."""
         self.stage = stage
         self.metrics_stage = metrics_stage or stage
         self.repository = repository
@@ -65,6 +71,7 @@ class StagePipeline:
         self.outbox = outbox
         self.runner = runner or BackgroundRunner()
         self.callbacks = callbacks
+        self.bulkhead = bulkhead or Bulkhead(self.metrics_stage, 0)
 
     async def submit(
         self,
@@ -82,15 +89,32 @@ class StagePipeline:
         """`input` is what a later run of this job needs besides the earlier stages' stored results
         (guardrails report, file_url); the stale-job reaper hands it back to `resume`. `guardrails` is the
         answer's `guardrails` (`npwp.guardrails_value` of the request's report), carried by the final callback."""
-        claimed = await self.repository.claim(request_id, input=input)
+        # The place is reserved before the claim: a refused submit (ServiceBusy) leaves no job behind.
+        ticket = self.bulkhead.reserve()
+        try:
+            claimed = await self.repository.claim(request_id, input=input)
+        except BaseException:
+            ticket.release()
+            raise
         status = STATUS_PROCESSING
         if claimed:
             self.runner.spawn(
-                self._run(
-                    request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection, guardrails
+                self._in_slot(
+                    ticket,
+                    self._run(
+                        request_id,
+                        work,
+                        handoff_payload,
+                        next_stage,
+                        callback_result,
+                        outcome_data,
+                        rejection,
+                        guardrails,
+                    ),
                 )
             )
         else:
+            ticket.release()
             record = await self.repository.get(request_id)
             status = record["status"] if record else STATUS_PROCESSING
         return {"request_id": request_id, "stage": self.stage, "status": status, "duplicate": not claimed}
@@ -107,12 +131,25 @@ class StagePipeline:
         rejection: Rejection | None = None,
         guardrails: int | float | None = None,
     ) -> None:
-        """Run a job that is already claimed (by the stale-job reaper) without claiming it again."""
+        """Run a job that is already claimed (by the stale-job reaper) without claiming it again. It waits for a
+        slot of the bulkhead like any job but is never refused: it is claimed and must run."""
         self.runner.spawn(
-            self._run(
-                request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection, guardrails
+            self._in_slot(
+                self.bulkhead.reserve(force=True),
+                self._run(
+                    request_id, work, handoff_payload, next_stage, callback_result, outcome_data, rejection, guardrails
+                ),
             )
         )
+
+    @staticmethod
+    async def _in_slot(ticket: Ticket, job: Coroutine[Any, Any, None]) -> None:
+        """Run `job` once the bulkhead has a free slot for it."""
+        try:
+            async with ticket:
+                await job
+        finally:
+            job.close()  # never started (cancelled while waiting for the slot): no "never awaited" warning
 
     async def get(self, request_id: str) -> dict[str, Any]:
         """The job's record for `GET /v1/<stage>/jobs/{request_id}`; `NotFound` when unknown."""

@@ -259,3 +259,37 @@ def test_http_extract_with_remote_backend(client, auth, use_engine):
     data = response.json()["data"]
     assert data["engine"] == "remote"
     assert data["blocks"][2]["text"] == "95.844.800.1-805.000"
+
+
+async def test_remote_backend_gets_the_overload_settings():
+    engine = OCR_BACKENDS["remote"](
+        _settings(
+            extraction_backend="remote",
+            extraction_ocr_url="http://localhost:8082/",
+            extraction_ocr_concurrency=3,
+            extraction_ocr_total_timeout_seconds=45,
+            extraction_ocr_breaker_failures=5,
+            extraction_ocr_breaker_reset_seconds=20,
+        )
+    )
+    assert isinstance(engine, RemoteOcrEngine)
+    try:
+        client = engine._client
+        assert client._calls is not None and client._calls._value == 3
+        assert client.total_timeout == 45
+        assert client.breaker is not None
+        assert (client.breaker.failures, client.breaker.reset_seconds) == (5, 20)
+    finally:
+        await engine.aclose()
+
+
+async def test_overload_protection_is_off_by_default():
+    engine = OCR_BACKENDS["remote"](_settings(extraction_backend="remote", extraction_ocr_url="http://localhost:8082/"))
+    assert isinstance(engine, RemoteOcrEngine)
+    try:
+        client = engine._client
+        assert client._calls is None
+        assert client.total_timeout is None
+        assert client.breaker is not None and not client.breaker.enabled
+    finally:
+        await engine.aclose()

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from ocr_common.errors import InternalError, ServiceError
+from ocr_common.overload import spread
 from ocr_common.pipeline import (
     SERVICE_OF_STAGE,
     STAGE_OF,
@@ -24,7 +25,7 @@ class StageError(ServiceError):
     uncaught, it becomes the usual error envelope."""
 
     def __init__(self, service: str, error: ServiceError):
-        super().__init__(error.status_code, error.message)
+        super().__init__(error.status_code, error.message, retry_after=error.retry_after)
         self.service = service
 
 
@@ -62,9 +63,12 @@ class PipelineWait(Protocol):
 class PipelineWaiter:
     """Reads the jobs of the stages, in pipeline order, to tell where a request is."""
 
-    def __init__(self, stages: Sequence[StageStatus], *, poll_interval: float):
+    def __init__(self, stages: Sequence[StageStatus], *, poll_interval: float, max_poll_interval: float | None = None):
+        """Polls a job after `poll_interval`, then twice as long each time up to `max_poll_interval` (None: a fixed
+        `poll_interval`), +/- 10% so the waits of a burst do not poll in step."""
         self._stages = tuple(stages)
         self._poll_interval = poll_interval
+        self._max_poll_interval = max(max_poll_interval or poll_interval, poll_interval)
 
     async def wait(self, request_id: str, timeout: float, *, last_stage: str | None = None) -> WaitOutcome:
         """Polls until the pipeline ends (DONE, FAILED or rejected) or `timeout` runs out (PROCESSING).
@@ -140,6 +144,7 @@ class PipelineWaiter:
         return self._stages[: names.index(last_stage) + 1]
 
     async def _until_finished(self, stage: StageStatus, request_id: str) -> dict[str, Any]:
+        interval = self._poll_interval
         while True:
             try:
                 record = await stage.get(request_id)
@@ -148,7 +153,8 @@ class PipelineWaiter:
                 record = None
             if record is not None and record.get("status") in (STATUS_DONE, STATUS_FAILED):
                 return record
-            await asyncio.sleep(self._poll_interval)
+            await asyncio.sleep(spread(interval, 0.1))
+            interval = min(interval * 2, self._max_poll_interval)
 
 
 async def _read(stage: StageStatus, request_id: str) -> dict[str, Any] | None:

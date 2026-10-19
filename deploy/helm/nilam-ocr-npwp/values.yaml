@@ -126,6 +126,14 @@ services:
     database: true
     upstreams: [guardrails, extraction, structuring, scoring]
     replicaCount: 2
+    # Queueing theory: tambah replika sebelum utilisasi melewati ~75% (waktu tunggu ~ rho / (1 - rho)). Target HPA
+    # dihitung terhadap requests.cpu. Dev mematikannya di values-ddb-dev.yaml (cluster penuh).
+    # Extraction sengaja tanpa HPA: replika tambahan hanya menambah panggilan ke VM model OCR, bottleneck sebenarnya.
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 75
     startupFailureThreshold: 15
     # Satu POST bisa memakan cek guardrails (GUARDRAILS_TIMEOUT_SECONDS) + tunggu pipeline + hand-off;
     # shutdown menunggu request yang sedang ditahan selesai.
@@ -134,6 +142,12 @@ services:
       # Tunggu pipeline sampai selesai (200 + hasil) sebelum menjawab 202; 0 = tidak menunggu.
       PIPELINE_WAIT_SECONDS: "15"
       GUARDRAILS_TIMEOUT_SECONDS: "20"
+      # Admission control: POST extract-ocr yang ditahan bersamaan per pod. Lebih dari ini dijawab 429
+      # TOO_MANY_REQUESTS + Retry-After sebelum apa pun dikerjakan. 100 x dokumen NPWP (1-2 MB) masih jauh di bawah
+      # limits.memory; 0 = tanpa batas. Orkestrasi pusat perlu mengirim ulang 429 setelah Retry-After.
+      MAX_IN_FLIGHT_REQUESTS: "100"
+      ADMISSION_RETRY_AFTER_SECONDS: "2"
+      # Polling job tahap selama menunggu: 0.25 dtk lalu dua kali lipat sampai 2 dtk (default di kode).
     # Tiap request menahan dokumennya (maks. MAX_UPLOAD_BYTES, 10 MB) selama menunggu pipeline.
     resources:
       requests:
@@ -156,9 +170,10 @@ services:
     gcsModels: true
     upstreams: []
     replicaCount: 1
-    # Satu-satunya service CPU-bound (torch). Nyalakan di produksi; replicaCount diabaikan saat aktif.
+    # Satu-satunya service CPU-bound (torch): HPA aktif (replicaCount diabaikan). Dev mematikannya di
+    # values-ddb-dev.yaml karena cluster dev penuh.
     autoscaling:
-      enabled: false
+      enabled: true
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
@@ -170,6 +185,10 @@ services:
       GUARDRAILS_DEVICE: cpu
       # Samakan dengan limits.cpu; tanpa ini torch membuat thread sebanyak core node.
       GUARDRAILS_TORCH_THREADS: "2"
+      # Bulkhead inference per pod: 2 dokumen dinilai bersamaan (render PDF dan inference bergantian di 2 CPU),
+      # 20 menunggu; lebih dari itu 503 SERVICE_BUSY + Retry-After, diteruskan orchestrator sebagai 503.
+      GUARDRAILS_MAX_CONCURRENCY: "2"
+      GUARDRAILS_MAX_QUEUE: "20"
       # Ambang reject dari Orkestrasi pusat; isi begitu endpoint-nya ada. Kosong = default 0.5 (checkpoint).
       # GUARDRAILS_THRESHOLD_URL: http://<orkestrasi-pusat>
       # GUARDRAILS_THRESHOLD_PATH: /v1/thresholds/guardrails
@@ -197,6 +216,18 @@ services:
       EXTRACTION_OCR_URL: ""
       EXTRACTION_OCR_TIMEOUT_SECONDS: "60"
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+      # Proteksi beban (stress test 15 Okt 2026: VM model OCR kebanjiran ratusan panggilan sekaligus).
+      # Panggilan ke model OCR bersamaan per pod; sisanya antre di sini, tidak ditumpuk ke VM.
+      EXTRACTION_OCR_CONCURRENCY: "4"
+      # Batas total satu panggilan (EXTRACTION_OCR_TIMEOUT_SECONDS berlaku per fase, jadi bisa 2x lipat).
+      EXTRACTION_OCR_TOTAL_TIMEOUT_SECONDS: "60"
+      # 5 gagal berturut-turut: berhenti memanggil model 30 dtk (job gagal cepat 503) supaya VM sempat pulih.
+      EXTRACTION_OCR_BREAKER_FAILURES: "5"
+      EXTRACTION_OCR_BREAKER_RESET_SECONDS: "30"
+      # Bulkhead job: 8 jalan + 50 antre per pipeline; lebih dari itu submit dijawab 503 SERVICE_BUSY + Retry-After
+      # sebelum job dicatat. Yang antre menahan dokumennya di memori (50 x 1-2 MB).
+      PIPELINE_MAX_CONCURRENCY: "8"
+      PIPELINE_MAX_QUEUE: "50"
     resources:
       requests:
         cpu: 250m
@@ -219,6 +250,9 @@ services:
     env:
       STRUCTURING_BACKEND: npwp_rules
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+      # Bulkhead job (CPU-bound di threadpool); hand-off yang ditolak 503 dicoba lagi oleh outbox extraction.
+      PIPELINE_MAX_CONCURRENCY: "8"
+      PIPELINE_MAX_QUEUE: "100"
     resources:
       requests:
         cpu: 250m
@@ -242,6 +276,9 @@ services:
     startupFailureThreshold: 15
     env:
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
+      # Bulkhead job (CPU-bound di threadpool); hand-off yang ditolak 503 dicoba lagi oleh outbox structuring.
+      PIPELINE_MAX_CONCURRENCY: "8"
+      PIPELINE_MAX_QUEUE: "100"
     resources:
       requests:
         cpu: 250m

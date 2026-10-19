@@ -7,6 +7,8 @@ from functools import lru_cache
 
 from fastapi import Depends
 
+from ocr_common.errors import TooManyRequests
+from ocr_common.overload import Bulkhead
 from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 from app.clients.extraction import ExtractionJobClient, build_extraction_client
@@ -36,9 +38,32 @@ def get_stage_status_clients() -> tuple[StageStatusClient, ...]:
     return build_stage_status_clients(get_settings())
 
 
+def _waiter(stages: tuple[StageStatusClient, ...]) -> PipelineWaiter:
+    settings = get_settings()
+    return PipelineWaiter(
+        stages,
+        poll_interval=settings.pipeline_poll_interval_seconds,
+        max_poll_interval=settings.pipeline_poll_max_interval_seconds,
+    )
+
+
 @lru_cache
 def get_pipeline_waiter() -> PipelineWaiter:
-    return PipelineWaiter(get_stage_status_clients(), poll_interval=get_settings().pipeline_poll_interval_seconds)
+    return _waiter(get_stage_status_clients())
+
+
+@lru_cache
+def get_admission() -> Bulkhead:
+    """The bound on POST extract-ocr held at once in this process (MAX_IN_FLIGHT_REQUESTS), shared by the live and
+    the -test endpoint: both hold the same pod's memory and connections."""
+    settings = get_settings()
+    return Bulkhead(
+        "orchestrator-admission",
+        settings.max_in_flight_requests,
+        0,
+        retry_after=settings.admission_retry_after_seconds,
+        error=lambda message, after: TooManyRequests(message, retry_after=after),
+    )
 
 
 def _guardrails_log(table_prefix: str = "") -> GuardrailsLog:
@@ -91,9 +116,7 @@ def get_testing_guardrails_log() -> GuardrailsLog:
 
 @lru_cache
 def get_testing_pipeline_waiter() -> PipelineWaiter:
-    return PipelineWaiter(
-        get_testing_stage_status_clients(), poll_interval=get_settings().pipeline_poll_interval_seconds
-    )
+    return _waiter(get_testing_stage_status_clients())
 
 
 # --- services (cheap to build: one per request) ------------------------------------------
@@ -105,8 +128,9 @@ def get_extract_service(
     waiter: PipelineWaiter = Depends(get_pipeline_waiter),
     settings: Settings = Depends(get_settings),
     log: GuardrailsLog = Depends(get_guardrails_log),
+    admission: Bulkhead = Depends(get_admission),
 ) -> ExtractOcrService:
-    return ExtractOcrService(guardrails, extraction, waiter, settings, log)
+    return ExtractOcrService(guardrails, extraction, waiter, settings, log, admission)
 
 
 def get_testing_extract_service(
@@ -115,5 +139,6 @@ def get_testing_extract_service(
     waiter: PipelineWaiter = Depends(get_testing_pipeline_waiter),
     settings: Settings = Depends(get_settings),
     log: GuardrailsLog = Depends(get_testing_guardrails_log),
+    admission: Bulkhead = Depends(get_admission),
 ) -> ExtractOcrService:
-    return ExtractOcrService(guardrails, extraction, waiter, settings, log)
+    return ExtractOcrService(guardrails, extraction, waiter, settings, log, admission)

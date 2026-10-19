@@ -198,8 +198,16 @@ async def test_a_callback_that_keeps_failing_is_retried_until_it_is_too_old(pipe
 
 def test_backoff_grows_exponentially_up_to_the_cap():
     relay = OutboxRelay(SqlOutbox("sqlite+aiosqlite://"), stage=STAGE_OCR, callback=Sink(), retry_delay_seconds=0.5)
-    assert [relay._backoff(n) for n in (1, 2, 3, 4)] == [0.5, 1.0, 2.0, 4.0]
-    assert relay._backoff(30) == 300.0
+    assert [relay._backoff_cap(n) for n in (1, 2, 3, 4)] == [0.5, 1.0, 2.0, 4.0]
+    assert relay._backoff_cap(30) == 300.0
+
+
+def test_backoff_is_jittered_within_the_cap():
+    """Full jitter: every wait is somewhere in [0, cap], and a burst of failures does not get one shared wait."""
+    relay = OutboxRelay(SqlOutbox("sqlite+aiosqlite://"), stage=STAGE_OCR, callback=Sink(), retry_delay_seconds=0.5)
+    waits = [relay._backoff(4) for _ in range(200)]
+    assert all(0.0 <= wait <= 4.0 for wait in waits)
+    assert len({round(wait, 3) for wait in waits}) > 50
 
 
 async def test_a_handoff_the_next_stage_refuses_becomes_a_failed_callback(pipeline):

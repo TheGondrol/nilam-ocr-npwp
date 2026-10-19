@@ -7,6 +7,7 @@ from prometheus_client import Counter
 
 from ocr_common.errors import NotFound, ServiceError
 from ocr_common.npwp import auto_accept, final_result
+from ocr_common.overload import Bulkhead
 from ocr_common.pipeline import (
     DEFAULT_SEQUENCE,
     EXTRACTION,
@@ -43,12 +44,16 @@ class ExtractOcrService:
         waiter: PipelineWait,
         settings: Settings,
         log: GuardrailsLog | None = None,
+        admission: Bulkhead | None = None,
     ):
+        """`admission` bounds the requests held at once in this process (MAX_IN_FLIGHT_REQUESTS); one more is
+        refused with 429 before anything is done. Without it, no bound."""
         self._guardrails = guardrails
         self._log = log or NoGuardrailsLog()
         self._extraction = extraction
         self._waiter = waiter
         self._settings = settings
+        self._admission = admission or Bulkhead("orchestrator-admission", 0)
 
     async def submit(
         self,
@@ -76,7 +81,35 @@ class ExtractOcrService:
         `guardrails_threshold` and `column_thresholds` come from the central orchestrator for this request.
         Without a guardrails threshold the document is accepted whatever the model says (`auto_accept`: the
         answer's `guardrails` is then the accepted probability); a field without a column threshold gets the trust
-        model's probability as its confidence."""
+        model's probability as its confidence.
+
+        Beyond MAX_IN_FLIGHT_REQUESTS held at once, 429 TOO_MANY_REQUESTS with Retry-After, before anything is done."""
+        async with self._admission.slot():
+            return await self._submit(
+                request_id,
+                filename,
+                content_type,
+                content,
+                received_at=received_at,
+                file_url=file_url,
+                sequence=sequence,
+                guardrails_threshold=guardrails_threshold,
+                column_thresholds=column_thresholds,
+            )
+
+    async def _submit(
+        self,
+        request_id: str,
+        filename: str,
+        content_type: str | None,
+        content: bytes,
+        *,
+        received_at: float | None,
+        file_url: str | None,
+        sequence: Sequence[str],
+        guardrails_threshold: float | None,
+        column_thresholds: Mapping[str, float] | None,
+    ) -> dict[str, Any]:
         started = time.monotonic() if received_at is None else received_at
         check_document(content_type, content, self._settings)
         if GUARDRAILS in sequence:

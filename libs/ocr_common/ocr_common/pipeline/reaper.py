@@ -11,6 +11,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ocr_common.overload import spread
 from ocr_common.pipeline.repository import JobRepository
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ class StaleJobReaper:
             if reclaimed:
                 continue
             try:
-                await asyncio.wait_for(self._stopping.wait(), self._interval)
+                # +/- 20%, so the reapers of replicas started together do not scan the table in step.
+                await asyncio.wait_for(self._stopping.wait(), spread(self._interval))
             except TimeoutError:
                 pass
 

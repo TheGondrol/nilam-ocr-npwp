@@ -172,6 +172,13 @@ class PipelineSettings(BaseServiceSettings):
 
     pipeline_retry_attempts: int = 3
     pipeline_retry_delay_seconds: float = 0.5
+    # Bulkhead of each pipeline (ocr_common.overload): at most PIPELINE_MAX_CONCURRENCY jobs run at once and
+    # PIPELINE_MAX_QUEUE more wait for a slot; a submit beyond that is answered 503 SERVICE_BUSY with Retry-After
+    # (PIPELINE_BUSY_RETRY_AFTER_SECONDS) before anything is stored. 0 = no limit (the queue is then ignored). The
+    # live and the -test pipeline of a service each have their own.
+    pipeline_max_concurrency: int = Field(0, ge=0)
+    pipeline_max_queue: int = Field(50, ge=0)
+    pipeline_busy_retry_after_seconds: float = Field(5.0, gt=0)
     pipeline_drain_timeout_seconds: float = 30.0
     pipeline_job_lease_seconds: float = Field(DEFAULT_JOB_LEASE_SECONDS, gt=0)
     orchestration_outcome_table: str = ""

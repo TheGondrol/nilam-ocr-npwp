@@ -19,6 +19,7 @@ DEFAULT_CODES = {
     409: "CONFLICT",
     413: "FILE_TOO_LARGE",
     422: "VALIDATION_ERROR",
+    429: "TOO_MANY_REQUESTS",
     500: "INTERNAL_SERVER_ERROR",
     503: "DOWNSTREAM_UNAVAILABLE",
     504: "DOWNSTREAM_TIMEOUT",
@@ -37,6 +38,10 @@ FILE_TOO_LARGE = "FILE_TOO_LARGE"
 # `NOT_FOUND` instead.
 REQUEST_ID_NOT_FOUND = "REQUEST_ID_NOT_FOUND"
 
+# The code of `ServiceBusy`: this service is at its limit of jobs running and waiting (ocr_common.overload); the
+# request was not started, so sending it again after `Retry-After` is safe.
+SERVICE_BUSY = "SERVICE_BUSY"
+
 
 def error_code(status_code: int, code: str | None = None) -> str:
     """`code`, else the default code of `status_code` (`ERROR` for a status without one)."""
@@ -45,14 +50,16 @@ def error_code(status_code: int, code: str | None = None) -> str:
 
 class ServiceError(Exception):
     """A failure with a known HTTP status. `message` is safe to show to the caller; `code` is the stable
-    `errors` value (None: the default code of the status)."""
+    `errors` value (None: the default code of the status). `retry_after`: seconds the caller should wait before
+    sending again, answered as the `Retry-After` header (an overloaded service, an open circuit)."""
 
     status_code: int = 500
 
-    def __init__(self, status_code: int, message: str, code: str | None = None):
+    def __init__(self, status_code: int, message: str, code: str | None = None, *, retry_after: float | None = None):
         self.status_code = status_code
         self.message = message
         self.code = code
+        self.retry_after = retry_after
         super().__init__(message)
 
     @property
@@ -62,8 +69,8 @@ class ServiceError(Exception):
 
 
 class _StatusError(ServiceError):
-    def __init__(self, message: str, code: str | None = None):
-        super().__init__(type(self).status_code, message, code)
+    def __init__(self, message: str, code: str | None = None, *, retry_after: float | None = None):
+        super().__init__(type(self).status_code, message, code, retry_after=retry_after)
 
 
 class BadRequest(_StatusError):
@@ -99,6 +106,13 @@ class UnprocessableEntity(_StatusError):
     status_code = 422
 
 
+class TooManyRequests(_StatusError):
+    """429: this service is holding as many requests as it admits (admission control); send again after
+    `Retry-After`."""
+
+    status_code = 429
+
+
 class InternalError(_StatusError):
     """500: this service or its model failed, or a dependency answered in an unexpected shape."""
 
@@ -115,3 +129,13 @@ class UpstreamTimeout(_StatusError):
     """504: a dependency did not answer within its timeout."""
 
     status_code = 504
+
+
+class ServiceBusy(_StatusError):
+    """503 `SERVICE_BUSY`: this service is at its limit of jobs running and waiting (a bulkhead,
+    ocr_common.overload). Nothing was started; sending the same request again after `Retry-After` is safe."""
+
+    status_code = 503
+
+    def __init__(self, message: str, code: str | None = SERVICE_BUSY, *, retry_after: float | None = None):
+        super().__init__(message, code, retry_after=retry_after)

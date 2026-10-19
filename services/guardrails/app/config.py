@@ -38,6 +38,13 @@ class Settings(BaseServiceSettings):
     guardrails_pdf_dpi: int = 150
     guardrails_max_pages: int = 20
 
+    # Bulkhead of the model's inference in this pod (ocr_common.overload): at most GUARDRAILS_MAX_CONCURRENCY
+    # documents judged at once (each uses GUARDRAILS_TORCH_THREADS threads; more only fight over the same CPUs) and
+    # GUARDRAILS_MAX_QUEUE more waiting; beyond that 503 SERVICE_BUSY with Retry-After. 0 = no limit.
+    guardrails_max_concurrency: int = Field(0, ge=0)
+    guardrails_max_queue: int = Field(20, ge=0)
+    guardrails_busy_retry_after_seconds: float = Field(2.0, gt=0)
+
     @model_validator(mode="after")
     def _guard_guardrails(self) -> Self:
         self.reject_mock_backend_outside_local(guardrails_backend=self.guardrails_backend)

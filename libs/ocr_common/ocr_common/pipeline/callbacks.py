@@ -10,6 +10,7 @@ from typing import Any, Protocol, cast
 from ocr_common.clients.remote import RemoteClientError, RemoteModelClient
 from ocr_common.errors import ServiceError
 from ocr_common.npwp import GUARDRAILS_PASSED, GUARDRAILS_REJECTED, REJECTED_CODE, contract_fields
+from ocr_common.overload import full_jitter, spread
 from ocr_common.types import FinalResult
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,16 @@ def not_ready(exc: ServiceError) -> bool:
     return isinstance(exc, RemoteClientError) and exc.status_code == 409 and exc.remote_code == RESULT_NOT_READY
 
 
+def not_ready_delay() -> float:
+    """The wait before sending a `RESULT_NOT_READY` callback again: 1-2 s as the contract asks (1.5 s +/- a third),
+    spread so the callbacks of a burst do not all come back in the same second."""
+    return spread(NOT_READY_DELAY_SECONDS, 1 / 3)
+
+
 async def with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: float) -> Any:
-    """Calls `call` up to `attempts` times, doubling `delay` between tries, on 5xx-class `ServiceError`s only;
-    a 4xx is raised at once.
+    """Calls `call` up to `attempts` times on 5xx-class `ServiceError`s only, waiting a random time up to `delay`
+    doubled per try ("full jitter"), so callers that failed together do not retry together; a 4xx is raised at
+    once.
     """
     for attempt in range(1, attempts + 1):
         try:
@@ -40,7 +48,7 @@ async def with_retry(call: Callable[[], Awaitable[Any]], attempts: int, delay: f
         except ServiceError as exc:
             if exc.status_code < 500 or attempt >= attempts:
                 raise
-            await asyncio.sleep(delay * 2 ** (attempt - 1))
+            await asyncio.sleep(full_jitter(delay * 2 ** (attempt - 1)))
 
 
 class StageCallback(Protocol):
@@ -316,7 +324,7 @@ class ResultCallback:
                 except ServiceError as exc:
                     if not not_ready(exc) or retry == NOT_READY_RETRIES:
                         raise
-                    await asyncio.sleep(NOT_READY_DELAY_SECONDS)
+                    await asyncio.sleep(not_ready_delay())
         except ServiceError as exc:
             logger.error("result callback failed: %s %s: %s", request_id, body["status"], exc.message)
             return False
