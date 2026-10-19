@@ -27,8 +27,9 @@ case "$DEPLOY_ENV" in
     ;;
   *) printf 'ERROR: DEPLOY_ENV tidak dikenal: %s (shared-dev | ddb-dev)\n' "$DEPLOY_ENV" >&2; exit 1 ;;
 esac
-# Nexus BRI: satu folder per aplikasi, satu image per service (<registry>/<service>:<tag>).
+# Nexus BRI: satu folder per aplikasi, satu image per service (<registry>/<prefix>-<service>:<tag>).
 REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
+IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 # NEXUS_USERNAME / NEXUS_PASSWORD untuk push dan untuk pull secret di cluster (file rahasia, tidak di-commit).
 NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
 PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
@@ -77,7 +78,7 @@ Kredensial Nexus dari \$NEXUS_ENV (default nexus.env di root repo): dipakai untu
 Environment: DEPLOY_ENV (default shared-dev -> values-shared-dev.yaml, cluster gc-bigpool-dev-gke-cluster-01
 namespace nilam lewat tunnel bastion; ddb-dev -> values-ddb-dev.yaml, cluster gc-ddb-dev-gke-cluster-01
 namespace nilam-ocr-npwp), RELEASE, NAMESPACE, PROXY_PORT (tunnel shared-dev, default 18090), PY (Python .venv),
-REGISTRY, NEXUS_ENV, PULL_SECRET, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
+REGISTRY, IMAGE_PREFIX, NEXUS_ENV, PULL_SECRET, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
 untuk rollback, default 5).
 
 Contoh:
@@ -165,7 +166,7 @@ if [[ -z "$TAG" ]]; then
   fi
 fi
 
-image_ref() { echo "$REGISTRY/$1:$TAG"; }
+image_ref() { echo "$REGISTRY/$IMAGE_PREFIX-$1:$TAG"; }
 
 # NEXUS_USERNAME / NEXUS_PASSWORD dari $NEXUS_ENV (KEY=VALUE), tanpa menjalankan file itu sebagai skrip.
 nexus_value() { sed -n "s/^$1=//p" "$NEXUS_ENV" | tail -n1 | tr -d '\r'; }

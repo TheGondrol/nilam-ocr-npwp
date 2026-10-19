@@ -53,7 +53,7 @@ Dari pod di namespace `nilam-ocr-npwp`:
 
 | Tujuan | Alamat | Hasil |
 |---|---|---|
-| Image di Nexus | `new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/<service>` | ditarik dengan pull secret `nilam-ocr-npwp-nexus` (dibuat `deploy.sh` dari `nexus.env`) |
+| Image di Nexus | `new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/ms-bribrain-nilam-ocr-npwp-<service>` | ditarik dengan pull secret `nilam-ocr-npwp-nexus` (dibuat `deploy.sh` dari `nexus.env`) |
 | PostgreSQL (dalam cluster) | `postgres.ocr-dev.svc.cluster.local:5432` | terjangkau |
 | PostgreSQL (LoadBalancer yang sama) | `34.50.114.49:5432` | terjangkau |
 | Orkestrasi | `ocr-orchestration.ocr-dev.svc.cluster.local:80` | terjangkau |
@@ -365,7 +365,7 @@ deploy harus SHA commit di `origin/main` (commit selain HEAD hanya bersama `--sk
 kembali ke versi lama). Dari branch lain hanya `--build-only` dan `--dry-run` yang jalan.
 
 Script membangun image service yang disebut, mendorongnya ke Nexus
-(`new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/<service>`, login dengan `NEXUS_USERNAME` /
+(`new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/ms-bribrain-nilam-ocr-npwp-<service>`, login dengan `NEXUS_USERNAME` /
 `NEXUS_PASSWORD` dari `nexus.env` di root repo, file rahasia yang tidak di-commit) dengan tag
 `git rev-parse --short HEAD` (`--build-only --allow-dirty` dari working tree yang belum di-commit
 menambah `-dirty-<waktu>`; image seperti itu tidak bisa di-deploy), lalu menjalankan `helm upgrade --reset-then-reuse-values

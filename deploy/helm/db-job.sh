@@ -8,12 +8,14 @@ SOURCE_KEY="${SOURCE_KEY:-DATABASE_URL}"
 TARGET_KEY="${TARGET_KEY:-DATABASE_URL_CLOUDSQL}"
 ALEMBIC_KEY="${ALEMBIC_KEY:-DATABASE_URL}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-nilam-ocr-npwp}"
-# Folder Nexus yang sama dengan deploy.sh; image migrasi = <registry>/migrate:<tag>.
+# Folder Nexus yang sama dengan deploy.sh; image migrasi = <registry>/<prefix>-migrate:<tag>.
 REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
 NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
 # Pull secret yang dibuat deploy.sh di namespace ini.
 PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
 APP_NAME="nilam-ocr-npwp"
+# Nama repository image di Nexus: <registry>/$IMAGE_PREFIX-migrate.
+IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-gke_ddb-kubecluster-dev-01_asia-southeast2_gc-ddb-dev-gke-cluster-01}"
 # Node dev yang rusak (lihat affinity di values-ddb-dev.yaml): Job ini juga menghindarinya.
 AVOID_NODE="${AVOID_NODE:-gke-gc-ddb-dev-gke-c-gc-dgv-dev-ndp-c-42b3b8a0-l5uf}"
@@ -104,7 +106,7 @@ NEXUS_PASSWORD="$(nexus_value NEXUS_PASSWORD)"
 [[ -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]] || die "NEXUS_USERNAME / NEXUS_PASSWORD kosong di $NEXUS_ENV"
 
 TAG="$(git rev-parse --short HEAD)"
-IMAGE="$REGISTRY/migrate:$TAG"
+IMAGE="$REGISTRY/$IMAGE_PREFIX-migrate:$TAG"
 JOB="$APP_NAME-db-$TASK-$(date +%Y%m%d%H%M%S)"
 
 log "Rencana"

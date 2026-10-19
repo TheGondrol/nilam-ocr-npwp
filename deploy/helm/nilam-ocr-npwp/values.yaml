@@ -9,7 +9,7 @@ terminationGracePeriodSeconds: 45
 environment: production
 
 image:
-  # Nexus BRI, satu folder untuk aplikasi ini: image = <registry>/<service>:<tag>.
+  # Nexus BRI, satu folder untuk aplikasi ini: image = <registry>/ms-bribrain-nilam-ocr-npwp-<service>:<tag>.
   registry: new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp
   tag: ""
   pullPolicy: IfNotPresent
@@ -105,7 +105,7 @@ services:
   orchestrator:
     enabled: true
     image:
-      repository: orchestrator
+      repository: ms-bribrain-nilam-ocr-npwp-orchestrator
       tag: ""
     port: 8034
     entrypoint: true
@@ -148,7 +148,7 @@ services:
   guardrails:
     enabled: true
     image:
-      repository: guardrails
+      repository: ms-bribrain-nilam-ocr-npwp-guardrails
       tag: ""
     port: 8031
     entrypoint: false
@@ -190,7 +190,7 @@ services:
   extraction:
     enabled: true
     image:
-      repository: extraction
+      repository: ms-bribrain-nilam-ocr-npwp-extraction
       tag: ""
     port: 8030
     entrypoint: false
@@ -226,7 +226,7 @@ services:
   structuring:
     enabled: true
     image:
-      repository: structuring
+      repository: ms-bribrain-nilam-ocr-npwp-structuring
       tag: ""
     port: 8032
     entrypoint: false
@@ -251,7 +251,7 @@ services:
   scoring:
     enabled: true
     image:
-      repository: scoring
+      repository: ms-bribrain-nilam-ocr-npwp-scoring
       tag: ""
     port: 8033
     entrypoint: false
