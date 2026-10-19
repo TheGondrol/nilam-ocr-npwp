@@ -16,12 +16,13 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from ocr_common.clients.remote import RemoteClientError
 from ocr_common.errors import InternalError, ServiceError, UpstreamTimeout, UpstreamUnavailable
+from ocr_common.overload import full_jitter, spread
 from ocr_common.pipeline.callbacks import (
-    NOT_READY_DELAY_SECONDS,
     NOT_READY_RETRIES,
     RESULT_NOT_READY,
     TRACE_PARENT_KEY,
     not_ready,
+    not_ready_delay,
     stage_callback_body,
 )
 from ocr_common.web import apm
@@ -148,7 +149,8 @@ class OutboxRelay:
     answers 5xx or cannot be reached, until it is older than `max_age_seconds` (a callback:
     `callback_max_age_seconds`); a 4xx, or that age, turns it into a dead letter that stays in the
     table. The one 4xx retried is the central orchestrator's 409 RESULT_NOT_READY to a callback, every
-    `NOT_READY_DELAY_SECONDS`, `NOT_READY_RETRIES` times. A hand-off that becomes a dead letter is
+    1-2 s (`not_ready_delay`), `NOT_READY_RETRIES` times. Retry waits are jittered (`_backoff`). A hand-off that
+    becomes a dead letter is
     replaced by a FAILED callback on behalf of the next stage, like in direct mode."""
 
     def __init__(
@@ -240,7 +242,8 @@ class OutboxRelay:
         (for messages queued by other replicas) elapses."""
         waiters = [asyncio.ensure_future(self._outbox.pending.wait()), asyncio.ensure_future(self._stopping.wait())]
         try:
-            await asyncio.wait(waiters, timeout=self._interval, return_when=asyncio.FIRST_COMPLETED)
+            # +/- 20%, so the relays of replicas started together do not poll the table in step.
+            await asyncio.wait(waiters, timeout=spread(self._interval), return_when=asyncio.FIRST_COMPLETED)
         finally:
             for waiter in waiters:
                 waiter.cancel()
@@ -378,14 +381,18 @@ class OutboxRelay:
             max_age = self._callback_max_age if row.kind == KIND_CALLBACK else self._max_age
             return self._backoff(row.attempts) if self._age(row) < max_age else None
         if row.kind == KIND_CALLBACK and not_ready(exc) and row.attempts <= NOT_READY_RETRIES:
-            return NOT_READY_DELAY_SECONDS
+            return not_ready_delay()
         return None
 
     def _failure(self, row: Row[Any], exc: ServiceError, target: str | None, retry_in: float | None) -> str:
         """The `last_error` line of this failed attempt: when, what the receiver did (its status and error code,
         a timeout, or no connection), and what the relay does about it: retry, or give up and why."""
         age = self._age(row)
-        outcome = f"retry in {retry_in:g}s" if retry_in is not None else f"dead letter: {self._why_dead(row, exc, age)}"
+        outcome = (
+            f"retry in {round(retry_in, 1):g}s"
+            if retry_in is not None
+            else f"dead letter: {self._why_dead(row, exc, age)}"
+        )
         when = f"attempt {row.attempts} at {datetime.now(UTC):%H:%M:%S}Z, {age:.0f}s after it was queued"
         return f"{when}: {_describe(exc, target or 'orchestration')} -> {outcome}"
 
@@ -398,8 +405,14 @@ class OutboxRelay:
             return f"still {RESULT_NOT_READY} after {NOT_READY_RETRIES} retries"
         return f"a {exc.status_code} is final, it is not sent again"
 
-    def _backoff(self, attempts: int) -> float:
+    def _backoff_cap(self, attempts: int) -> float:
+        """The longest wait before try `attempts + 1`: the retry delay doubled per try, up to the maximum."""
         return min(self._retry_delay * 2 ** max(attempts - 1, 0), self._max_backoff)
+
+    def _backoff(self, attempts: int) -> float:
+        """A random wait up to `_backoff_cap` ("full jitter"): after an outage of the receiver, the messages that
+        failed together are spread over the window instead of all being sent again in the same second."""
+        return full_jitter(self._backoff_cap(attempts))
 
     async def _send(self, row: Row[Any]) -> bool:
         """Send the message; False when there was nothing to send."""

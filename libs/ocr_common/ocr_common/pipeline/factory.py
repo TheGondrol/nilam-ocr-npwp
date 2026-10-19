@@ -3,6 +3,7 @@ composition root (app/dependencies.py) needs for the async pipeline."""
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.config import PipelineSettings
+from ocr_common.overload import Bulkhead
 from ocr_common.pipeline.callbacks import (
     LoggedCallback,
     NextStage,
@@ -93,6 +94,7 @@ def build_stage_pipeline(
         callback = LoggedCallback(build_callback(settings), _callback_log(settings.database_url, table_prefix))
     else:
         callback = build_callback(settings)
+    metrics_stage = testing_metrics_stage(stage) if testing else None
     return StagePipeline(
         stage=stage,
         repository=repository,
@@ -100,7 +102,13 @@ def build_stage_pipeline(
         next_stage_client=next_stage,
         outbox=outbox,
         callbacks=False if testing else settings.callbacks_enabled,
-        metrics_stage=testing_metrics_stage(stage) if testing else None,
+        metrics_stage=metrics_stage,
+        bulkhead=Bulkhead(
+            metrics_stage or stage,
+            settings.pipeline_max_concurrency,
+            settings.pipeline_max_queue,
+            retry_after=settings.pipeline_busy_retry_after_seconds,
+        ),
     )
 
 

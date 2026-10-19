@@ -30,7 +30,17 @@ class Settings(BaseServiceSettings):
     pipeline_retry_attempts: int = 3
     pipeline_retry_delay_seconds: float = 0.5
     pipeline_wait_seconds: float = Field(15.0, ge=0)
-    pipeline_poll_interval_seconds: float = Field(0.5, gt=0)
+    # The wait polls the stages' jobs: first after PIPELINE_POLL_INTERVAL_SECONDS, then twice as long each time up to
+    # PIPELINE_POLL_MAX_INTERVAL_SECONDS. A fast pipeline is still answered quickly, a slow one is asked ~10 times in
+    # 15 s instead of 30 (a fixed 0.5 s kept extraction at 100% CPU answering GETs under load, 15 Oct 2026).
+    pipeline_poll_interval_seconds: float = Field(0.25, gt=0)
+    pipeline_poll_max_interval_seconds: float = Field(2.0, gt=0)
+
+    # Admission control (ocr_common.overload): at most MAX_IN_FLIGHT_REQUESTS POST extract-ocr held at once per pod
+    # (each holds its upload and a connection for up to PIPELINE_WAIT_SECONDS); one more is answered 429
+    # TOO_MANY_REQUESTS with Retry-After (ADMISSION_RETRY_AFTER_SECONDS) before anything is done. 0 = no limit.
+    max_in_flight_requests: int = Field(0, ge=0)
+    admission_retry_after_seconds: float = Field(2.0, gt=0)
 
     # The shared database, only to keep every guardrails verdict (nilam_guardrails_results), the rejected ones
     # included. Unset: nothing is kept. A write is best-effort, bounded by GUARDRAILS_LOG_TIMEOUT_SECONDS.

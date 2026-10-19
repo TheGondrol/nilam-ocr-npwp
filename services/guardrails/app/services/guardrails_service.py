@@ -2,6 +2,8 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
+from ocr_common.overload import Bulkhead
+
 from app.clients.threshold import GuardrailsThreshold, default_threshold, rejects
 from app.config import Settings
 from app.services.pages import render_pages
@@ -21,13 +23,21 @@ class GuardrailsService:
     """The guardrails model's verdict on a document. Only what the model decides: the type, size and page
     count were checked by the orchestrator NPWP before it called this service."""
 
-    def __init__(self, classifier, settings: Settings, threshold: GuardrailsThreshold | None = None):
-        """Without `threshold`, the default one (GUARDRAILS_THRESHOLD, else the checkpoint's)."""
+    def __init__(
+        self,
+        classifier,
+        settings: Settings,
+        threshold: GuardrailsThreshold | None = None,
+        bulkhead: Bulkhead | None = None,
+    ):
+        """Without `threshold`, the default one (GUARDRAILS_THRESHOLD, else the checkpoint's). `bulkhead` bounds the
+        documents judged at once in this process (one shared by every request); without it, no bound."""
         self._classifier = classifier
         self._settings = settings
         self._threshold = threshold or GuardrailsThreshold(
             None, "", default_threshold(settings.guardrails_threshold, classifier), cache_seconds=0
         )
+        self._bulkhead = bulkhead or Bulkhead("guardrails-inference", 0)
 
     async def check(
         self, filename: str, content_type: str | None, content: bytes, threshold: float | None = None
@@ -39,7 +49,10 @@ class GuardrailsService:
             report = await self._classifier.check_document(filename, content, content_type)
         else:
             threshold = threshold or await self._threshold.get()
-            report = await run_in_threadpool(self._check_locally, filename, content_type, content, threshold)
+            # Rendering and inference are CPU-bound: beyond the bulkhead the request is refused (503 SERVICE_BUSY)
+            # rather than queued in the threadpool, where every extra document only slows the others down.
+            async with self._bulkhead.slot():
+                report = await run_in_threadpool(self._check_locally, filename, content_type, content, threshold)
 
         passed = report["document"]["verdict"] == VERDICT_ACCEPTED
         return {"passed": passed, "reason": None if passed else _reject_reason(report["document"]), **report}

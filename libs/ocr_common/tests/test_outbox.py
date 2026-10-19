@@ -63,6 +63,14 @@ async def pipeline(tmp_path):
     await database.dispose_engines()
 
 
+@pytest.fixture
+def exact_waits(monkeypatch):
+    """Retry waits without jitter (the full backoff, the middle of the RESULT_NOT_READY window), so a test can
+    assert the `retry in` that `last_error` reports."""
+    monkeypatch.setattr("ocr_common.pipeline.outbox.full_jitter", lambda delay: delay)
+    monkeypatch.setattr("ocr_common.pipeline.outbox.not_ready_delay", lambda: 1.5)
+
+
 async def _rows(outbox: SqlOutbox) -> list[dict]:
     async with database.get_engine(outbox._url).connect() as conn:
         rows = (await conn.execute(select(outbox.table).order_by(outbox.table.c.id))).mappings().all()
@@ -169,6 +177,7 @@ async def test_the_relay_delivers_the_handoff_first_and_clears_the_rows(pipeline
     assert await _rows(stage.outbox) == []
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_a_callback_the_orchestrator_cannot_take_is_retried_without_holding_up_the_handoff(pipeline):
     stage, _ = pipeline
     await _run(stage)
@@ -200,6 +209,7 @@ async def test_a_callback_the_orchestrator_rejects_becomes_a_dead_letter_that_st
     assert (await _rows(stage.outbox))[0]["attempts"] == 1
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_a_callback_that_keeps_failing_is_retried_until_it_is_too_old(pipeline):
     stage, _ = pipeline
     await _run(stage, fails=True)
@@ -225,8 +235,16 @@ async def test_a_callback_that_keeps_failing_is_retried_until_it_is_too_old(pipe
 
 def test_backoff_grows_exponentially_up_to_the_cap():
     relay = OutboxRelay(SqlOutbox("sqlite+aiosqlite://"), stage=STAGE_OCR, callback=Sink(), retry_delay_seconds=0.5)
-    assert [relay._backoff(n) for n in (1, 2, 3, 4)] == [0.5, 1.0, 2.0, 4.0]
-    assert relay._backoff(30) == 300.0
+    assert [relay._backoff_cap(n) for n in (1, 2, 3, 4)] == [0.5, 1.0, 2.0, 4.0]
+    assert relay._backoff_cap(30) == 300.0
+
+
+def test_backoff_is_jittered_within_the_cap():
+    """Full jitter: every wait is somewhere in [0, cap], and a burst of failures does not get one shared wait."""
+    relay = OutboxRelay(SqlOutbox("sqlite+aiosqlite://"), stage=STAGE_OCR, callback=Sink(), retry_delay_seconds=0.5)
+    waits = [relay._backoff(4) for _ in range(200)]
+    assert all(0.0 <= wait <= 4.0 for wait in waits)
+    assert len({round(wait, 3) for wait in waits}) > 50
 
 
 async def test_a_handoff_the_next_stage_refuses_becomes_a_failed_callback(pipeline):
@@ -464,6 +482,7 @@ async def _due_now(outbox: SqlOutbox) -> None:
         await conn.execute(update(outbox.table).values(next_attempt_at=datetime.now(UTC)))
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_a_callback_the_orchestrator_has_not_recorded_yet_is_sent_again_a_few_times(pipeline):
     stage, _ = pipeline
     await _run(stage, fails=True)
@@ -589,6 +608,7 @@ def _events(caplog) -> list[dict]:
     ]
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_every_delivery_is_one_structured_log_event_without_the_payload(pipeline, caplog):
     stage, _ = pipeline
     await _run(stage)
@@ -644,6 +664,7 @@ class Errors:
         raise self.errors.pop(0)
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_last_error_keeps_the_timeout_under_the_409_that_ended_the_callback(pipeline):
     stage, _ = pipeline
     await _run(stage, fails=True)
@@ -670,6 +691,7 @@ async def test_last_error_keeps_the_timeout_under_the_409_that_ended_the_callbac
     ]
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_last_error_says_why_the_receiver_could_not_be_reached(pipeline):
     stage, _ = pipeline
     await _run(stage, fails=True)
@@ -696,6 +718,7 @@ async def test_a_code_the_central_orchestrator_did_not_send_gets_no_hint(pipelin
     ]
 
 
+@pytest.mark.usefixtures("exact_waits")
 async def test_a_released_dead_letter_adds_its_new_attempts_above_the_old_lines(pipeline):
     stage, _ = pipeline
     await _run(stage, fails=True)

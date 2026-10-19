@@ -64,10 +64,17 @@ networkPolicy:
   clientNamespaces: [ocr-dev]
 
 services:
+  orchestrator:
+    # HPA (aktif di values.yaml) mati di dev: cluster penuh; tetap 2 replika (replicaCount).
+    autoscaling:
+      enabled: false
   extraction:
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070
   guardrails:
+    # HPA (aktif di values.yaml) mati di dev: cluster penuh, replika kedua tidak akan dapat node.
+    autoscaling:
+      enabled: false
     # Cluster dev penuh (node pool di ukuran maksimum, 29 Sep 2026): pod guardrails kedua (1 CPU, 1 Gi) saat
     # surge tidak pernah dapat node, jadi helm --wait menunggu sampai timeout. Pod lama dimatikan dulu dan
     # penggantinya memakai slotnya; guardrails tidak tersedia selama pod baru menyala (~30-60 dtk).

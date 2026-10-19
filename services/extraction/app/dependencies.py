@@ -6,6 +6,7 @@ Every `get_*` here is what the routes take through `Depends(...)` and what tests
 from functools import lru_cache
 
 from ocr_common.clients.remote import RemoteModelClient
+from ocr_common.overload import CircuitBreaker
 from ocr_common.pipeline import (
     STAGE_OCR,
     NextStageClient,
@@ -31,26 +32,38 @@ from app.services.job_service import ExtractionJobService
 DB_TABLE_PREFIX = "ocr"
 
 
+def _ocr_client(settings: Settings, url: str, headers: dict[str, str] | None = None) -> RemoteModelClient:
+    """The client to the OCR model, with its overload protection (EXTRACTION_OCR_CONCURRENCY,
+    EXTRACTION_OCR_TOTAL_TIMEOUT_SECONDS, EXTRACTION_OCR_BREAKER_*); one per process, shared by the live and the
+    -test pipeline and the direct endpoint, since they all call the same model."""
+    return RemoteModelClient(
+        url,
+        settings.extraction_ocr_timeout_seconds,
+        name="extraction OCR model",
+        headers=headers,
+        max_concurrency=settings.extraction_ocr_concurrency,
+        total_timeout=settings.extraction_ocr_total_timeout_seconds,
+        breaker=CircuitBreaker(
+            "extraction-ocr",
+            settings.extraction_ocr_breaker_failures,
+            settings.extraction_ocr_breaker_reset_seconds,
+        ),
+    )
+
+
 def _build_paddle(settings: Settings) -> PaddleOcrEngine:
     if not settings.extraction_ocr_url:
         raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=paddle")
-    client = RemoteModelClient(
-        settings.extraction_ocr_url, settings.extraction_ocr_timeout_seconds, name="extraction OCR model"
-    )
-    return PaddleOcrEngine(client)
+    return PaddleOcrEngine(_ocr_client(settings, settings.extraction_ocr_url))
 
 
 def _build_remote(settings: Settings) -> RemoteOcrEngine:
     if not settings.extraction_ocr_url:
         raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=remote")
     headers = {"X-API-Key": settings.extraction_ocr_api_key} if settings.extraction_ocr_api_key else None
-    client = RemoteModelClient(
-        settings.extraction_ocr_url,
-        settings.extraction_ocr_timeout_seconds,
-        name="extraction OCR model",
-        headers=headers,
+    return RemoteOcrEngine(
+        _ocr_client(settings, settings.extraction_ocr_url, headers), params=settings.extraction_ocr_params
     )
-    return RemoteOcrEngine(client, params=settings.extraction_ocr_params)
 
 
 # EXTRACTION_BACKEND -> how to build it. Add a backend here and, if it needs settings, in config.py.

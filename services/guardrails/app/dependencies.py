@@ -7,6 +7,7 @@ from functools import lru_cache
 
 from ocr_common.clients.models import model_file
 from ocr_common.clients.remote import RemoteModelClient
+from ocr_common.overload import Bulkhead
 from ocr_common.registry import Factory, build_backend
 
 from app.clients.threshold import GuardrailsThreshold, default_threshold
@@ -83,8 +84,20 @@ def get_threshold() -> GuardrailsThreshold:
     )
 
 
+@lru_cache
+def get_inference_bulkhead() -> Bulkhead:
+    """The bound on documents judged at once in this process (GUARDRAILS_MAX_CONCURRENCY / _MAX_QUEUE)."""
+    settings: Settings = get_settings()
+    return Bulkhead(
+        "guardrails-inference",
+        settings.guardrails_max_concurrency,
+        settings.guardrails_max_queue,
+        retry_after=settings.guardrails_busy_retry_after_seconds,
+    )
+
+
 # --- services (cheap to build: one per request) ------------------------------------------
 
 
 def get_guardrails_service() -> GuardrailsService:
-    return GuardrailsService(get_page_classifier(), get_settings(), get_threshold())
+    return GuardrailsService(get_page_classifier(), get_settings(), get_threshold(), get_inference_bulkhead())
