@@ -90,7 +90,7 @@ commonEnv:
   TESTING_ENDPOINTS: "false"
 
 # Tiap service = satu Deployment + satu ConfigMap + satu Service internal `<release>-<nama>`.
-#   entrypoint : dipanggil dari luar release (Orkestrasi pusat). Terbuka lewat Service `<release>-gateway`
+#   entrypoint : dipanggil dari luar release (Orkestrasi pusat). Terbuka lewat Service `<release>-orchestrator`
 #                (bukan Service internal) dan NetworkPolicy-nya menerima namespace di
 #                networkPolicy.clientNamespaces. Hanya orchestrator; yang lain internal.
 #   pipeline   : tahap async yang butuh DATABASE_URL dan konfigurasi Orkestrasi.
@@ -278,7 +278,7 @@ services:
 service:
   type: ClusterIP
   annotations: {}
-  # Service `<release>-gateway` yang membuka port semua service ber-entrypoint (hanya orchestrator, 8034).
+  # Service `<release>-orchestrator` yang membuka port semua service ber-entrypoint (hanya orchestrator, 8034).
   # Ini alamat yang dipublikasikan ke Orkestrasi pusat (integration.md). Service per komponen
   # (`<release>-<service>`) hanya untuk panggilan internal pipeline, jadi orchestrator tidak punya.
   entrypoint:

@@ -175,7 +175,7 @@ Yang berubah otomatis mengikuti saklar itu:
 
 | | GKE | lokal |
 |---|---|---|
-| service | `kubectl port-forward` (satu per service) di 9030-9034: `svc/nilam-ocr-npwp-<service>` untuk keempat service internal, `deploy/nilam-ocr-npwp-orchestrator` untuk orchestrator (tidak punya Service internal) | container di 127.0.0.1:8030-8034 |
+| service | `kubectl port-forward` (satu per service) di 9030-9034: `svc/nilam-ocr-npwp-<service>` untuk keempat service internal, `deploy/nilam-ocr-npwp-orchestrator` untuk orchestrator (Service-nya memilih semua pod release) | container di 127.0.0.1:8030-8034 |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
 | baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5433}` |

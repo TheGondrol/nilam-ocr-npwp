@@ -8,7 +8,7 @@
 //
 // Env (diisi tracker):
 //   RUN_ID        id run; endpoint -test membuat request_id TEST_<RUN_ID>_<uuid>
-//   TARGET        base URL orchestrator, mis. http://nilam-ocr-npwp-gateway:8034 (Service yang dipanggil Orkestrasi pusat)
+//   TARGET        base URL orchestrator, mis. http://nilam-ocr-npwp-orchestrator:8034 (Service yang dipanggil Orkestrasi pusat)
 //   ENDPOINT      default /v1/extract-ocr-test
 //   STAGES        JSON [[target, detik], ...]: laju kedatangan per 10 detik (resolusi 0.1 rps) tiap tahap,
 //                 dijalankan berurutan oleh ramping-arrival-rate (naik/turun linear di dalam satu tahap)
@@ -24,7 +24,7 @@ import http from 'k6/http'
 import { Counter, Rate, Trend } from 'k6/metrics'
 
 const RUN = __ENV.RUN_ID || `manual${Date.now().toString(36)}`
-const TARGET = (__ENV.TARGET || 'http://nilam-ocr-npwp-gateway:8034').replace(/\/$/, '')
+const TARGET = (__ENV.TARGET || 'http://nilam-ocr-npwp-orchestrator:8034').replace(/\/$/, '')
 const ENDPOINT = __ENV.ENDPOINT || '/v1/extract-ocr-test'
 const WAIT = Number(__ENV.WAIT_SECONDS || 15)
 const API_KEY = __ENV.API_KEY || ''

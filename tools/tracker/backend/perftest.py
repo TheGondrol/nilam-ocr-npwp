@@ -52,7 +52,7 @@ CONTEXT = os.environ.get("PERF_KUBE_CONTEXT", "gke_ddb-kubecluster-dev-01_asia-s
 NAMESPACE = os.environ.get("PERF_NAMESPACE", "nilam-ocr-npwp")
 RELEASE = os.environ.get("PERF_RELEASE", "nilam-ocr-npwp")
 SECRET = os.environ.get("PERF_SECRET", f"{RELEASE}-secrets")
-TARGET = os.environ.get("PERF_TARGET", f"http://{RELEASE}-gateway:8034")
+TARGET = os.environ.get("PERF_TARGET", f"http://{RELEASE}-orchestrator:8034")
 ENDPOINT = "/v1/extract-ocr-test"
 K6_IMAGE = os.environ.get("PERF_K6_IMAGE", "grafana/k6:2.3.0")
 # Pod relay TCP ke Cloud SQL yang sudah ada di namespace; kalau tidak ada, run membuat relay sendiri (RELAY_IMAGE).

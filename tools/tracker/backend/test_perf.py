@@ -35,7 +35,7 @@ def meta(profile: str, the_plan, **extra):
         "limits": LIMITS,
         "release": RELEASE,
         "images": ["npwp1.jpg"],
-        "target": "http://nilam-ocr-npwp-gateway:8034/v1/extract-ocr-test",
+        "target": "http://nilam-ocr-npwp-orchestrator:8034/v1/extract-ocr-test",
         "context": "gke_x_asia-southeast2_cluster",
         "namespace": "nilam-ocr-npwp",
         "wait_seconds": 15,

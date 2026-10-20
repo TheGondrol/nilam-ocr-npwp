@@ -169,10 +169,10 @@ def create_app(
     return app
 
 
-# The Helm chart's names (deploy/helm): release `nilam-ocr-npwp`; an internal service is `<release>-<service>`,
-# and the entry point (orchestrator) is only behind `<release>-gateway`, the Service the central orchestrator calls.
+# The Helm chart's names (deploy/helm): release `nilam-ocr-npwp`; every service is behind `<release>-<service>`.
+# The entry point's (`<release>-orchestrator`) is the one the central orchestrator calls.
 RELEASE = "nilam-ocr-npwp"
-GATEWAY_SERVICE = f"{RELEASE}-gateway"
+ENTRY_SERVICE = f"{RELEASE}-orchestrator"
 _NAMESPACE = {
     "namespace": {
         "default": RELEASE,
@@ -185,8 +185,8 @@ def _cluster_servers(service_name: str, port: int, *, entrypoint: bool) -> list[
     if entrypoint:
         return [
             {
-                "url": f"http://{GATEWAY_SERVICE}.{{namespace}}.svc.cluster.local:{port}",
-                "description": "GKE: the gateway Service (the central orchestrator calls this)",
+                "url": f"http://{ENTRY_SERVICE}.{{namespace}}.svc.cluster.local:{port}",
+                "description": "GKE: the entry Service (the central orchestrator calls this)",
                 "variables": _NAMESPACE,
             }
         ]

@@ -1,5 +1,5 @@
 {{- /* Satu Service internal per komponen, untuk panggilan antar service (upstreams). Komponen ber-entrypoint
-       (orchestrator) tidak dipanggil service lain, jadi hanya terbuka lewat Service gateway di bawah. */}}
+       (orchestrator) tidak dipanggil service lain, jadi hanya terbuka lewat Service `<release>-orchestrator` di bawah. */}}
 {{- range $name, $svc := .Values.services }}
 {{- if and $svc.enabled (not $svc.entrypoint) }}
 {{- $component := dict "root" $ "name" $name "svc" $svc }}
@@ -26,13 +26,13 @@ spec:
 {{- end }}
 {{- if .Values.service.entrypoint.enabled }}
 ---
-# Gateway: alamat dalam cluster yang dipublikasikan ke Orkestrasi pusat (integration.md), satu nama untuk semua
+# Pintu masuk: alamat dalam cluster yang dipublikasikan ke Orkestrasi pusat (integration.md), satu nama untuk semua
 # service ber-entrypoint. Selector-nya mencakup semua pod release; tiap port hanya sampai ke pod yang punya
 # port bernama itu, karena Kubernetes melewatkan pod tanpa nama port tersebut.
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "nilam-ocr-npwp.fullname" . }}-gateway
+  name: {{ include "nilam-ocr-npwp.fullname" . }}-orchestrator
   labels:
     {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
     app.kubernetes.io/component: entrypoint
@@ -56,7 +56,7 @@ spec:
 {{- if .Values.service.public.enabled }}
 ---
 # Pintu masuk yang sama dengan IP load balancer GCP, untuk pemanggil di luar cluster. Terpisah dari Service
-# `<release>-gateway` supaya alamat dalam cluster yang dipakai Orkestrasi pusat tidak berubah.
+# `<release>-orchestrator` supaya alamat dalam cluster yang dipakai Orkestrasi pusat tidak berubah.
 apiVersion: v1
 kind: Service
 metadata:

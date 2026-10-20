@@ -90,8 +90,8 @@ if [[ "$TRACKER_TARGET" == "gke" ]]; then
     || die "tidak bisa membaca namespace $NS. Jalankan: gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2"
 
   : >"$HERE/.port-forward.log"
-  # Satu port-forward per service. Service internal: svc/<release>-<nama>. Orchestrator tidak punya Service
-  # internal (hanya Service gateway, yang selector-nya mencakup semua pod release), jadi lewat Deployment-nya.
+  # Satu port-forward per service: svc/<release>-<nama>, kecuali orchestrator. Service-nya (<release>-orchestrator,
+  # pintu masuk pusat) memilih semua pod release, jadi port-forward ke sana bisa jatuh ke pod lain: lewat Deployment.
   say "target GKE: $NS/{svc/$RELEASE-{extraction,guardrails,structuring,scoring},deploy/$RELEASE-orchestrator} -> 127.0.0.1:9030-9034"
   for pair in "svc/$RELEASE-extraction|9030:8030" "svc/$RELEASE-guardrails|9031:8031" "svc/$RELEASE-structuring|9032:8032" \
               "svc/$RELEASE-scoring|9033:8033" "deploy/$RELEASE-orchestrator|9034:8034"; do
