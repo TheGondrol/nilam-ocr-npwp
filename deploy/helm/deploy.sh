@@ -76,6 +76,9 @@ Opsi:
   --build-only    build + push saja, tanpa helm upgrade
   --install       izinkan instalasi pertama kali (release belum ada di namespace); butuh Secret
                   \$existingSecret (nilam-ocr-npwp-secrets) sudah dibuat di namespace itu
+  --update-pull-secret
+                  tulis ulang pull secret Nexus \$PULL_SECRET dari \$NEXUS_ENV (mis. password Nexus berganti);
+                  tanpa opsi ini pull secret yang sudah ada dibiarkan
   --dry-run       tampilkan diff manifest terhadap release yang berjalan, tanpa apply
   -y, --yes       tanpa konfirmasi
   -h, --help      tampilkan bantuan ini
@@ -104,6 +107,7 @@ ALLOW_DIRTY=0
 SKIP_BUILD=0
 BUILD_ONLY=0
 INSTALL=0
+UPDATE_PULL_SECRET=0
 RELEASE_EXISTS=1
 DRY_RUN=0
 ASSUME_YES=0
@@ -116,6 +120,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --install) INSTALL=1; shift ;;
+    --update-pull-secret) UPDATE_PULL_SECRET=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -200,13 +205,19 @@ fi
 image_ref() { echo "$REGISTRY/$IMAGE_PREFIX-$1:$TAG"; }
 
 # NEXUS_USERNAME / NEXUS_PASSWORD dari $NEXUS_ENV (KEY=VALUE), tanpa menjalankan file itu sebagai skrip.
+# Hanya dibaca kalau perlu: untuk push (build) dan untuk membuat pull secret yang belum ada.
 nexus_value() { sed -n "s/^$1=//p" "$NEXUS_ENV" | tail -n1 | tr -d '\r'; }
-if [[ $DRY_RUN -eq 0 ]]; then
+NEXUS_USERNAME=""
+NEXUS_PASSWORD=""
+load_nexus_credentials() {
+  [[ -n "$NEXUS_USERNAME" ]] && return 0
   [[ -f "$NEXUS_ENV" ]] || die "kredensial Nexus tidak ada: $NEXUS_ENV (NEXUS_USERNAME, NEXUS_PASSWORD)"
   NEXUS_USERNAME="$(nexus_value NEXUS_USERNAME)"
   NEXUS_PASSWORD="$(nexus_value NEXUS_PASSWORD)"
   [[ -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]] || die "NEXUS_USERNAME / NEXUS_PASSWORD kosong di $NEXUS_ENV"
-fi
+}
+# Build: gagal di awal, bukan setelah build selesai.
+[[ $SKIP_BUILD -eq 0 && $DRY_RUN -eq 0 ]] && load_nexus_credentials
 
 # --- Tunnel (shared-dev) ----------------------------------------------------------------------------------------
 # gcloud compute ssh -D: SOCKS5 di 127.0.0.1:$PROXY_PORT, keluar dari bastion ke API server privat. Di Windows
@@ -377,12 +388,17 @@ else
   HELM_ARGS+=(--wait=watcher --rollback-on-failure)
 fi
 
-# Pull secret untuk Nexus (chart: imagePullSecrets). Dibuat/diperbarui tiap deploy, jadi ganti password Nexus
-# cukup ubah nexus.env lalu deploy lagi.
-log "Pull secret $PULL_SECRET (${REGISTRY%%/*})"
-kubectl -n "$NAMESPACE" create secret docker-registry "$PULL_SECRET" --docker-server="${REGISTRY%%/*}" \
-  --docker-username="$NEXUS_USERNAME" --docker-password="$NEXUS_PASSWORD" --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
+# Pull secret untuk Nexus (chart: imagePullSecrets). Dipakai bersama service dokumen lain di namespace ini, jadi
+# yang sudah ada dibiarkan; hanya dibuat kalau belum ada. Password Nexus berganti: --update-pull-secret.
+if kubectl -n "$NAMESPACE" get secret "$PULL_SECRET" >/dev/null 2>&1 && [[ $UPDATE_PULL_SECRET -eq 0 ]]; then
+  log "Pull secret $PULL_SECRET sudah ada, dipakai apa adanya"
+else
+  load_nexus_credentials
+  log "Pull secret $PULL_SECRET (${REGISTRY%%/*}): $([[ $UPDATE_PULL_SECRET -eq 1 ]] && echo diperbarui || echo dibuat)"
+  kubectl -n "$NAMESPACE" create secret docker-registry "$PULL_SECRET" --docker-server="${REGISTRY%%/*}" \
+    --docker-username="$NEXUS_USERNAME" --docker-password="$NEXUS_PASSWORD" --dry-run=client -o yaml \
+    | kubectl apply -f - >/dev/null
+fi
 
 log "helm upgrade"
 helm "${HELM_ARGS[@]}"

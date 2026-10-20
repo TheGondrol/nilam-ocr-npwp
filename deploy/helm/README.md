@@ -26,7 +26,9 @@ dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
 | `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `nilam` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
 | `ddb-dev` | `gc-ddb-dev-gke-cluster-01` (project `ddb-kubecluster-dev-01`) | `nilam-ocr-npwp` | `values-ddb-dev.yaml` | publik, context `~/.kube/config` |
 
-Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus` (dibuat `deploy.sh`).
+Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus`, generik untuk semua service dokumen
+NILAM OCR di namespace yang sama. `deploy.sh` hanya membuatnya kalau belum ada (dari `nexus.env`); yang sudah ada
+dibiarkan. Password Nexus berganti: `deploy.sh --update-pull-secret ...`.
 Tanpa GCS di pod: model ikut di image (lihat "Model dari GCS"), karena identitas pod ke GCS di cluster
 shared belum jalan (SA node `gc-bribrain-dev-sac-gke-01` ditolak 403).
 
