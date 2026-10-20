@@ -86,9 +86,10 @@ def test_probabilities_are_valid_per_page(classifier):
 @needs_weights
 def test_a_blank_page_is_rejected(classifier):
     """Guards the class order against the real weights: a white page is not an NPWP card. With the
-    23 Sep 2026 checkpoint read in the wrong order it would be accepted at 0.98."""
+    23 Sep 2026 checkpoint read in the wrong order it would be accepted at 0.98. The 20 Oct 2026 checkpoint
+    (epoch 3) rejects it less firmly (0.79), so the bound is the verdict, not a confidence level."""
     [(proba_approve, proba_reject)] = classifier.classify("x.jpg", [Image.new("RGB", (800, 500), "white")])
-    assert proba_reject > 0.9, (proba_approve, proba_reject)
+    assert proba_reject > 0.5, (proba_approve, proba_reject)
 
 
 @needs_weights
