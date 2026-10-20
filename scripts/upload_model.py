@@ -2,7 +2,7 @@
 SCORING_MODEL_GCS_URI), then downloads it back and checks it.
 
     python scripts/upload_model.py services/guardrails/weights/best_model.pt \\
-        gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
+        gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/guardrails/best_model.pt
 
 Credentials: GCP Workload Identity Federation with Entra ID (Tim SEA), the variables of `--env-file`
 (default wif.gcs.env, never committed) or of the environment. The object is overwritten: the services take

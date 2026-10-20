@@ -10,7 +10,7 @@ from ocr_common.clients import gcs, models
 from ocr_common.clients.gcp import EntraTokenSupplier, WifConfig, google_credentials, wif_config
 from ocr_common.config import BaseServiceSettings
 
-URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib"
+URI = "gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/scoring/trust_model.joblib"
 CONTENT = b"the trust model"
 SHA256 = hashlib.sha256(CONTENT).hexdigest()
 MD5 = base64.b64encode(hashlib.md5(CONTENT, usedforsecurity=False).digest()).decode()
@@ -79,9 +79,9 @@ def session(monkeypatch):
 
 def test_a_gcs_uri_is_bucket_and_object():
     obj = gcs.GcsObject.parse(URI)
-    assert obj.bucket == "gc-bribrain-dev-gcs-ocr-nilam-01"
+    assert obj.bucket == "gc-bribrain-dev-gcs-ocrkprmod-01"
     assert obj.name.endswith("/trust_model.joblib")
-    assert obj.path.startswith("/b/gc-bribrain-dev-gcs-ocr-nilam-01/o/nilam-ocr-npwp%2Fscoring")
+    assert obj.path.startswith("/b/gc-bribrain-dev-gcs-ocrkprmod-01/o/nilam%2Fnilam-ocr-npwp%2Fscoring")
     for bad in ("gs://bucket", "gs://bucket/", "gs://bucket/dir/", "s3://bucket/x", "bucket/x"):
         with pytest.raises(ValueError):
             gcs.GcsObject.parse(bad)

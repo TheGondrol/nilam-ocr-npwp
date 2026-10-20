@@ -5,7 +5,7 @@ in GCS when it was built (`make weights` does the same by hand).
     python scripts/fetch_weights.py [guardrails] [scoring]
 
 Source: GUARDRAILS_MODEL_GCS_URI / SCORING_MODEL_GCS_URI, by default the fixed paths in
-gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/. A file already there with the object's SHA-256 is kept; any
+gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/. A file already there with the object's SHA-256 is kept; any
 other is replaced. The download is checked against GCS's MD5 and the SHA-256 recorded at upload (or
 GUARDRAILS_/SCORING_MODEL_SHA256 when set).
 
@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT / "libs" / "ocr_common"))
 from ocr_common.clients import gcs  # noqa: E402
 from ocr_common.clients.gcp import credentials_from_env  # noqa: E402
 
-BUCKET = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp"
+BUCKET = "gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp"
 MODELS = {
     "guardrails": {
         "uri_env": "GUARDRAILS_MODEL_GCS_URI",

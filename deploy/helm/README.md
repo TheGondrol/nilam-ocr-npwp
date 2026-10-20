@@ -137,8 +137,8 @@ Setelah mengubah Secret, restart pod yang memakainya:
 
 Model guardrails dan scoring disimpan di GCS, satu path tetap per model:
 
-- guardrails: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt`
-- scoring: `gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib`
+- guardrails: `gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/guardrails/best_model.pt`
+- scoring: `gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/scoring/trust_model.joblib`
 
 **Model ikut ke dalam image saat build.** Setiap `./deploy.sh` yang membangun guardrails atau scoring mengambil
 model terbaru dari GCS lebih dulu (`scripts/fetch_weights.py`, dicek MD5 dan SHA-256), lalu `docker build`
@@ -157,7 +157,7 @@ Kredensial GCS di mesin build (`ocr_common.clients.gcp.google_credentials`), sal
 **Ganti model:** unggah menimpa objeknya, lalu build dan deploy service-nya:
 
 ```bash
-python scripts/upload_model.py <file baru> gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt
+python scripts/upload_model.py <file baru> gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/guardrails/best_model.pt
 ./deploy.sh guardrails
 ```
 

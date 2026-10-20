@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 
-GCS_URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/scoring/trust_model.joblib"
+GCS_URI = "gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/scoring/trust_model.joblib"
 
 
 def test_a_trust_model_from_gcs_needs_no_pinned_sha256_when_deployed():

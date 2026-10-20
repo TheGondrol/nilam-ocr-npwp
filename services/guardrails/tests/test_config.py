@@ -40,7 +40,7 @@ def test_settings_of_the_pipeline_are_ignored(monkeypatch):
     assert not hasattr(settings, "pipeline_wait_seconds")
 
 
-GCS_URI = "gs://gc-bribrain-dev-gcs-ocr-nilam-01/nilam-ocr-npwp/guardrails/best_model.pt"
+GCS_URI = "gs://gc-bribrain-dev-gcs-ocrkprmod-01/nilam/nilam-ocr-npwp/guardrails/best_model.pt"
 
 
 def test_a_checkpoint_from_gcs_needs_no_pinned_sha256_when_deployed():
