@@ -1,7 +1,7 @@
 """Copies every table of this repository (schema `nilam_ocr_npwp`, live and testing_) from one database to another,
 e.g. to move to Cloud SQL, without changing the source: it is read in one read-only snapshot.
 
-    SOURCE_DATABASE_URL=... TARGET_DATABASE_URL=... python db/copy_database.py [--check | --replace]
+    SOURCE_DATABASE_URL=... TARGET_DATABASE_URL=... python db/copy_database.py [--check | --replace] [--skip-testing]
 
 Either URL may be a Cloud SQL URL (`cloudsql_instance`, IAM login; see ocr_common.pipeline.database).
 
@@ -15,6 +15,9 @@ Either URL may be a Cloud SQL URL (`cloudsql_instance`, IAM login; see ocr_commo
 
 --check only connects to both, compares the versions and prints the counts: nothing is created or copied, and
 only a version mismatch fails it (the target is expected to be empty then).
+
+--skip-testing leaves the `-test` endpoints' tables (`nilam_testing_*`, load-test data) out of the copy and the
+counts; the target still gets them, empty.
 """
 
 import argparse
@@ -33,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from ocr_common.pipeline.database import PIPELINE_SCHEMA, dispose_engines, get_engine
 from ocr_common.pipeline.tables import repo_metadata
+from ocr_common.testing_endpoints import TESTING_TABLE_PREFIX
 
 ALEMBIC_INI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alembic.ini")
 VERSION_TABLE = f'"{PIPELINE_SCHEMA}".nilam_ocr_npwp_alembic_version'
@@ -93,9 +97,11 @@ async def continue_sequences(target: AsyncConnection, tables: list[Table]) -> No
                 )
 
 
-async def run(source_url: str, target_url: str, *, check: bool, replace: bool) -> bool:
+async def run(source_url: str, target_url: str, *, check: bool, replace: bool, skip_testing: bool = False) -> bool:
     metadata = repo_metadata()
     tables = list(metadata.sorted_tables)  # jobs before the results that refer to them
+    if skip_testing:
+        tables = [table for table in tables if TESTING_TABLE_PREFIX not in table.name]
     expected = head()
     try:
         async with get_engine(source_url).connect() as source:
@@ -152,6 +158,7 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="connect, compare versions and count; change nothing")
     mode.add_argument("--replace", action="store_true", help="empty the target tables first: an exact copy")
+    parser.add_argument("--skip-testing", action="store_true", help="leave the nilam_testing_* tables out")
     args = parser.parse_args()
 
     source_url, target_url = os.environ.get("SOURCE_DATABASE_URL"), os.environ.get("TARGET_DATABASE_URL")
@@ -161,7 +168,9 @@ def main() -> int:
         raise SystemExit("SOURCE_DATABASE_URL and TARGET_DATABASE_URL are the same database")
     print(f"source: {shown(source_url)}\ntarget: {shown(target_url)}\n")
 
-    matched = asyncio.run(run(source_url, target_url, check=args.check, replace=args.replace))
+    matched = asyncio.run(
+        run(source_url, target_url, check=args.check, replace=args.replace, skip_testing=args.skip_testing)
+    )
     if not args.check:
         alembic(target_url, "stamp", "head")
         alembic(target_url, "check")
