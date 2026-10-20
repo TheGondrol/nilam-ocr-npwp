@@ -28,6 +28,29 @@ Untuk satu request, dari kiri ke kanan di layar:
    handoff, callback, retry, dead letter, END. Setiap callback yang tiba membawa **cek kontrak**
    (lihat di bawah) dan body JSON aslinya, bisa dibuka di bawah barisnya.
 
+## Laporan PDF per request (untuk tim ML Engineer dan QC)
+
+Tombol **Export PDF** di kepala request yang sedang dibuka (atau `GET /api/requests/{id}/report.pdf`) mengunduh
+satu laporan per `request_id`, dibuat [backend/report.py](backend/report.py):
+
+1. **Ringkasan**: keputusan akhir dengan bahasa biasa (selesai / ditolak guardrails / ditolak aturan structuring /
+   gagal di tahap X / masih 202), dokumen, sequence, lama jawaban, status dan durasi tiap tahap, field akhir yang
+   dikirim ke pusat (nilai, confidence, threshold, keputusannya), dan foto dokumen dengan kotak bbox OCR bernomor.
+2. **Guardrails**: verdict, confidence, threshold dan sumbernya, `proba_approve` / `proba_reject` per halaman
+   (dari `nilam_guardrails_results`).
+3. **Extraction**: engine / model, waktu inferensi, setiap baris OCR dengan confidence-nya; baris di bawah 0,80
+   ditandai.
+4. **Structuring**: field, sumber dan sinyalnya, flag aturan, alasan penolakan.
+5. **Scoring**: probabilitas trust model dan setiap fitur payload-nya, dengan artinya.
+6. **Jawaban ke pusat**: body `POST /v1/extract-ocr`, callback yang tiba (cek kontrak), baris `nilam_ocr_results`;
+   lalu timeline semua event dan cara membaca laporannya.
+
+Sumbernya stream event Redis request itu, ditambah kedua tabel kalau database terbaca (tanpa database, bagian itu
+menyebut alasannya). Foto diambil dari `tools/tracker/uploads/`, tempat tracker menyimpan setiap dokumen yang ia
+kirim (di-.gitignore, terhapus bersama request-nya di daftar); request yang dibuat sebelum fitur ini tidak punya
+foto, dan dokumen PDF tidak dirender. Laporan berisi data dokumen asli: hanya untuk tim internal. Selama request
+masih *Live* laporannya berisi keadaan saat itu.
+
 ## Cek kontrak callback
 
 Setiap callback yang tiba di tracker diperiksa terhadap kontrak "Callback Hasil OCR" yang disepakati dengan
@@ -152,7 +175,7 @@ Yang berubah otomatis mengikuti saklar itu:
 
 | | GKE | lokal |
 |---|---|---|
-| service | `kubectl port-forward` ke `svc/nilam-ocr-npwp-<service>` (satu per service) di 9030-9034; butuh chart 0.3.0+, karena chart lama belum punya orchestrator | container di 127.0.0.1:8030-8034 |
+| service | `kubectl port-forward` (satu per service) di 9030-9034: `svc/nilam-ocr-npwp-<service>` untuk keempat service internal, `deploy/nilam-ocr-npwp-orchestrator` untuk orchestrator (tidak punya Service internal) | container di 127.0.0.1:8030-8034 |
 | `API_KEY` | `changeme` (service memaksa `X-API-Key`) | kosong, service jalan `AUTH_DISABLED=true` |
 | hasil tiap tahap | polling `GET /v1/<tahap>/jobs/{id}` | callback ke `/v1/callbacks/stage` + baca DB |
 | baris outbox | hanya bila `TRACKER_DATABASE_URL` diisi | otomatis: Postgres compose di `127.0.0.1:${POSTGRES_HOST_PORT:-5433}` |
@@ -200,6 +223,7 @@ pemantau database hidup, simulasi yang aktif, dan backend tiap service.
 | `POST /api/requests` | form `file`, `slow_seconds` (0 = tanpa simulasi), `pipeline_name_sequence` (JSON array; kosong = pipeline penuh; sengaja tidak divalidasi supaya 422 orchestrator bisa diperlihatkan) |
 | `POST /v1/callbacks/stage` | dipanggil relay tiap service; jawabannya mengikuti simulasi; bentuk body diperiksa (`contract`) |
 | `GET /api/requests/{id}/events` | SSE, setiap event punya `type`: client, http, stage, outbox, callback, pipeline |
+| `GET /api/requests/{id}/report.pdf` | laporan PDF request itu (lihat *Laporan PDF per request*); 404 kalau tidak ada event-nya |
 | `POST /api/requests/{id}/outbox/release` | lepaskan dead letter request itu |
 | `GET` / `PUT /api/simulation` | `{"callback": "ok" \| "down" \| "reject" \| "unauthorized" \| "slow" \| "flaky" \| "not_ready"}` |
 | `POST /v1/ocr-callback` | callback format result (dev); diperiksa `X-Callback-Key` kalau `TRACKER_CALLBACK_KEY` diisi, dan kontraknya (event `callback` membawa `contract` dan `payload`); body tak terbaca -> 400 |
@@ -228,6 +252,54 @@ dihitung terpisah dari tuntas dan gagal, dengan daftar alasannya. Request uji be
 tidak masuk daftar "Request terakhir". Env: K6_IMAGE (grafana/k6:latest), K6_NETWORK
 (ocr_default), K6_TARGET (http://orchestrator:8034), K6_TRACKER (http://host.docker.internal:PORT),
 K6_API_KEY, LOAD_TESTER_DIR.
+
+## Performance test GKE
+
+Menu **Performance Test** menguji pipeline yang terdeploy di cluster ddb (`gc-ddb-dev-gke-cluster-01`, namespace
+`nilam-ocr-npwp`), bukan stack lokal. Bedanya dengan Load testing:
+
+- **Generator di dalam cluster.** k6 (`grafana/k6:2.3.0`) jalan sebagai Job `nilam-perf-<run>` di namespace pipeline
+  dan menembak Service orchestrator langsung. Lewat `kubectl port-forward` yang terukur adalah tunnel-nya, bukan
+  service. Skrip dan file uji dikirim lewat ConfigMap (maks. ~900 KB), API key dari Secret pipeline.
+- **Endpoint `-test`.** Pipeline yang sama, tabel `nilam_testing_*`, tanpa callback ke Orkestrasi pusat. Request id
+  `TEST_<run>_<uuid>`.
+- **Lima profil**, dijalankan berurutan: *smoke* (hidup?), *load* (beban normal, jadi baseline), *stress* (naik per
+  step sampai SLO dilanggar, berhenti otomatis), *spike* (lonjakan dan waktu pulih), *soak* (stabil lama? memori,
+  degradasi). Stress, spike, dan soak minta konfirmasi di UI karena membebani cluster dev bersama dan VM model OCR.
+- **SLO sebagai kriteria lulus** (default, bisa diubah per run): error 5xx+timeout < 1%, p95 pintu masuk < 15 dtk,
+  p95 end-to-end < 60 dtk, rasio tuntas >= 99%, 0 restart/OOMKilled, dan **utilisasi CPU <= 75%**: CPU pod
+  tersibuk tiap service dibanding limit-nya, dirata-rata per fase tahan. Teori antrean: waktu tunggu tumbuh sebanding
+  rho / (1 - rho) (3x di 75%, 9x di 90%), jadi di atas 75% tidak ada ruang untuk lonjakan. Kapasitas berkelanjutan
+  stress test dihitung dengan batas ini (step pertama yang melanggar disebut alasannya, mis. `CPU extraction 80%`),
+  dan laporan juga menulis batas menurut latensi/error saja sebagai pembanding.
+- **Sisi server ikut diukur.** `kubectl top pods` tiap 15 dtk (CPU/memori per service dan generator k6 vs limit),
+  restart/OOMKilled, serta status job tiap tahap di database lewat pod relay `cloudsql-relay-ocr-nilam`
+  (port-forward; kalau tidak ada, run membuat relay `alpine/socat` sendiri) untuk end-to-end, durasi per tahap, dan
+  jeda serah-terima outbox.
+- **Laporan PDF otomatis** saat run selesai: `load-tester/out/perf-<run>.pdf` (unduh dari panel run; selama run
+  berjalan tombolnya membuat laporan sementara). Isinya kesimpulan per SLO, temuan, grafik laju/latensi/status/
+  resource, hasil per fase dan per tahap, resource per service, perbandingan dengan run sebelumnya (profil dan
+  sequence sama), konfigurasi, versi image, dan metodologi.
+
+Prasyarat: `kubectl` dengan context cluster ddb dan izin membuat Job/ConfigMap di namespace pipeline, metrics-server
+(untuk `kubectl top`), `TESTING_ENDPOINTS=true` di orchestrator. Tracker tidak perlu mode GKE (`TRACKER_TARGET`) untuk
+menu ini. **Hapus** run menghapus catatan dan laporannya; opsi kedua di dialog juga menghapus baris `TEST_<run>_%`
+dari tabel `nilam_testing_*` (kecuali `nilam_testing_ocr_results`, append-only).
+
+| Endpoint | |
+|---|---|
+| `GET /api/perftest/config` | profil, SLO default, status cluster/relay, file uji |
+| `GET /api/perftest`, `POST /api/perftest` | daftar run; mulai run `{profile, params, slo, images, pipeline_name_sequence, note}` |
+| `GET /api/perftest/{run}` | meta + hasil (sementara selama run, final setelahnya) |
+| `POST /api/perftest/{run}/stop` | hentikan Job k6; laporan tetap dibuat dari data yang terkumpul |
+| `GET /api/perftest/{run}/report.pdf` | laporan PDF |
+| `DELETE /api/perftest/{run}?cleanup_db=true` | hapus run (dan baris uji di database) |
+
+Env: PERF_KUBE_CONTEXT, PERF_NAMESPACE (nilam-ocr-npwp), PERF_RELEASE (nilam-ocr-npwp), PERF_SECRET
+(`<release>-secrets`), PERF_TARGET, PERF_K6_IMAGE, PERF_DB_RELAY_POD (cloudsql-relay-ocr-nilam), PERF_RELAY_IMAGE,
+PERF_MAX_RATE (10 rps), PERF_MAX_SECONDS (7200), PERF_DRAIN_SECONDS (180). Kode: `backend/perftest.py`
+(orkestrasi), `backend/perf_stats.py` (perhitungan, diuji `test_perf.py`), `backend/perf_report.py` (PDF),
+`../load-tester/k6/perf.js`.
 
 Env backend: TRACKER_TARGET, ORCHESTRATOR_URL, GUARDRAILS_URL, EXTRACTION_URL, STRUCTURING_URL,
 SCORING_URL (default 127.0.0.1:8030-8034), TRACKER_POLL, REDIS_URL, API_KEY, PORT,

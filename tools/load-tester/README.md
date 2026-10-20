@@ -14,6 +14,10 @@ Keduanya dihitung oleh tracker ([../tracker](../tracker)) di menu **Load testing
 tiap sampel ke `POST /api/loadtest/{run}/samples`, dan callback tahap untuk request berprefiks
 `LT_` dihitung terpisah, tidak masuk daftar "Request terakhir".
 
+Untuk menguji yang terdeploy di **GKE** pakai menu **Performance Test** di tracker (skrip `k6/perf.js`, dijalankan
+sebagai Job di dalam cluster, dengan SLO, lima profil uji, dan laporan PDF): lihat
+[../tracker/README.md](../tracker/README.md#performance-test-gke). Bagian di bawah ini untuk stack lokal.
+
 ## Menjalankan dari tracker
 
     tools/tracker/run.sh --stack     # stack lokal + tracker
@@ -60,7 +64,7 @@ Load test ke **dev** (GKE) tanpa mengotori data Orkestrasi: port-forward orchest
 `-test`-nya, yang menulis ke tabel `testing_*` dan tidak mengirim callback (lihat README utama,
 "Endpoint Testing"):
 
-    kubectl -n nilam-ocr-npwp port-forward svc/nilam-ocr-npwp-orchestrator 8034:8034
+    kubectl -n nilam-ocr-npwp port-forward deploy/nilam-ocr-npwp-orchestrator 8034:8034
     docker run --rm --add-host host.docker.internal:host-gateway \
       -v "$PWD/tools/load-tester/k6:/scripts:ro" -v "$PWD/tools/load-tester/images:/images:ro" \
       -e ENDPOINT=/v1/extract-ocr-test -e TARGET=http://host.docker.internal:8034 -e API_KEY="$API_KEY" \

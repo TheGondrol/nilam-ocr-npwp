@@ -34,6 +34,7 @@ fi
 if [[ "${TRACKER_TARGET:-local}" == "gke" ]]; then
   say "menutup port-forward ke ${GKE_NAMESPACE:-nilam-ocr-npwp}"
   for port in 9030 9031 9032 9033 9034; do kill_port "$port"; done
+  [[ -n "${GKE_DB_RELAY:-}" ]] && kill_port "${GKE_DB_LOCAL_PORT:-15432}"
 fi
 
 if [[ "${1:-}" == "--stack" ]]; then

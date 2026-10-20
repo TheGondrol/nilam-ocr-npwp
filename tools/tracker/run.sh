@@ -90,16 +90,31 @@ if [[ "$TRACKER_TARGET" == "gke" ]]; then
     || die "tidak bisa membaca namespace $NS. Jalankan: gcloud container clusters get-credentials gc-ddb-dev-gke-cluster-01 --project ddb-kubecluster-dev-01 --location asia-southeast2"
 
   : >"$HERE/.port-forward.log"
-  # Chart 0.3.0+: satu Deployment + Service per service (<release>-<nama>), satu port-forward per service.
-  # Chart yang lebih lama tidak punya orchestrator, pintu masuk yang dipanggil tracker.
-  say "target GKE: $NS/svc/$RELEASE-{extraction,guardrails,structuring,scoring,orchestrator} -> 127.0.0.1:9030-9034"
-  for pair in "extraction|9030:8030" "guardrails|9031:8031" "structuring|9032:8032" "scoring|9033:8033" "orchestrator|9034:8034"; do
-    svc="${pair%%|*}"; ports="${pair##*|}"
-    kubectl -n "$NS" get "svc/$RELEASE-$svc" >/dev/null 2>&1 \
-      || die "svc/$RELEASE-$svc tidak ada di $NS. Release masih di bawah chart 0.3.0 (belum ada orchestrator)? Deploy dulu dari main: deploy/helm/deploy.sh all"
-    kubectl -n "$NS" port-forward "svc/$RELEASE-$svc" "$ports" >>"$HERE/.port-forward.log" 2>&1 &
+  # Satu port-forward per service. Service internal: svc/<release>-<nama>. Orchestrator tidak punya Service
+  # internal (hanya Service gateway, yang selector-nya mencakup semua pod release), jadi lewat Deployment-nya.
+  say "target GKE: $NS/{svc/$RELEASE-{extraction,guardrails,structuring,scoring},deploy/$RELEASE-orchestrator} -> 127.0.0.1:9030-9034"
+  for pair in "svc/$RELEASE-extraction|9030:8030" "svc/$RELEASE-guardrails|9031:8031" "svc/$RELEASE-structuring|9032:8032" \
+              "svc/$RELEASE-scoring|9033:8033" "deploy/$RELEASE-orchestrator|9034:8034"; do
+    target="${pair%%|*}"; ports="${pair##*|}"
+    kubectl -n "$NS" get "$target" >/dev/null 2>&1 \
+      || die "$target tidak ada di $NS. Deploy dulu dari main: deploy/helm/deploy.sh all"
+    kubectl -n "$NS" port-forward "$target" "$ports" >>"$HERE/.port-forward.log" 2>&1 &
     PF_PIDS+=($!)
   done
+
+  # Cloud SQL hanya punya private IP: laptop menjangkaunya lewat pod relay (socat) di namespace yang sama,
+  # dan TRACKER_DATABASE_URL di .env menunjuk ke 127.0.0.1:$GKE_DB_LOCAL_PORT. Kosongkan GKE_DB_RELAY untuk tanpa DB.
+  if [[ -n "${GKE_DB_RELAY:-}" ]]; then
+    DB_PORT="${GKE_DB_LOCAL_PORT:-15432}"
+    port_free_or_die "$DB_PORT" "relay database"
+    kubectl -n "$NS" get "$GKE_DB_RELAY" >/dev/null 2>&1 \
+      || die "$GKE_DB_RELAY tidak ada di $NS: relay Cloud SQL sudah dihapus? Buat lagi, atau kosongkan GKE_DB_RELAY di .env"
+    say "database: $NS/$GKE_DB_RELAY -> 127.0.0.1:$DB_PORT"
+    kubectl -n "$NS" port-forward "$GKE_DB_RELAY" "$DB_PORT:5432" >>"$HERE/.port-forward.log" 2>&1 &
+    PF_PIDS+=($!)
+    [[ "${TRACKER_DATABASE_URL:-}" == *"@127.0.0.1:$DB_PORT/"* ]] \
+      || warn "TRACKER_DATABASE_URL tidak menunjuk ke 127.0.0.1:$DB_PORT; private IP Cloud SQL tidak terjangkau dari laptop"
+  fi
 
   for _ in $(seq 1 30); do
     up "$ORCHESTRATOR_URL/health" && up "$EXTRACTION_URL/health" && up "$GUARDRAILS_URL/health" && up "$STRUCTURING_URL/health" && up "$SCORING_URL/health" && break
@@ -126,7 +141,7 @@ elif [[ -f "$ROOT/.venv/bin/python" ]]; then
   PYTHON_BIN="$ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_BIN" -c "import fastapi, httpx, redis" 2>/dev/null \
+"$PYTHON_BIN" -c "import fastapi, httpx, redis, fpdf" 2>/dev/null \
   || { say "memasang dependency backend"; "$PYTHON_BIN" -m pip install -q -r "$HERE/backend/requirements.txt"; }
 [[ -d "$HERE/frontend/node_modules" ]] \
   || { say "memasang dependency frontend"; (cd "$HERE/frontend" && npm install --no-audit --no-fund); }

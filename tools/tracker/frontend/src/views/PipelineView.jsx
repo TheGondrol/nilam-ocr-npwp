@@ -18,6 +18,7 @@ import {
   CheckCheck,
   Globe,
   Trash2,
+  FileDown,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -972,6 +973,17 @@ export default function PipelineView({ overview, focus }) {
                       Total {fmtMs(total)}
                     </Badge>
                   )}
+                  {/* Laporan untuk tim ML Engineer dan QC; selama request masih Live laporannya berisi keadaan saat itu. */}
+                  <Button asChild variant="outline" size="xs" className="h-6 px-2 text-xs gap-1">
+                    <a
+                      href={`/api/requests/${encodeURIComponent(current)}/report.pdf`}
+                      download
+                      title={live ? 'Request masih berjalan: laporan berisi keadaan saat ini' : 'Unduh laporan PDF request ini'}
+                    >
+                      <FileDown size={12} />
+                      <span className="hidden sm:inline">Export PDF</span>
+                    </a>
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"

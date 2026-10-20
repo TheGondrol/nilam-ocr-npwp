@@ -49,12 +49,19 @@ function fmtBytes(n) {
   return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function TestFilesManager({ config, selected, setSelected, onChanged }) {
+export function TestFilesManager({ config, selected, setSelected, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [dragging, setDragging] = useState(false)
   const input = useRef(null)
   const files = config?.image_files ?? []
+
+  // Unggahan dihapus begitu run yang memakainya selesai: centang file yang sudah tidak ada di daftar ikut dibuang.
+  useEffect(() => {
+    if (!config) return
+    const names = new Set(files.map((f) => f.name))
+    setSelected((prev) => (prev.every((n) => names.has(n)) ? prev : prev.filter((n) => names.has(n))))
+  }, [config])
 
   async function upload(list) {
     if (!list?.length) return
@@ -233,6 +240,7 @@ export default function LoadTestView() {
       loadRuns()
     } catch (err) {
       setError(String(err.message ?? err))
+      loadConfig()
     } finally {
       setStarting(false)
     }
@@ -251,6 +259,13 @@ export default function LoadTestView() {
   }
 
   const running = runs.some((r) => r.status === 'running')
+
+  // Run yang berakhir menghapus unggahannya: muat ulang daftar file supaya yang sudah dihapus tidak tampil lagi.
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    if (wasRunning.current && !running) loadConfig()
+    wasRunning.current = running
+  }, [running])
   const d = detail
   const sent = d?.sent ?? 0
   const waitSeconds = d?.wait_seconds ?? 15

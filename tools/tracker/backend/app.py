@@ -9,6 +9,7 @@ diagram, secukupnya untuk melihat pipeline dan pola outbox-nya hidup:
     GET  /api/files/{token}/{nama}   dokumen yang dikirim sebagai file_url (seperti Orkestrasi pusat)
     GET  /api/requests               daftar request terakhir
     GET  /api/requests/{id}/events   SSE: semua event request itu (replay dari awal, lalu live)
+    GET  /api/requests/{id}/report.pdf   laporan PDF request itu untuk tim ML Engineer dan QC (report.py)
     POST /api/requests/{id}/outbox/release   lepaskan dead letter request itu (failed_at = NULL)
     GET/PUT /api/simulation          bagaimana tracker menjawab callback: ok | down (503) | reject (422) |
                                      unauthorized (401) | slow (200 setelah timeout relay) | flaky (503 lalu 200),
@@ -41,6 +42,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -51,6 +53,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -59,10 +62,13 @@ import contract
 import httpx
 import loadtest
 import outbox_logs
+import perftest
+import report
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from starlette.concurrency import run_in_threadpool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tracker")
@@ -171,6 +177,9 @@ MAX_FILES = 200
 # Mode lokal: hasil kirim setiap pesan outbox dibaca dari log relay (outbox_logs.py), karena barisnya di jalur normal
 # terhapus sebelum watcher DB sempat membacanya. 0 = hanya dari tabel.
 OUTBOX_LOGS = os.environ.get("TRACKER_OUTBOX_LOGS", "1") != "0"
+# Dokumen tiap request, untuk foto di laporan PDF. Bisa dokumen nasabah asli: di-.gitignore, dihapus bersama
+# request-nya di daftar.
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 # Jeda sebelum END supaya baris log pengiriman terakhir (docker logs -f sedikit tertinggal) masuk sebelum SSE ditutup.
 OUTBOX_LOG_GRACE_SECONDS = 1.0
 
@@ -180,6 +189,7 @@ async def lifespan(_: FastAPI):
     global outbox_follower
     await get_pool()
     await loadtest.reconcile()
+    await perftest.reconcile()
     if TARGET == "local" and OUTBOX_LOGS:
         outbox_follower = outbox_logs.OutboxLogFollower(emit, known_request, chaos.container)
         outbox_follower.start()
@@ -206,6 +216,9 @@ watchers: dict[str, asyncio.Task[None]] = {}
 files: dict[str, tuple[bytes, str]] = {}  # token -> (isi, content type) untuk file_url
 pool: Any = None
 db_error: str | None = None
+# After a failed connect, get_pool waits this long before trying again (see get_pool).
+DB_RETRY_SECONDS = 30.0
+db_retry_at = 0.0
 outbox_follower: outbox_logs.OutboxLogFollower | None = None
 
 
@@ -311,8 +324,10 @@ async def request_sequence(request_id: str) -> list[str] | None:
 
 
 async def get_pool():
-    global pool, db_error
-    if pool is not None or not DB_URL:
+    """The database pool, or None. After a failed connect the next try waits DB_RETRY_SECONDS: every request (and
+    /api/health, which run.sh polls with a 3 s timeout) would otherwise wait for the connect timeout again."""
+    global pool, db_error, db_retry_at
+    if pool is not None or not DB_URL or time.monotonic() < db_retry_at:
         return pool
     try:
         import asyncpg
@@ -324,12 +339,15 @@ async def get_pool():
         db_error = None
     except Exception as exc:  # noqa: BLE001
         db_error = f"{type(exc).__name__}: {exc}"
-        log.warning("database watcher off: %s", db_error)
+        db_retry_at = time.monotonic() + DB_RETRY_SECONDS
+        log.warning("database watcher off: %s (next try in %.0fs)", db_error, DB_RETRY_SECONDS)
     return pool
 
 
 loadtest.configure(redis=redis, get_pool=get_pool, wait_seconds=WAIT_SECONDS, tables=TABLES)
 app.include_router(loadtest.router)
+perftest.configure(redis=redis, wait_seconds=WAIT_SECONDS)
+app.include_router(perftest.router)
 app.include_router(chaos.router)
 
 
@@ -636,6 +654,7 @@ async def run_request(
     )
     if stages:
         start_watcher(request_id)
+    save_upload(request_id, content)
 
     fields = {"request_id": request_id}
     if sequence is not None:
@@ -725,6 +744,23 @@ async def run_request(
     if POLL and stages:
         asyncio.create_task(poll_stages(request_id, stages))
     return {**answer, "accepted": True}
+
+
+def _upload_path(request_id: str) -> Path:
+    """request_id bisa diketik sendiri (kirim ulang): hanya karakter yang aman untuk nama file."""
+    return UPLOADS_DIR / re.sub(r"[^A-Za-z0-9_-]", "_", request_id)[:120]
+
+
+def save_upload(request_id: str, content: bytes) -> None:
+    try:
+        UPLOADS_DIR.mkdir(exist_ok=True)
+        _upload_path(request_id).write_bytes(content)
+    except OSError as exc:
+        log.warning("dokumen %s tidak tersimpan untuk laporan: %s", request_id, exc)
+
+
+def delete_upload(request_id: str) -> None:
+    _upload_path(request_id).unlink(missing_ok=True)
 
 
 @app.post("/api/requests")
@@ -1051,6 +1087,7 @@ async def delete_request(request_id: str):
     await redis.hdel("ocr:requests", request_id)
     await redis.delete(f"ocr:events:{request_id}")
     stop_watcher(request_id)
+    delete_upload(request_id)
 
     db = await get_pool()
     if db is not None:
@@ -1071,6 +1108,7 @@ async def clear_requests():
         rid = k.decode() if isinstance(k, bytes) else str(k)
         await redis.delete(f"ocr:events:{rid}")
         stop_watcher(rid)
+        delete_upload(rid)
     await redis.delete("ocr:requests")
     return {"ok": True, "count": len(raw_keys)}
 
@@ -1122,6 +1160,64 @@ async def get_ocr_results(request_id: str):
             "db_host": db_host_label(DB_URL),
             "rows": [],
         }
+
+
+async def _db_rows(sql: str, request_id: str) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Baris satu tabel untuk laporan, kolom JSON sudah di-decode; (None, alasan) kalau DB tidak terbaca."""
+    db = await get_pool()
+    if db is None:
+        return None, f"Database tidak tersedia ({db_error or 'TRACKER_DATABASE_URL kosong'})."
+    try:
+        async with db.acquire() as conn:
+            records = await conn.fetch(sql, request_id)
+    except Exception as exc:  # noqa: BLE001 - laporan tetap dibuat tanpa tabel ini
+        return None, f"Database tidak terbaca ({type(exc).__name__}: {exc})."
+    rows = []
+    for record in records:
+        row = {key: _iso(value) if hasattr(value, "isoformat") else value for key, value in dict(record).items()}
+        for key in ("report", "data", "pipeline_name_sequence"):
+            if isinstance(row.get(key), str):
+                try:
+                    row[key] = json.loads(row[key])
+                except ValueError:
+                    pass
+        rows.append(row)
+    return rows, None
+
+
+@app.get("/api/requests/{request_id}/report.pdf")
+async def request_report(request_id: str):
+    """Laporan PDF satu request untuk tim ML Engineer dan QC (report.py): keputusan akhir, foto dokumen dengan
+    kotak OCR, hasil tiap tahap, jawaban ke pusat, dan timeline. Dari stream event Redis, ditambah
+    nilam_guardrails_results dan nilam_ocr_results kalau database terbaca."""
+    events = [json.loads(fields["json"]) for _, fields in await redis.xrange(_stream(request_id))]
+    if not events:
+        raise HTTPException(status_code=404, detail=f"tidak ada event untuk {request_id}")
+    guardrails_rows, db_note = await _db_rows(
+        "SELECT * FROM nilam_guardrails_results WHERE request_id = $1 ORDER BY id", request_id
+    )
+    ocr_results_rows, _ = await _db_rows(
+        "SELECT * FROM nilam_ocr_results WHERE request_id = $1 ORDER BY created_at, id", request_id
+    )
+    path = _upload_path(request_id)
+    pdf = await run_in_threadpool(
+        report.render,
+        {
+            "request_id": request_id,
+            "generated_at": time.time(),
+            "target": TARGET,
+            "summary": json.loads(await redis.hget("ocr:requests", request_id) or "{}"),
+            "events": events,
+            "guardrails_rows": guardrails_rows,
+            "ocr_results_rows": ocr_results_rows,
+            "document": path.read_bytes() if path.is_file() else None,
+            "db_note": db_note,
+        },
+    )
+    filename = f"laporan-{_upload_path(request_id).name}.pdf"
+    return Response(
+        content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.get("/api/requests/{request_id}/events")

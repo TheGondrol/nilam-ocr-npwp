@@ -89,6 +89,22 @@ def list_images() -> list[str]:
     return [p.name for p in _image_paths()]
 
 
+def chosen_images(requested: list[str] | None, available: list[str]) -> list[str]:
+    """The files a run asked for, all of which must still exist: an upload is deleted once the run that used it ends,
+    so a page that has not reloaded its list may still show (and send) it."""
+    names = list(dict.fromkeys(requested or []))
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"file uji sudah tidak ada: {', '.join(missing)}. Unggahan dihapus otomatis setelah run yang "
+                "memakainya selesai; unggah lagi, atau hapus centangnya"
+            ),
+        )
+    return names
+
+
 def list_uploads() -> list[str]:
     return sorted(p.name for p in _files(ASSETS_DIR))
 
@@ -521,7 +537,7 @@ async def start(request: Request) -> dict[str, Any]:
             status_code=422, detail=f"pipeline_name_sequence harus daftar dari {', '.join(PIPELINE_NAMES)}"
         )
     available = list_images()
-    images = [name for name in (body.get("images") or available) if name in available]
+    images = chosen_images(body.get("images") or available, available)
     if not images:
         raise HTTPException(status_code=422, detail=f"tidak ada file uji di {SAMPLES_DIR} maupun {ASSETS_DIR}")
     uploads = set(list_uploads())

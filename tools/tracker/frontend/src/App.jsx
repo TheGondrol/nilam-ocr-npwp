@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Header from './components/Header'
 import PipelineView from './views/PipelineView'
 import LoadTestView from './views/LoadTestView'
+import PerfTestView from './views/PerfTestView'
 import ScenariosView from './views/ScenariosView'
 import OutboxGuideView from './views/OutboxGuideView'
 import { useTheme } from './lib/useTheme'
@@ -13,7 +14,7 @@ export default function App() {
     try {
       const hash = window.location.hash.slice(1)
       const stored = hash || localStorage.getItem('tracker.view')
-      return ['loadtest', 'scenarios', 'outbox'].includes(stored) ? stored : 'pipeline'
+      return ['loadtest', 'perftest', 'scenarios', 'outbox'].includes(stored) ? stored : 'pipeline'
     } catch (_) {
       return 'pipeline'
     }
@@ -81,6 +82,8 @@ export default function App() {
         {view === 'loadtest' && (
           <LoadTestView overview={overview} />
         )}
+
+        {view === 'perftest' && <PerfTestView />}
 
         {view === 'scenarios' && (
           <ScenariosView openRequest={openRequest} />

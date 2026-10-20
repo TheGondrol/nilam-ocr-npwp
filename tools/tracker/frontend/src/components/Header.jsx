@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Gauge,
   ShieldAlert,
   Layers,
   Terminal,
@@ -65,6 +66,16 @@ export default function Header({ view, setView, overview, live, sim, theme, togg
           >
             <BarChart3 size={13} />
             <span className="hidden md:inline">Load Testing</span>
+          </Button>
+
+          <Button
+            variant={view === 'perftest' ? 'secondary' : 'ghost'}
+            size="xs"
+            onClick={() => setView('perftest')}
+            className={`gap-1.5 text-xs h-7 px-3 ${view === 'perftest' ? 'bg-background shadow-xs font-medium text-foreground' : 'text-muted-foreground'}`}
+          >
+            <Gauge size={13} />
+            <span className="hidden md:inline">Performance Test</span>
           </Button>
 
           <Button
