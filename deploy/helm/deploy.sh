@@ -36,7 +36,13 @@ PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-$DEFAULT_CONTEXT}"
 TIMEOUT="${TIMEOUT:-10m}"
 # Python with ocr_common's dependencies (the repo's .venv), to fetch the models from GCS before a build.
-PY="${PY:-python}"
+# Default: the repo's .venv (Windows or Linux layout) when it exists, so the venv need not be activated.
+if [[ -z "${PY:-}" ]]; then
+  for candidate in "$ROOT/.venv/Scripts/python.exe" "$ROOT/.venv/bin/python"; do
+    [[ -x "$candidate" ]] && { PY="$candidate"; break; }
+  done
+  PY="${PY:-python}"
+fi
 # Revisi release yang disimpan Helm (satu Secret sh.helm.release.v1.<release>.vN per revisi), untuk rollback.
 HISTORY_MAX="${HISTORY_MAX:-5}"
 ALL_SERVICES=(orchestrator guardrails extraction structuring scoring)
