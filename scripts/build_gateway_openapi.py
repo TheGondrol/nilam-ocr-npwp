@@ -75,8 +75,8 @@ correct. There is **no document-level score and no approve / reject decision**; 
 ## Addresses
 
 The orchestrator is the only service you call, through the release's gateway Service:
-`http://nilam-ocr-npwp-gateway.<namespace>.svc.cluster.local:8034` (namespace `nilam` on the shared dev
-cluster, `nilam-ocr-npwp` on the ddb dev cluster). The guardrails and pipeline stage services are internal.
+`http://nilam-ocr-npwp-gateway.nilam-ocr-npwp.svc.cluster.local:8034` (namespace `nilam-ocr-npwp` on both dev
+clusters). The guardrails and pipeline stage services are internal.
 """
 
 REF = re.compile(r"#/components/schemas/([A-Za-z0-9_]+)")

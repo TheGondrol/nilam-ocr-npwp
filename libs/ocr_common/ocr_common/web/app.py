@@ -175,9 +175,8 @@ RELEASE = "nilam-ocr-npwp"
 GATEWAY_SERVICE = f"{RELEASE}-gateway"
 _NAMESPACE = {
     "namespace": {
-        "default": "nilam",
-        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, "
-        "nilam-ocr-npwp on ddb-dev)",
+        "default": RELEASE,
+        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp on both dev clusters)",
     }
 }
 

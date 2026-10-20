@@ -81,9 +81,8 @@ servers:
   description: GKE, from inside the release's namespace (the other services of this pipeline)
   variables:
     namespace:
-      default: nilam
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, nilam-ocr-npwp
-        on ddb-dev)'
+      default: nilam-ocr-npwp
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp on both dev clusters)'
 - url: http://guardrails:8031
   description: The Docker Compose network
 - url: http://127.0.0.1:8031

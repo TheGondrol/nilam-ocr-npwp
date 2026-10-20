@@ -23,30 +23,27 @@ dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
 
 | `DEPLOY_ENV` | Cluster | Namespace | Values | Akses API server |
 |---|---|---|---|---|
-| `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `nilam` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
+| `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `nilam-ocr-npwp` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
 | `ddb-dev` | `gc-ddb-dev-gke-cluster-01` (project `ddb-kubecluster-dev-01`) | `nilam-ocr-npwp` | `values-ddb-dev.yaml` | publik, context `~/.kube/config` |
 
-Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus`, generik untuk semua service dokumen
-NILAM OCR di namespace yang sama. `deploy.sh` hanya membuatnya kalau belum ada (dari `nexus.env`); yang sudah ada
-dibiarkan. Password Nexus berganti: `deploy.sh --update-pull-secret ...`.
-Tanpa GCS di pod: model ikut di image (lihat "Model dari GCS"), karena identitas pod ke GCS di cluster
-shared belum jalan (SA node `gc-bribrain-dev-sac-gke-01` ditolak 403).
+Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus`. `deploy.sh` hanya membuatnya
+kalau belum ada di namespace (dari `nexus.env`); yang sudah ada dibiarkan. Password Nexus berganti:
+`deploy.sh --update-pull-secret ...`.
+Model ikut di image (lihat "Model dari GCS"); pod tidak butuh identitas GCS untuk berjalan.
 
-**Status cluster shared (19 Okt 2026).** Manifest lolos server-side dry-run (LimitRange: limit CPU maks 4x
-request, memori maks 3x request; ResourceQuota 10 CPU / 10 Gi). Yang belum:
+**Cluster shared (sejak 20 Okt 2026).** Namespace `nilam-ocr-npwp`, dibuat dengan kubectl (bukan Rancher
+project, seperti `nilam-ocr-orchestrator`), jadi tanpa ResourceQuota/LimitRange platform. Database: Cloud SQL
+`gc-bribrain-dev-sql-ocrkpr-01` (`10.213.193.3`, database `nilam`), satu VPC dengan cluster ini. Masih timeout
+dari pod di cluster ini: PaddleOCR `10.213.128.67:8070` (setiap dokumen gagal di extraction, 422 `OCR_FAILED`),
+Elastic APM `10.213.128.39:8200`, Logstash `10.213.128.12:5040`; `orchestration.url` dan APM di
+`values-shared-dev.yaml` kosong sampai jalurnya ada. Migrasi: database ini tidak terjangkau dari laptop, jadi
+lewat relay pod di cluster (`migrate-db.sh` hanya untuk database yang terjangkau).
 
-- Secret `nilam-ocr-npwp-secrets` belum ada di namespace `nilam`; buat dulu (key yang sama dengan di cluster ddb).
-- Dari pod di namespace `nilam` hanya Nexus yang terjangkau. Cloud SQL `10.213.224.76:5432`, PaddleOCR
-  `10.213.128.67:8070`, Elastic APM `10.213.128.39:8200`, Logstash `10.213.128.12:5040` timeout, dan
-  Orkestrasi pusat adalah Service di cluster ddb (`ocr-orchestration.ocr-dev.svc.cluster.local`). Sampai
-  tim platform membuka jalurnya, pod menyala tetapi `/health` gagal (database tidak terjangkau);
-  `orchestration.url` dan APM di `values-shared-dev.yaml` sengaja kosong.
-- `db-job.sh` (migrasi) tetap ke cluster ddb, tempat Cloud SQL terjangkau.
-
-Instalasi pertama di `nilam` (release belum ada), setelah Secret dibuat:
+Instalasi pertama di namespace baru: buat namespace dan Secret `nilam-ocr-npwp-secrets` (`API_KEY`,
+`DATABASE_URL`, `ORCHESTRATION_CALLBACK_KEY`), lalu
 
 ```bash
-deploy/helm/deploy.sh --install --skip-build --tag <sha di Nexus> all   # atau tanpa --skip-build/--tag: build dari HEAD
+deploy/helm/deploy.sh --install all     # build dari HEAD; atau --skip-build --tag <sha di Nexus>
 ```
 
 ## Yang sudah diverifikasi di `gc-ddb-dev-gke-cluster-01`
@@ -437,7 +434,7 @@ menutup tunnel sendiri. Untuk kubectl manual, buka tunnel SOCKS lalu pakai kubec
 ```bash
 gcloud compute ssh gc-shared-dev-gce-bastion-01 --zone asia-southeast2-a --project shared-kubecluster-dev-01 \
   --tunnel-through-iap -- -N -D 127.0.0.1:18090 &
-KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01 kubectl -n nilam get pods
+KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01 kubectl -n nilam-ocr-npwp get pods
 ```
 
 ## Cek cepat

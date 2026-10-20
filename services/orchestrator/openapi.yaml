@@ -85,9 +85,8 @@ servers:
   description: 'GKE: the gateway Service (the central orchestrator calls this)'
   variables:
     namespace:
-      default: nilam
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, nilam-ocr-npwp
-        on ddb-dev)'
+      default: nilam-ocr-npwp
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam-ocr-npwp on both dev clusters)'
 - url: http://orchestrator:8034
   description: The Docker Compose network
 - url: http://127.0.0.1:8034
