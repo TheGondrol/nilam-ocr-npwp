@@ -35,3 +35,11 @@ tools/load-tester/out/*
 
 # Unggahan dari tracker (load test): bisa dokumen nasabah asli, tidak pernah ikut repo.
 tools/load-tester/assets/
+# Dokumen tiap request tracker (foto laporan PDF): sama, tidak pernah ikut repo.
+tools/tracker/uploads/
+
+# Tes koneksi GCS dari GKE shared-kubecluster-dev: hanya testing, belum masuk repo.
+deploy/gke-shared-test/
+
+# Hasil helm template untuk dibaca/di-review (deploy/helm/rendered/<env>.yaml); dibuat ulang kapan saja.
+deploy/helm/rendered/
