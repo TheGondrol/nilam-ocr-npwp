@@ -32,7 +32,9 @@ REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}
 IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"
 # NEXUS_USERNAME / NEXUS_PASSWORD untuk push dan untuk pull secret di cluster (file rahasia, tidak di-commit).
 NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
-PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
+# Generik, bukan khusus NPWP: dipakai bersama semua service dokumen NILAM OCR (NPWP, KTP, KK, ...) di namespace
+# yang sama, jadi namanya tanpa nama dokumen.
+PULL_SECRET="${PULL_SECRET:-nilam-ocr-nexus}"
 EXPECTED_CONTEXT="${EXPECTED_CONTEXT:-$DEFAULT_CONTEXT}"
 TIMEOUT="${TIMEOUT:-10m}"
 # Python with ocr_common's dependencies (the repo's .venv), to fetch the models from GCS before a build.

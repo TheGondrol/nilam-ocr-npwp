@@ -14,9 +14,10 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
-# Dibuat/diperbarui deploy.sh dari nexus.env sebelum tiap helm upgrade.
+# Dibuat/diperbarui deploy.sh dari nexus.env sebelum tiap helm upgrade. Generik: dipakai bersama semua service
+# dokumen NILAM OCR (NPWP, KTP, KK, ...) di namespace yang sama.
 imagePullSecrets:
-  - name: nilam-ocr-npwp-nexus
+  - name: nilam-ocr-nexus
 
 existingSecret: nilam-ocr-npwp-secrets
 secretKeys:

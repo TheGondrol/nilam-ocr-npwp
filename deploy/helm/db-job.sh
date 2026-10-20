@@ -12,7 +12,7 @@ SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-nilam-ocr-npwp}"
 REGISTRY="${REGISTRY:-new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp}"
 NEXUS_ENV="${NEXUS_ENV:-nexus.env}"
 # Pull secret yang dibuat deploy.sh di namespace ini.
-PULL_SECRET="${PULL_SECRET:-nilam-ocr-npwp-nexus}"
+PULL_SECRET="${PULL_SECRET:-nilam-ocr-nexus}"
 APP_NAME="nilam-ocr-npwp"
 # Nama repository image di Nexus: <registry>/$IMAGE_PREFIX-migrate.
 IMAGE_PREFIX="${IMAGE_PREFIX:-ms-bribrain-nilam-ocr-npwp}"

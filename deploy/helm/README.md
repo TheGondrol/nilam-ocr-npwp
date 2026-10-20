@@ -26,7 +26,7 @@ dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
 | `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `nilam` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
 | `ddb-dev` | `gc-ddb-dev-gke-cluster-01` (project `ddb-kubecluster-dev-01`) | `nilam-ocr-npwp` | `values-ddb-dev.yaml` | publik, context `~/.kube/config` |
 
-Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-npwp-nexus` (dibuat `deploy.sh`).
+Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus` (dibuat `deploy.sh`).
 Tanpa GCS di pod: model ikut di image (lihat "Model dari GCS"), karena identitas pod ke GCS di cluster
 shared belum jalan (SA node `gc-bribrain-dev-sac-gke-01` ditolak 403).
 
@@ -53,7 +53,7 @@ Dari pod di namespace `nilam-ocr-npwp`:
 
 | Tujuan | Alamat | Hasil |
 |---|---|---|
-| Image di Nexus | `new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/ms-bribrain-nilam-ocr-npwp-<service>` | ditarik dengan pull secret `nilam-ocr-npwp-nexus` (dibuat `deploy.sh` dari `nexus.env`) |
+| Image di Nexus | `new-nexus.gcp.bri.co.id/bribrain/dev/nilam/nilam-ocr-npwp/ms-bribrain-nilam-ocr-npwp-<service>` | ditarik dengan pull secret `nilam-ocr-nexus` (dibuat `deploy.sh` dari `nexus.env`) |
 | PostgreSQL (dalam cluster) | `postgres.ocr-dev.svc.cluster.local:5432` | terjangkau |
 | PostgreSQL (LoadBalancer yang sama) | `34.50.114.49:5432` | terjangkau |
 | Orkestrasi | `ocr-orchestration.ocr-dev.svc.cluster.local:80` | terjangkau |
