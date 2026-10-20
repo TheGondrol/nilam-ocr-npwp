@@ -419,6 +419,16 @@ jeda singkat tanpa layanan; lakukan di luar jam uji coba. Values lama tetap dipa
 butuh `gke-gcloud-auth-plugin`, yang dipasang dengan `gcloud components install gke-gcloud-auth-plugin`
 dari terminal Administrator.
 
+**Jaringan kantor.** Nexus, GCS, dan bastion terjangkau; GitHub hanya lewat HTTPS (SSH diblok, rute IPv6
+sering di-reset). `deploy.sh` sudah menanganinya: kalau `git fetch` lewat SSH gagal, ia mencoba HTTPS ke
+alamat IPv4 GitHub. Untuk push dari jaringan kantor:
+
+```bash
+IP=$(nslookup github.com | sed -n '/^Name:/,$p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
+git -c credential.helper= -c "credential.helper=!gh auth git-credential" -c "http.curloptResolve=github.com:443:$IP" \
+  push https://github.com/TheGondrol/nilam-ocr-npwp.git main:main
+```
+
 Cluster shared tidak bisa dijangkau langsung dari laptop; `deploy.sh` (DEPLOY_ENV=shared-dev) membuka dan
 menutup tunnel sendiri. Untuk kubectl manual, buka tunnel SOCKS lalu pakai kubeconfig-nya:
 

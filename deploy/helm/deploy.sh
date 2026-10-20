@@ -143,6 +143,29 @@ fi
 
 cd "$ROOT"
 
+# origin/main terbaru. Jaringan kantor memblokir SSH ke GitHub dan rute IPv6-nya (NAT64) sering di-reset, jadi
+# kalau fetch biasa gagal, dicoba lagi lewat HTTPS ke alamat IPv4 GitHub (kredensial dari `gh` kalau ada,
+# selain itu credential helper git biasa). Hasilnya tetap disimpan sebagai origin/main.
+fetch_origin_main() {
+  git fetch --quiet origin main 2>/dev/null && return 0
+  local url ip helper=()
+  url="$(git remote get-url origin)"
+  [[ "$url" == git@github.com:* ]] && url="https://github.com/${url#git@github.com:}"
+  [[ "$url" == https://github.com/* ]] || return 1
+  ip="$(nslookup github.com 2>/dev/null | sed -n '/^Name:/,$p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)"
+  command -v gh >/dev/null && helper=(-c credential.helper= -c "credential.helper=!gh auth git-credential")
+  echo "  fetch lewat SSH gagal; mencoba HTTPS${ip:+ via IPv4 $ip}" >&2
+  local attempt
+  for attempt in 1 2 3; do
+    if git ${helper[@]+"${helper[@]}"} ${ip:+-c "http.curloptResolve=github.com:443:$ip"} fetch --quiet "$url" main; then
+      git update-ref refs/remotes/origin/main FETCH_HEAD
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
 # Deploy hanya dari main: yang jalan di cluster selalu commit yang sudah ada di origin/main, bukan
 # branch fitur atau perubahan lokal. --build-only dan --dry-run tidak mengubah cluster, jadi boleh
 # dari branch mana pun. Hotfix pun di-commit dan di-push ke main dulu, baru di-deploy.
@@ -150,7 +173,7 @@ if [[ $BUILD_ONLY -eq 0 && $DRY_RUN -eq 0 ]]; then
   BRANCH="$(git rev-parse --abbrev-ref HEAD)"
   [[ "$BRANCH" == main ]] \
     || die "deploy hanya boleh dari branch main (sekarang: $BRANCH). Merge dulu ke main, lalu: git checkout main && git pull --ff-only"
-  git fetch --quiet origin main || die "git fetch origin main gagal"
+  fetch_origin_main || die "git fetch origin main gagal (SSH dan HTTPS); cek koneksi ke github.com"
   [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
     || die "main lokal ($(git rev-parse --short HEAD)) tidak sama dengan origin/main ($(git rev-parse --short origin/main)): pull commit yang belum ada di lokal, push commit lokal yang belum ada di origin."
   [[ -z "$(git status --porcelain -- libs services db deploy/helm)" ]] \
