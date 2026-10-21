@@ -23,9 +23,9 @@ info:
     \ and\n`name_confidence`: the probability, from the ML team's trust model, that each extracted field\
     \ is\ncorrect. There is **no document-level score and no approve / reject decision**; thresholds are\
     \ yours.\n\n## Addresses\n\nThe orchestrator is the only service you call, through the release's entry\
-    \ Service:\n`http://ms-bribrain-nilam-ocr-npwp-orchestrator.nilam.svc.cluster.local:8034` on the shared\
-    \ dev cluster\n(`http://nilam-ocr-npwp-orchestrator.nilam-ocr-npwp.svc.cluster.local:8034` on the\
-    \ ddb dev cluster). The guardrails\nand pipeline stage services are internal.\n\n\n## Conventions\
+    \ Service:\n`http://ms-bribrain-nilam-ocr-npwp-orchestrator.bribrain-ocr-nilam.svc.cluster.local:8034`\
+    \ on the shared dev cluster\n(`http://nilam-ocr-npwp-orchestrator.nilam-ocr-npwp.svc.cluster.local:8034`\
+    \ on the ddb dev cluster). The guardrails\nand pipeline stage services are internal.\n\n\n## Conventions\
     \ (the same for every nilam-ocr service)\n\n**Authentication.** Every endpoint except `/health`, `/ready`\
     \ and `/metrics` requires the header `X-API-Key`.\nA missing or wrong key answers `401`. The services\
     \ are reachable only from inside the cluster.\n\n**Envelope.** Every JSON response, success or error,\
@@ -337,8 +337,9 @@ paths:
         description: 'GKE: the entry Service (the central orchestrator calls this)'
         variables:
           namespace:
-            default: nilam
-            description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)'
+            default: bribrain-ocr-nilam
+            description: 'Namespace of the Helm release (deploy/helm/deploy.sh: bribrain-ocr-nilam on
+              shared-dev)'
       - url: http://orchestrator:8034
         description: The Docker Compose network
       - url: http://127.0.0.1:8034

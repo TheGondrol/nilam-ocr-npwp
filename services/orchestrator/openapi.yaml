@@ -85,8 +85,8 @@ servers:
   description: 'GKE: the entry Service (the central orchestrator calls this)'
   variables:
     namespace:
-      default: nilam
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)'
+      default: bribrain-ocr-nilam
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: bribrain-ocr-nilam on shared-dev)'
 - url: http://orchestrator:8034
   description: The Docker Compose network
 - url: http://127.0.0.1:8034

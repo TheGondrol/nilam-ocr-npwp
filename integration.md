@@ -35,12 +35,12 @@ setelah deploy berikutnya, yang kami kabari bersama waktu kalian pindah ke port 
 |---|---|---|
 | Cluster | `gc-bigpool-dev-gke-cluster-01` | `gc-ddb-dev-gke-cluster-01` |
 | Project | `shared-kubecluster-dev-01`, region `asia-southeast2` | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
-| Namespace | `nilam` | `nilam-ocr-npwp` |
+| Namespace | `bribrain-ocr-nilam` | `nilam-ocr-npwp` |
 | Service (ClusterIP) | `ms-bribrain-nilam-ocr-npwp-orchestrator`: pintu masuk, hanya port 8034 (orchestrator) | `nilam-ocr-npwp-orchestrator` |
 
 Satu-satunya alamat yang kalian pakai:
 
-    http://ms-bribrain-nilam-ocr-npwp-orchestrator.nilam.svc.cluster.local:8034         # cluster shared
+    http://ms-bribrain-nilam-ocr-npwp-orchestrator.bribrain-ocr-nilam.svc.cluster.local:8034         # cluster shared
     http://nilam-ocr-npwp-orchestrator.nilam-ocr-npwp.svc.cluster.local:8034            # cluster ddb
 
 Di belakangnya, tiap service internal punya Deployment + Service sendiri (`ms-bribrain-nilam-ocr-npwp-<service>` di
@@ -131,7 +131,7 @@ tahap-tahap pipeline (bagian 7).
 Kirim `request_id` plus dokumen sebagai `file` (multipart), **atau** sebagai `file_url`
 supaya service ini yang mengunduh. Salah satu saja, tidak boleh dua-duanya.
 
-    curl -X POST http://ms-bribrain-nilam-ocr-npwp-orchestrator.nilam.svc.cluster.local:8034/v1/extract-ocr \
+    curl -X POST http://ms-bribrain-nilam-ocr-npwp-orchestrator.bribrain-ocr-nilam.svc.cluster.local:8034/v1/extract-ocr \
       -H "X-API-Key: changeme" \
       -F "request_id=REQ_001" \
       -F "document_type=npwp" \
@@ -345,7 +345,7 @@ Kontrak yang sama dengan `POST`, tanpa menunggu: orchestrator membaca status tah
 dan scoring sekali, berurutan. Pakai untuk request yang dijawab 202, misalnya kalau callback-nya
 tidak datang.
 
-    curl http://ms-bribrain-nilam-ocr-npwp-orchestrator.nilam.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
+    curl http://ms-bribrain-nilam-ocr-npwp-orchestrator.bribrain-ocr-nilam.svc.cluster.local:8034/v1/extract-ocr/REQ_001 \
       -H "X-API-Key: changeme"
 
 | Keadaan | HTTP | isi | `errors` |

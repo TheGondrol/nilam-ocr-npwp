@@ -178,8 +178,8 @@ OBJECT_PREFIX = "ms-bribrain-nilam-ocr-npwp"
 ENTRY_SERVICE = f"{OBJECT_PREFIX}-orchestrator"
 _NAMESPACE = {
     "namespace": {
-        "default": "nilam",
-        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)",
+        "default": "bribrain-ocr-nilam",
+        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: bribrain-ocr-nilam on shared-dev)",
     }
 }
 

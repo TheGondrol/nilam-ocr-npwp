@@ -25,7 +25,7 @@ dan polanya (Deployment per service, NetworkPolicy, PDB, HPA) dibawa ke sini.
 
 | `DEPLOY_ENV` | Cluster | Namespace | Values | Akses API server |
 |---|---|---|---|---|
-| `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `nilam` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
+| `shared-dev` (default) | `gc-bigpool-dev-gke-cluster-01` (project `shared-kubecluster-dev-01`) | `bribrain-ocr-nilam` | `values-shared-dev.yaml` | privat: `deploy.sh` membuka tunnel SOCKS lewat bastion `gc-shared-dev-gce-bastion-01` (IAP SSH, butuh OS Login ke VM itu) dengan kubeconfig sendiri `~/.kube/config-shared-kubecluster-dev-01` |
 | `ddb-dev` | `gc-ddb-dev-gke-cluster-01` (project `ddb-kubecluster-dev-01`) | `nilam-ocr-npwp` | `values-ddb-dev.yaml` | publik, context `~/.kube/config` |
 
 Image di kedua cluster ditarik dari Nexus dengan pull secret `nilam-ocr-nexus`. `deploy.sh` hanya membuatnya
@@ -33,9 +33,9 @@ kalau belum ada di namespace (dari `nexus.env`); yang sudah ada dibiarkan. Passw
 `deploy.sh --update-pull-secret ...`.
 Model ikut di image (lihat "Model dari GCS"); pod tidak butuh identitas GCS untuk berjalan.
 
-**Cluster shared.** Namespace `nilam`, disiapkan tim platform lewat Rancher project, dengan ResourceQuota
-(`limits.cpu` 10, memori 10 Gi) dan LimitRange (limit CPU maks 4x request, memori maks 3x): rolling update yang
-menambah pod pengganti untuk semua service sekaligus bisa tertahan kuota sebentar. Database: Cloud SQL
+**Cluster shared.** Namespace `bribrain-ocr-nilam` (Rancher project tim, tanpa ResourceQuota/LimitRange; bersama
+service SPR). Tiap service 250m CPU / 512 Mi (request = limit), total 1,25 CPU / 2,5 Gi. Sampai 21 Okt 2026 di
+namespace `nilam`, yang kuota memorinya (10 Gi) sudah habis dipesan service KTP, PaddleOCR dan slipgaji. Database: Cloud SQL
 `gc-bribrain-dev-sql-ocrkpr-01` (`10.213.193.3`, database `nilam`), satu VPC dengan cluster ini. Masih timeout
 dari pod di cluster ini: PaddleOCR `10.213.128.67:8070` (setiap dokumen gagal di extraction, 422 `OCR_FAILED`),
 Elastic APM `10.213.128.39:8200`, Logstash `10.213.128.12:5040`; `orchestration.url` dan APM di
@@ -437,7 +437,7 @@ menutup tunnel sendiri. Untuk kubectl manual, buka tunnel SOCKS lalu pakai kubec
 ```bash
 gcloud compute ssh gc-shared-dev-gce-bastion-01 --zone asia-southeast2-a --project shared-kubecluster-dev-01 \
   --tunnel-through-iap -- -N -D 127.0.0.1:18090 &
-KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01 kubectl -n nilam get pods
+KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01 kubectl -n bribrain-ocr-nilam get pods
 ```
 
 ## Cek cepat

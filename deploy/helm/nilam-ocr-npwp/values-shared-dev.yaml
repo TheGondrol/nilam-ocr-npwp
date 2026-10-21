@@ -1,5 +1,6 @@
-# Dev di GKE shared: cluster gc-bigpool-dev-gke-cluster-01 (project shared-kubecluster-dev-01), namespace nilam
-# (Rancher project tim platform; 20 Okt 2026 sempat di nilam-ocr-npwp, dikembalikan 21 Okt).
+# Dev di GKE shared: cluster gc-bigpool-dev-gke-cluster-01 (project shared-kubecluster-dev-01), namespace
+# bribrain-ocr-nilam (sejak 21 Okt 2026; bersama service SPR, tanpa ResourceQuota/LimitRange). Sebelumnya di nilam,
+# yang kuota memorinya sudah habis dipesan service KTP, PaddleOCR dan slipgaji.
 # deploy.sh memakainya dengan DEPLOY_ENV=shared-dev (default). API server cluster ini privat: deploy.sh membuka
 # tunnel lewat bastion gc-shared-dev-gce-bastion-01.
 #
@@ -47,21 +48,84 @@ service:
   public:
     enabled: false
 
-# Namespace nilam punya LimitRange (limit CPU maks 4x request, memori maks 3x request) dan ResourceQuota
-# (limits.cpu 10 / 10 Gi), dipakai bersama service KTP, slipgaji dan PaddleOCR. HPA dimatikan dan tiap service 1
-# replika, seperti service tim lain di namespace ini (21 Okt 2026); semua Service ClusterIP, tanpa LoadBalancer.
+# HPA dimatikan dan tiap service 1 replika, seperti service tim lain di cluster ini; semua Service ClusterIP, tanpa
+# LoadBalancer.
+#
+# Jatah per service dari tim: 250m CPU / 512Mi, request = limit (QoS Guaranteed: pod tidak pernah diusir lebih
+# dulu saat node penuh). Lima service = 1,25 CPU / 2,5 Gi.
+# maxSurge 0: rollout tidak memesan pod tambahan di atas jatah; service mati sebentar selama pod baru menyala.
+# Pemakaian nyata di ddb (21 Okt 2026, idle): orchestrator ~150Mi, extraction ~95Mi, structuring ~120Mi,
+# scoring ~145Mi, guardrails ~400Mi. Guardrails paling mepet: kena OOMKilled -> naikkan memorinya saja.
 services:
   orchestrator:
     replicaCount: 1
     autoscaling:
       enabled: false
-    # Memori 256Mi -> 1Gi (4x) ditolak LimitRange; 384Mi -> 1Gi = 2,7x.
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
     resources:
       requests:
-        memory: 384Mi
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+    env:
+      # Tiap request menahan dokumennya (maks. 10 MB) selama menunggu pipeline: 20 x 10 MB masih di bawah 512Mi.
+      MAX_IN_FLIGHT_REQUESTS: "20"
   guardrails:
     autoscaling:
       enabled: false
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    # Memuat torch + model dengan 250m CPU lebih lambat: beri 180 dtk (90 x 2 dtk) sebelum pod dianggap gagal.
+    startupFailureThreshold: 90
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+    env:
+      # Satu dokumen dinilai sekali waktu: dua render PDF + inference bersamaan tidak muat di 512Mi.
+      GUARDRAILS_TORCH_THREADS: "1"
+      GUARDRAILS_MAX_CONCURRENCY: "1"
+      GUARDRAILS_MAX_QUEUE: "5"
   extraction:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
     env:
       EXTRACTION_OCR_URL: http://10.213.128.67:8070
+  structuring:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+  scoring:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi

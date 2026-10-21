@@ -82,8 +82,8 @@ servers:
   description: GKE, from inside the release's namespace (the other services of this pipeline)
   variables:
     namespace:
-      default: nilam
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)'
+      default: bribrain-ocr-nilam
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: bribrain-ocr-nilam on shared-dev)'
 - url: http://structuring:8032
   description: The Docker Compose network
 - url: http://127.0.0.1:8032
