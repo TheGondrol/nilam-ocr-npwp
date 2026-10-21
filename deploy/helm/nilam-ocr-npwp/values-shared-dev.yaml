@@ -44,9 +44,11 @@ service:
     enabled: false
 
 # Namespace nilam punya LimitRange (limit CPU maks 4x request, memori maks 3x request) dan ResourceQuota
-# (limits.cpu 10 / 10 Gi). HPA dimatikan supaya jumlah pod tetap dan muat di kuota.
+# (limits.cpu 10 / 10 Gi), dipakai bersama service KTP, slipgaji dan PaddleOCR. HPA dimatikan dan tiap service 1
+# replika, seperti service tim lain di namespace ini (21 Okt 2026); semua Service ClusterIP, tanpa LoadBalancer.
 services:
   orchestrator:
+    replicaCount: 1
     autoscaling:
       enabled: false
     # Memori 256Mi -> 1Gi (4x) ditolak LimitRange; 384Mi -> 1Gi = 2,7x.
