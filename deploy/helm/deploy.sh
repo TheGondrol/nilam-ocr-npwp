@@ -283,6 +283,16 @@ open_tunnel() {
   die "API server $GKE_CLUSTER tidak menjawab lewat tunnel"
 }
 
+# Build + push memakan belasan menit dan sesi IAP SSH bisa putus di tengahnya: sebelum menyentuh cluster lagi,
+# pastikan tunnel masih menjawab, kalau tidak buka ulang.
+ensure_tunnel() {
+  [[ -n "$BASTION" ]] || return 0
+  kubectl get namespace "$NAMESPACE" --request-timeout=20s >/dev/null 2>&1 && return 0
+  log "Tunnel ke $GKE_CLUSTER putus, dibuka lagi"
+  cleanup
+  open_tunnel
+}
+
 if [[ $BUILD_ONLY -eq 0 ]]; then
   [[ -n "$BASTION" ]] && open_tunnel
   CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
@@ -395,6 +405,8 @@ if [[ "$(helm version --template '{{.Version}}')" == v3.* ]]; then
 else
   HELM_ARGS+=(--wait=watcher --rollback-on-failure)
 fi
+
+ensure_tunnel
 
 # Pull secret untuk Nexus (chart: imagePullSecrets). Dipakai bersama service dokumen lain di namespace ini, jadi
 # yang sudah ada dibiarkan; hanya dibuat kalau belum ada. Password Nexus berganti: --update-pull-secret.
