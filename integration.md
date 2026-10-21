@@ -35,7 +35,7 @@ setelah deploy berikutnya, yang kami kabari bersama waktu kalian pindah ke port 
 |---|---|---|
 | Cluster | `gc-bigpool-dev-gke-cluster-01` | `gc-ddb-dev-gke-cluster-01` |
 | Project | `shared-kubecluster-dev-01`, region `asia-southeast2` | `ddb-kubecluster-dev-01`, region `asia-southeast2` |
-| Namespace | `nilam-ocr-npwp` | `nilam-ocr-npwp` |
+| Namespace | `nilam` | `nilam-ocr-npwp` |
 | Service (ClusterIP) | `nilam-ocr-npwp-orchestrator`: pintu masuk, hanya port 8034 (orchestrator) | sama |
 
 Satu-satunya alamat yang kalian pakai (dulu `nilam-ocr-npwp`, tanpa akhiran):

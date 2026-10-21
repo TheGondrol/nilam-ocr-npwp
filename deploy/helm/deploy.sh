@@ -10,7 +10,7 @@ RELEASE="${RELEASE:-nilam-ocr-npwp}"
 # (IAP SSH) dengan kubeconfig sendiri; ~/.kube/config (context ddb) tidak disentuh.
 case "$DEPLOY_ENV" in
   shared-dev)
-    NAMESPACE="${NAMESPACE:-nilam-ocr-npwp}"
+    NAMESPACE="${NAMESPACE:-nilam}"
     GKE_PROJECT="${GKE_PROJECT:-shared-kubecluster-dev-01}"
     GKE_CLUSTER="${GKE_CLUSTER:-gc-bigpool-dev-gke-cluster-01}"
     GKE_REGION="${GKE_REGION:-asia-southeast2}"
@@ -87,7 +87,7 @@ Kredensial Nexus dari \$NEXUS_ENV (default nexus.env di root repo): dipakai untu
 \$PULL_SECRET yang dibuat/diperbarui di namespace sebelum helm upgrade.
 
 Environment: DEPLOY_ENV (default shared-dev -> values-shared-dev.yaml, cluster gc-bigpool-dev-gke-cluster-01
-namespace nilam-ocr-npwp lewat tunnel bastion; ddb-dev -> values-ddb-dev.yaml, cluster gc-ddb-dev-gke-cluster-01
+namespace nilam lewat tunnel bastion; ddb-dev -> values-ddb-dev.yaml, cluster gc-ddb-dev-gke-cluster-01
 namespace nilam-ocr-npwp), RELEASE, NAMESPACE, PROXY_PORT (tunnel shared-dev, default 18090), PY (Python .venv),
 REGISTRY, IMAGE_PREFIX, NEXUS_ENV, PULL_SECRET, EXPECTED_CONTEXT, TIMEOUT (default 10m), HISTORY_MAX (revisi release yang disimpan
 untuk rollback, default 5).
