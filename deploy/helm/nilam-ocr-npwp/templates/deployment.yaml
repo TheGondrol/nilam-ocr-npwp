@@ -10,7 +10,8 @@ metadata:
     {{- include "nilam-ocr-npwp.componentLabels" $component | nindent 4 }}
 spec:
   {{- if not (dig "autoscaling" "enabled" false $svc) }}
-  replicas: {{ $svc.replicaCount | default 1 }}
+  {{- /* hasKey, not `default`: replicaCount 0 (installed, no pods) must stay 0. */}}
+  replicas: {{ ternary $svc.replicaCount 1 (hasKey $svc "replicaCount") }}
   {{- end }}
   revisionHistoryLimit: {{ $.Values.revisionHistoryLimit }}
   selector:

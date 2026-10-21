@@ -79,6 +79,8 @@ Opsi:
   --update-pull-secret
                   tulis ulang pull secret Nexus \$PULL_SECRET dari \$NEXUS_ENV (mis. password Nexus berganti);
                   tanpa opsi ini pull secret yang sudah ada dibiarkan
+  --replicas N    jumlah pod tiap service yang disebut, hanya untuk deploy ini (mis. 0: objek terpasang tanpa
+                  pod, tidak memakan kuota namespace). Deploy berikutnya tanpa opsi ini kembali ke values
   --dry-run       tampilkan diff manifest terhadap release yang berjalan, tanpa apply
   -y, --yes       tanpa konfirmasi
   -h, --help      tampilkan bantuan ini
@@ -108,6 +110,7 @@ SKIP_BUILD=0
 BUILD_ONLY=0
 INSTALL=0
 UPDATE_PULL_SECRET=0
+REPLICAS=""
 RELEASE_EXISTS=1
 DRY_RUN=0
 ASSUME_YES=0
@@ -121,6 +124,7 @@ while [[ $# -gt 0 ]]; do
     --build-only) BUILD_ONLY=1; shift ;;
     --install) INSTALL=1; shift ;;
     --update-pull-secret) UPDATE_PULL_SECRET=1; shift ;;
+    --replicas) REPLICAS="${2:?--replicas butuh nilai}"; [[ "$REPLICAS" =~ ^[0-9]+$ ]] || die "--replicas harus angka: $REPLICAS"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -370,6 +374,10 @@ if [[ $RELEASE_EXISTS -eq 0 ]]; then
 fi
 for svc in "${SERVICES[@]}"; do
   HELM_ARGS+=(--set "services.$svc.image.tag=$TAG")
+  # replicaCount hanya dipakai Deployment tanpa HPA; HPA (values.yaml produksi) tetap memegang jumlah pod.
+  if [[ -n "$REPLICAS" ]]; then
+    HELM_ARGS+=(--set "services.$svc.replicaCount=$REPLICAS")
+  fi
 done
 
 if [[ $DRY_RUN -eq 1 ]]; then
