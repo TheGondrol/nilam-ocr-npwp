@@ -55,7 +55,7 @@ Pemakaian: deploy/helm/deploy.sh [opsi] <service...|all>
 
 Build image service yang disebut, push ke Nexus ($REGISTRY), lalu helm upgrade
 release $RELEASE dengan tag baru hanya untuk service tersebut. Tiap service adalah
-Deployment sendiri ($RELEASE-<service>), jadi hanya pod service itu yang diganti.
+Deployment sendiri (<release atau fullnameOverride>-<service>), jadi hanya pod service itu yang diganti.
 
 Model guardrails dan scoring diambil dulu dari GCS (scripts/fetch_weights.py, kredensial dari wif.gcs.env
 atau Application Default Credentials) lalu ikut di dalam image; SHA-256-nya jadi label image
@@ -412,8 +412,11 @@ log "helm upgrade"
 helm "${HELM_ARGS[@]}"
 
 log "Status"
+# Nama objek = <fullnameOverride atau release>-<service> (shared-dev: ms-bribrain-nilam-ocr-npwp-<service>).
+OBJECT_PREFIX="$(sed -n 's/^fullnameOverride: *//p' "$VALUES" | tail -n1 | tr -d '"'"'"'\r')"
+OBJECT_PREFIX="${OBJECT_PREFIX:-$RELEASE}"
 for svc in "${SERVICES[@]}"; do
-  kubectl -n "$NAMESPACE" rollout status "deploy/$RELEASE-$svc" --timeout "$TIMEOUT"
+  kubectl -n "$NAMESPACE" rollout status "deploy/$OBJECT_PREFIX-$svc" --timeout "$TIMEOUT"
 done
 kubectl -n "$NAMESPACE" get pods -l "app.kubernetes.io/instance=$RELEASE"
 kubectl -n "$NAMESPACE" get deploy -l "app.kubernetes.io/instance=$RELEASE" \

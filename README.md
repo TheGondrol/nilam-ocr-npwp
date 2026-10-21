@@ -667,7 +667,7 @@ Pemeriksaan yang dijalankan sebelum commit dan sebelum deploy, semuanya dari lap
 | 2. Callbacks | webhook `stageCallback`: request yang **dikirim** tiap tahap ke `{ORCHESTRATION_URL}{ORCHESTRATION_CALLBACK_PATH}`; body `StageCallback` (OCR, STRUCTURING) atau `ScoringStageCallback` (hasil akhir), aturan retry, idempotensi, urutan |
 | 3. Status | `GET /v1/extract-ocr/{request_id}` di orchestrator: kontrak yang sama, tanpa menunggu |
 
-Tiap operasi membawa `servers` orchestrator: Service `nilam-ocr-npwp-orchestrator` (variabel `namespace`, default `nilam`), Compose, dan localhost; test menjaga bahwa server pertamanya entry Service di port 8034. Guardrails, `GET /v1/<tahap>/jobs/{request_id}`, panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`), dan helper sinkron sengaja tidak ikut: semuanya internal, ada di spec per service dan di `/docs` masing-masing.
+Tiap operasi membawa `servers` orchestrator: Service `ms-bribrain-nilam-ocr-npwp-orchestrator` (variabel `namespace`, default `nilam`; di ddb `nilam-ocr-npwp-orchestrator`), Compose, dan localhost; test menjaga bahwa server pertamanya entry Service di port 8034. Guardrails, `GET /v1/<tahap>/jobs/{request_id}`, panggilan internal antar tahap (`structuring/jobs`, `scoring/jobs`), dan helper sinkron sengaja tidak ikut: semuanya internal, ada di spec per service dan di `/docs` masing-masing.
 
 Aturan penulisan yang dijaga test: setiap operasi punya `operationId` (dipakai generator klien: `extractOcr`, `getExtractOcr`), setiap respons 4xx/5xx punya contohnya sendiri, dan teks `Field(description=...)` berbahasa Inggris karena dibaca tim lain. Contoh di spec memakai data fiktif.
 

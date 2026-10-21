@@ -14,6 +14,10 @@
 
 environment: production
 
+# Nama objek seperti service tim lain di namespace nilam (ms-bribrain-nilam-ocr-ktp-*): Deployment, Service,
+# ConfigMap, dll. bernama ms-bribrain-nilam-ocr-npwp-<service>. Release Helm dan label tetap nilam-ocr-npwp.
+fullnameOverride: ms-bribrain-nilam-ocr-npwp
+
 existingSecret: nilam-ocr-npwp-secrets
 
 orchestration:

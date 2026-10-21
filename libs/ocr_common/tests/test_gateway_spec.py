@@ -46,4 +46,4 @@ def test_the_gateway_calls_only_the_orchestrator_through_the_entry_service():
     for item in paths.values():
         for operation in item.values():
             first = operation["servers"][0]
-            assert first["url"] == "http://nilam-ocr-npwp-orchestrator.{namespace}.svc.cluster.local:8034"
+            assert first["url"] == "http://ms-bribrain-nilam-ocr-npwp-orchestrator.{namespace}.svc.cluster.local:8034"

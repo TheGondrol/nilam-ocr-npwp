@@ -2,11 +2,13 @@
 
 Satu Deployment, Service, ConfigMap, PodDisruptionBudget, dan NetworkPolicy per service:
 `orchestrator` (8034), `guardrails` (8031), `extraction` (8030), `structuring` (8032), `scoring`
-(8033). Nama objeknya `<release>-<service>`, jadi di cluster dev: `nilam-ocr-npwp-orchestrator`, dst.
+(8033). Nama objeknya `<release>-<service>` (ddb: `nilam-ocr-npwp-orchestrator`, dst.), atau
+`<fullnameOverride>-<service>` (cluster shared: `ms-bribrain-nilam-ocr-npwp-orchestrator`, dst., seperti service tim lain
+di namespace `nilam`).
 Tiap service bisa di-scale dan di-restart sendiri; guardrails (torch, CPU-bound) punya HPA opsional, dan
 kalau ia kehabisan memori, tahap lain tidak ikut jatuh.
 
-Service `nilam-ocr-npwp-orchestrator` adalah pintu masuk yang dipublikasikan ke Orkestrasi pusat
+Service `<prefix>-orchestrator` adalah pintu masuk yang dipublikasikan ke Orkestrasi pusat
 ([integration.md](../../integration.md)): ia membuka port semua service ber-`entrypoint`, yaitu hanya
 orchestrator (8034). Ia satu-satunya Service orchestrator: tidak ada service lain yang memanggil orchestrator,
 jadi tidak ada Service internal terpisah untuknya (dulu dua Service: `nilam-ocr-npwp` untuk pusat dan

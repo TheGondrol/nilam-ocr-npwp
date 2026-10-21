@@ -169,15 +169,17 @@ def create_app(
     return app
 
 
-# The Helm chart's names (deploy/helm): release `nilam-ocr-npwp`; every service is behind `<release>-<service>`.
-# The entry point's (`<release>-orchestrator`) is the one the central orchestrator calls.
+# The Helm chart's names (deploy/helm) on the shared cluster: every service is behind `<prefix>-<service>`
+# (values-shared-dev.yaml fullnameOverride, like the other teams' ms-bribrain-nilam-ocr-* services); the entry
+# point's (`<prefix>-orchestrator`) is the one the central orchestrator calls. On ddb the prefix is the release,
+# nilam-ocr-npwp, in namespace nilam-ocr-npwp.
 RELEASE = "nilam-ocr-npwp"
-ENTRY_SERVICE = f"{RELEASE}-orchestrator"
+OBJECT_PREFIX = "ms-bribrain-nilam-ocr-npwp"
+ENTRY_SERVICE = f"{OBJECT_PREFIX}-orchestrator"
 _NAMESPACE = {
     "namespace": {
         "default": "nilam",
-        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, "
-        "nilam-ocr-npwp on ddb-dev)",
+        "description": "Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)",
     }
 }
 
@@ -193,7 +195,7 @@ def _cluster_servers(service_name: str, port: int, *, entrypoint: bool) -> list[
         ]
     return [
         {
-            "url": f"http://{RELEASE}-{service_name}.{{namespace}}.svc.cluster.local:{port}",
+            "url": f"http://{OBJECT_PREFIX}-{service_name}.{{namespace}}.svc.cluster.local:{port}",
             "description": "GKE, from inside the release's namespace (the other services of this pipeline)",
             "variables": _NAMESPACE,
         }

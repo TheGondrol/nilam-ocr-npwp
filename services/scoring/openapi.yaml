@@ -79,13 +79,12 @@ info:
 servers:
 - url: /
   description: This host (where this page is served)
-- url: http://nilam-ocr-npwp-scoring.{namespace}.svc.cluster.local:8033
+- url: http://ms-bribrain-nilam-ocr-npwp-scoring.{namespace}.svc.cluster.local:8033
   description: GKE, from inside the release's namespace (the other services of this pipeline)
   variables:
     namespace:
       default: nilam
-      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev, nilam-ocr-npwp
-        on ddb-dev)'
+      description: 'Namespace of the Helm release (deploy/helm/deploy.sh: nilam on shared-dev)'
 - url: http://scoring:8033
   description: The Docker Compose network
 - url: http://127.0.0.1:8033
