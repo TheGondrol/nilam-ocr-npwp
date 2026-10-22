@@ -6,8 +6,13 @@
 #
 # Database: Cloud SQL gc-bribrain-dev-sql-ocrkpr-01 (10.213.193.3, database nilam), DATABASE_URL di Secret
 # nilam-ocr-npwp-secrets. Status jaringan dari pod di cluster ini (20 Okt 2026): DB dan Nexus terjangkau;
-# PaddleOCR (10.213.128.67:8070), Elastic APM (10.213.128.39:8200) dan Logstash belum, jadi setiap dokumen gagal
-# di extraction (422 OCR_FAILED) sampai tim platform membuka jalurnya.
+# Elastic APM (10.213.128.39:8200) dan Logstash belum.
+#
+# OCR: sejak 22 Okt 2026 service PaddleOCR PP-OCRv6 milik tim PaddleOCR di namespace yang sama
+# (ms-bribrain-nilam-ocr-paddle-ppocr-v6-service:80, POST /v1/ocr, GPU), kontrak response sama dengan /ocr di VM
+# lama (10.213.128.67:8070, tidak terjangkau dari cluster ini). Wajib X-API-Key: diambil langsung dari Secret
+# mereka (PADDLE_API_KEY), jadi tidak ada salinan key di Secret kita dan rotasi dari mereka langsung terbawa
+# (setelah pod extraction di-restart).
 #
 # Model guardrails dan scoring ikut di dalam image (deploy.sh mengambilnya dari GCS saat build), jadi pod tidak
 # butuh identitas GCP; gcpWif dan *_MODEL_GCS_URI tidak dipakai. (SA node gc-bribrain-dev-sac-gke-01 sudah bisa
@@ -105,8 +110,13 @@ services:
       limits:
         cpu: 250m
         memory: 512Mi
+    secretEnv:
+      - name: EXTRACTION_OCR_API_KEY
+        secret: ms-bribrain-nilam-ocr-paddle-ppocr-v6-secret
+        key: PADDLE_API_KEY
     env:
-      EXTRACTION_OCR_URL: http://10.213.128.67:8070
+      EXTRACTION_OCR_URL: http://ms-bribrain-nilam-ocr-paddle-ppocr-v6-service
+      EXTRACTION_OCR_PATH: /v1/ocr
   structuring:
     rollingUpdate:
       maxSurge: 0

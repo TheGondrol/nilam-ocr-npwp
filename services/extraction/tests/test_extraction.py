@@ -7,6 +7,7 @@ from ocr_common.testing import image_upload
 from ocr_common.types import OcrEngineResult
 
 from app.config import Settings
+from app.dependencies import OCR_BACKENDS
 from app.ml.mock import MockOcrEngine
 from app.ml.paddle import PaddleOcrEngine
 from app.services.extraction_service import ExtractionService
@@ -63,11 +64,11 @@ class StubEngine:
         }
 
 
-def _paddle_engine(handler) -> PaddleOcrEngine:
+def _paddle_engine(handler, **kwargs) -> PaddleOcrEngine:
     client = RemoteModelClient(
         "http://ocr.test", 5.0, name="extraction OCR model", transport=httpx.MockTransport(handler)
     )
-    return PaddleOcrEngine(client)
+    return PaddleOcrEngine(client, **kwargs)
 
 
 async def test_service_wraps_engine_output_with_metadata():
@@ -132,6 +133,48 @@ async def test_paddle_engine_defaults_filename_and_content_type():
     await _paddle_engine(handler).extract("", b"x", None)
     assert b'filename="upload"' in seen["body"]
     assert b"Content-Type: image/jpeg" in seen["body"]
+
+
+async def test_paddle_engine_posts_to_the_configured_path():
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=PADDLE_RESPONSE)
+
+    await _paddle_engine(handler, path="/v1/ocr").extract("npwp.jpg", b"x", "image/jpeg")
+    assert seen["url"] == "http://ocr.test/v1/ocr"
+
+
+async def test_paddle_backend_is_built_from_settings():
+    engine = OCR_BACKENDS["paddle"](
+        Settings(
+            api_key="x",
+            _env_file=None,
+            extraction_backend="paddle",
+            extraction_ocr_url="http://ms-bribrain-nilam-ocr-paddle-ppocr-v6-service",
+            extraction_ocr_api_key="paddle-key",
+            extraction_ocr_path="/v1/ocr",
+        )
+    )
+    try:
+        assert isinstance(engine, PaddleOcrEngine)
+        assert engine._path == "/v1/ocr"
+        assert engine._client._client.headers["X-API-Key"] == "paddle-key"
+    finally:
+        await engine.aclose()
+
+
+async def test_paddle_backend_defaults_to_the_old_vm_contract():
+    engine = OCR_BACKENDS["paddle"](
+        Settings(api_key="x", _env_file=None, extraction_backend="paddle", extraction_ocr_url="http://10.0.0.1:8070")
+    )
+    try:
+        assert isinstance(engine, PaddleOcrEngine)
+        assert engine._path == "/ocr"
+        assert "X-API-Key" not in engine._client._client.headers
+    finally:
+        await engine.aclose()
 
 
 async def test_mock_engine_shape_matches_contract():

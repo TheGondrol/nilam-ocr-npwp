@@ -37,8 +37,9 @@ Model ikut di image (lihat "Model dari GCS"); pod tidak butuh identitas GCS untu
 service SPR). Tiap service 250m CPU / 512 Mi (request = limit), total 1,25 CPU / 2,5 Gi. Sampai 21 Okt 2026 di
 namespace `nilam`, yang kuota memorinya (10 Gi) sudah habis dipesan service KTP, PaddleOCR dan slipgaji. Database: Cloud SQL
 `gc-bribrain-dev-sql-ocrkpr-01` (`10.213.193.3`, database `nilam`), satu VPC dengan cluster ini. Masih timeout
-dari pod di cluster ini: PaddleOCR `10.213.128.67:8070` (setiap dokumen gagal di extraction, 422 `OCR_FAILED`),
-Elastic APM `10.213.128.39:8200`, Logstash `10.213.128.12:5040`; `orchestration.url` dan APM di
+dari pod di cluster ini: PaddleOCR lama `10.213.128.67:8070` (sejak 22 Okt 2026 extraction memakai service PP-OCRv6 tim
+PaddleOCR di namespace yang sama, `ms-bribrain-nilam-ocr-paddle-ppocr-v6-service` `/v1/ocr`, key dari Secret mereka
+lewat `services.extraction.secretEnv`), Elastic APM `10.213.128.39:8200`, Logstash `10.213.128.12:5040`; `orchestration.url` dan APM di
 `values-shared-dev.yaml` kosong sampai jalurnya ada. Migrasi: database ini tidak terjangkau dari laptop, jadi
 lewat relay pod di cluster (`migrate-db.sh` hanya untuk database yang terjangkau).
 

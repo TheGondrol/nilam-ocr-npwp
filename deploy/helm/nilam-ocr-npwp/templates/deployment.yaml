@@ -110,6 +110,14 @@ spec:
                   key: {{ $.Values.secretKeys.apmApiKey }}
                   optional: true
             {{- end }}
+            {{- range $svc.secretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secret | default $.Values.existingSecret }}
+                  key: {{ .key | default .name }}
+                  optional: {{ .optional | default false }}
+            {{- end }}
             - name: HOME
               value: /tmp
           # Liveness and startup check the port only: /health reports on the database, and a database blip

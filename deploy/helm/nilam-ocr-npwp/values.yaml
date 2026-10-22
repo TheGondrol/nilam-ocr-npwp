@@ -199,9 +199,14 @@ services:
     upstreams: [structuring]
     replicaCount: 1
     startupFailureThreshold: 15
+    # Env dari Secret, per service: [{name, secret (default existingSecret), key (default name), optional}].
+    # Contoh: X-API-Key PaddleOCR dari Secret tim PaddleOCR (values-shared-dev.yaml).
+    secretEnv: []
     env:
       EXTRACTION_BACKEND: paddle
       EXTRACTION_OCR_URL: ""
+      # /ocr = API lama di VM 10.213.128.67:8070; /v1/ocr = service PP-OCRv6 di cluster shared.
+      EXTRACTION_OCR_PATH: /ocr
       EXTRACTION_OCR_TIMEOUT_SECONDS: "60"
       PIPELINE_DRAIN_TIMEOUT_SECONDS: "30"
       # Proteksi beban (stress test 15 Okt 2026: VM model OCR kebanjiran ratusan panggilan sekaligus).

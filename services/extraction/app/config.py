@@ -11,7 +11,10 @@ class Settings(PipelineSettings):
 
     extraction_backend: str = "mock"
     extraction_ocr_url: str | None = None
+    # Sent as X-API-Key by both `remote` and `paddle`.
     extraction_ocr_api_key: str | None = None
+    # `paddle` only: /ocr on the old VM (10.213.128.67:8070), /v1/ocr on the PP-OCRv6 service in the shared cluster.
+    extraction_ocr_path: str = "/ocr"
     extraction_ocr_timeout_seconds: float = 30.0
     # `remote` only: extra form fields sent with every /v1/predict/json call (JSON object). The ML team's
     # OCR model will serve several document types in production and take its parameters per call.

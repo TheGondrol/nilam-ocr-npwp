@@ -51,18 +51,25 @@ def _ocr_client(settings: Settings, url: str, headers: dict[str, str] | None = N
     )
 
 
+def _api_key_header(settings: Settings) -> dict[str, str] | None:
+    return {"X-API-Key": settings.extraction_ocr_api_key} if settings.extraction_ocr_api_key else None
+
+
 def _build_paddle(settings: Settings) -> PaddleOcrEngine:
     if not settings.extraction_ocr_url:
         raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=paddle")
-    return PaddleOcrEngine(_ocr_client(settings, settings.extraction_ocr_url))
+    return PaddleOcrEngine(
+        _ocr_client(settings, settings.extraction_ocr_url, _api_key_header(settings)),
+        path=settings.extraction_ocr_path,
+    )
 
 
 def _build_remote(settings: Settings) -> RemoteOcrEngine:
     if not settings.extraction_ocr_url:
         raise RuntimeError("EXTRACTION_OCR_URL is required when EXTRACTION_BACKEND=remote")
-    headers = {"X-API-Key": settings.extraction_ocr_api_key} if settings.extraction_ocr_api_key else None
     return RemoteOcrEngine(
-        _ocr_client(settings, settings.extraction_ocr_url, headers), params=settings.extraction_ocr_params
+        _ocr_client(settings, settings.extraction_ocr_url, _api_key_header(settings)),
+        params=settings.extraction_ocr_params,
     )
 
 

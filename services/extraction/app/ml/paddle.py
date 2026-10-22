@@ -1,4 +1,7 @@
-"""The `paddle` backend: the PaddleOCR model server (EXTRACTION_OCR_URL) and its /ocr contract."""
+"""The `paddle` backend: the PaddleOCR model server (EXTRACTION_OCR_URL) and its /ocr contract.
+
+The same contract is served at /ocr by the old VM and at /v1/ocr by the PP-OCRv6 service in the shared cluster
+(EXTRACTION_OCR_PATH)."""
 
 from ocr_common.clients.remote import RemoteModelClient
 from ocr_common.errors import InternalError
@@ -10,12 +13,13 @@ from app.ml.utils import bbox, confidence, model_name
 class PaddleOcrEngine:
     name = "paddle"
 
-    def __init__(self, client: RemoteModelClient):
+    def __init__(self, client: RemoteModelClient, path: str = "/ocr"):
         self._client = client
+        self._path = path
 
     async def extract(self, filename: str, content: bytes, content_type: str | None = None) -> OcrEngineResult:
         body = await self._client.post_multipart(
-            "/ocr",
+            self._path,
             filename=filename or "upload",
             content=content,
             content_type=content_type or "image/jpeg",
