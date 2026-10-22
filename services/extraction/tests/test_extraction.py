@@ -143,7 +143,7 @@ async def test_paddle_engine_posts_to_the_configured_path():
         return httpx.Response(200, json=PADDLE_RESPONSE)
 
     await _paddle_engine(handler, path="/v1/ocr").extract("npwp.jpg", b"x", "image/jpeg")
-    assert seen["url"] == "http://ocr.test/v1/ocr"
+    assert seen["url"] == ("http://ocr.test/v1/ocr?doc_orientation=true&doc_unwarping=true&textline_orientation=false")
 
 
 async def test_paddle_backend_is_built_from_settings():

@@ -9,6 +9,12 @@ from ocr_common.types import OcrBlock, OcrEngineResult
 
 from app.ml.utils import bbox, confidence, model_name
 
+V1_OCR_PATH = "/v1/ocr"
+# Fixed preprocessing for the PP-OCRv6 service's /v1/ocr, every call (agreed 22 Oct 2026). These names replace
+# use_doc_orientation_classify / use_doc_unwarping / use_textline_orientation, which it answers with 400.
+# The old VM's /ocr gets no query.
+V1_OCR_PARAMS = {"doc_orientation": "true", "doc_unwarping": "true", "textline_orientation": "false"}
+
 
 class PaddleOcrEngine:
     name = "paddle"
@@ -23,6 +29,7 @@ class PaddleOcrEngine:
             filename=filename or "upload",
             content=content,
             content_type=content_type or "image/jpeg",
+            params=V1_OCR_PARAMS if self._path == V1_OCR_PATH else None,
         )
         documents = body if isinstance(body, list) else [body]
 

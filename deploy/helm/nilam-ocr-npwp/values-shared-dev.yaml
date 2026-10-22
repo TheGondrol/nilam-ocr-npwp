@@ -12,7 +12,8 @@
 # (ms-bribrain-nilam-ocr-paddle-ppocr-v6-service:80, POST /v1/ocr, GPU), kontrak response sama dengan /ocr di VM
 # lama (10.213.128.67:8070, tidak terjangkau dari cluster ini). Wajib X-API-Key: diambil langsung dari Secret
 # mereka (PADDLE_API_KEY), jadi tidak ada salinan key di Secret kita dan rotasi dari mereka langsung terbawa
-# (setelah pod extraction di-restart).
+# (setelah pod extraction di-restart). Query doc_orientation=true&doc_unwarping=true&textline_orientation=false
+# di-hardcode di kode (app/ml/paddle.py), bukan di sini.
 #
 # Model guardrails dan scoring ikut di dalam image (deploy.sh mengambilnya dari GCS saat build), jadi pod tidak
 # butuh identitas GCP; gcpWif dan *_MODEL_GCS_URI tidak dipakai. (SA node gc-bribrain-dev-sac-gke-01 sudah bisa
