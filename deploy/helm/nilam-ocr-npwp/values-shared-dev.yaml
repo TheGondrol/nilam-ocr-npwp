@@ -28,12 +28,12 @@ fullnameOverride: ms-bribrain-nilam-ocr-npwp
 existingSecret: nilam-ocr-npwp-secrets
 
 orchestration:
-  # Orkestrasi pusat berjalan di cluster ddb (ocr-orchestration.ocr-dev.svc.cluster.local), nama itu tidak
-  # ada di cluster ini. Isi url dengan alamat yang terjangkau dari cluster shared, lalu nyalakan callback.
-  url: ""
+  # Orkestrasi pusat di namespace yang sama (release ocr-backend, Service ms-bribrain-nilam-ocr-orchestrator:80),
+  # diminta 23 Okt 2026. Callback hasil (result) dengan X-Callback-Key dari secretKeys.callbackKey.
+  url: http://ms-bribrain-nilam-ocr-orchestrator.bribrain-ocr-nilam.svc.cluster.local
   callbackPath: /v1/ocr-callback
   callbackFormat: result
-  callbackEnabled: false
+  callbackEnabled: true
 
 commonEnv:
   ORCHESTRATION_API_EVENTS_TABLE: ""
