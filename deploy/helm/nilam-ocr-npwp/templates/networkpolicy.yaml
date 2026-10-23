@@ -37,7 +37,8 @@ spec:
   ingress:
     - from:
         {{- if $svc.entrypoint }}
-        # Semua pod release, dan namespace pemanggil di networkPolicy.clientNamespaces (Orkestrasi pusat).
+        # Semua pod release, namespace pemanggil di networkPolicy.clientNamespaces, dan pod pemanggil di namespace
+        # release sendiri di networkPolicy.clientPods (Orkestrasi pusat).
         - podSelector:
             matchLabels:
               {{- include "nilam-ocr-npwp.selectorLabels" $ | nindent 14 }}
@@ -45,6 +46,11 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+        {{- range $.Values.networkPolicy.clientPods }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
         {{- end }}
         {{- if $.Values.service.public.enabled }}
         # Pemanggil lewat Service `<release>-public`; externalTrafficPolicy Local menjaga IP asalnya.

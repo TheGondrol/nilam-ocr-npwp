@@ -299,12 +299,15 @@ service:
     externalTrafficPolicy: Local
 
 # Ingress default-deny untuk semua pod release; tiap service hanya menerima dari pemanggilnya
-# (dihitung dari upstreams). Service ber-entrypoint menerima dari clientNamespaces dan dari semua
-# pod release. Egress belum dibatasi. Cluster tanpa enforcement
-# (GKE tanpa Dataplane V2 / Calico) mengabaikan policy ini diam-diam.
+# (dihitung dari upstreams). Service ber-entrypoint menerima dari semua pod release, dari namespace di
+# clientNamespaces (semua pod-nya), dan dari pod di namespace release yang cocok dengan salah satu label di
+# clientPods (pemanggil yang satu namespace, tanpa membuka namespace itu untuk semua pod). Egress belum dibatasi.
+# Cluster tanpa enforcement (GKE tanpa Dataplane V2 / Calico) mengabaikan policy ini diam-diam.
 networkPolicy:
   enabled: true
   clientNamespaces: []
+  # Contoh: - app.kubernetes.io/instance: ocr-backend
+  clientPods: []
 
 # maxUnavailable, bukan minAvailable: minAvailable 1 menahan upgrade node saat replika 1.
 podDisruptionBudget:

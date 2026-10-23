@@ -64,7 +64,7 @@ Dari pod di namespace `nilam-ocr-npwp`:
 
 Cluster dev memakai `LEGACY_DATAPATH` tanpa network policy enforcement: NetworkPolicy chart ini
 terpasang di sana tetapi belum ditegakkan. Di cluster dengan Dataplane V2 (atau Calico) ia
-langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Orkestrasi memanggil.
+langsung berlaku, jadi `networkPolicy.clientNamespaces` (atau `clientPods`) harus terisi sebelum Orkestrasi memanggil.
 
 ## Objek yang dirender
 
@@ -77,13 +77,15 @@ langsung berlaku, jadi `networkPolicy.clientNamespaces` harus terisi sebelum Ork
 | ConfigMap `<release>-<svc>` | ya | `environment`, `orchestration`, `commonEnv`, `services.<svc>.env`, `upstreams` |
 | PodDisruptionBudget | ya | `podDisruptionBudget.{enabled,maxUnavailable}` |
 | HorizontalPodAutoscaler | hanya yang `autoscaling.enabled` | `services.<svc>.autoscaling.{minReplicas,maxReplicas,targetCPUUtilizationPercentage}` |
-| NetworkPolicy | default-deny + satu per service | `networkPolicy.{enabled,clientNamespaces}` |
+| NetworkPolicy | default-deny + satu per service | `networkPolicy.{enabled,clientNamespaces,clientPods}` |
 | ServiceAccount | satu untuk semua | `serviceAccount.{create,name,annotations}` |
 
 Aturan NetworkPolicy dihitung dari `services.<svc>.upstreams`: guardrails dan extraction hanya
 menerima dari orchestrator, `structuring` dari extraction dan orchestrator, `scoring` dari structuring
 dan orchestrator (orchestrator membaca status tiap tahap). Service ber-`entrypoint` (hanya
-orchestrator) menerima dari semua pod release dan dari namespace di `networkPolicy.clientNamespaces`.
+orchestrator) menerima dari semua pod release, dari namespace di `networkPolicy.clientNamespaces`, dan dari pod
+di namespace release yang cocok dengan label di `networkPolicy.clientPods` (di cluster shared: Orkestrasi pusat,
+`app.kubernetes.io/instance: ocr-backend`, yang satu namespace dengan kita).
 Egress belum dibatasi (utang teknis di README utama).
 
 ## Konfigurasi dinamis
@@ -100,7 +102,7 @@ hanya me-restart pod service yang konfigurasinya berubah.
 | `commonEnv` | env var untuk kelima service (yang tidak dikenal sebuah service diabaikan) |
 | `services.<nama>.env` | env var per service; menimpa `commonEnv` dan nilai bawaan chart |
 | `services.<nama>.upstreams` | service lain yang dipanggil; chart mengisi `<NAMA>_SERVICE_URL` dan NetworkPolicy |
-| `services.<nama>.entrypoint` | dipanggil dari luar release: ikut Service pintu masuk dan menerima `clientNamespaces` |
+| `services.<nama>.entrypoint` | dipanggil dari luar release: ikut Service pintu masuk dan menerima `clientNamespaces` / `clientPods` |
 | `services.<nama>.pipeline` | tahap async: menerima `DATABASE_URL` dan konfigurasi Orkestrasi |
 | `services.<nama>.replicaCount` | jumlah pod; diabaikan kalau `autoscaling.enabled` |
 | `services.<nama>.resources` | request dan limit per container |

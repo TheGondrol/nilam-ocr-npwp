@@ -45,10 +45,14 @@ commonEnv:
 apm:
   serverUrl: ""
 
-# Belum ada client yang diizinkan. Kandidat Orkestrasi pusat di cluster ini: namespace nilam-ocr-orchestrator
-# (Service ocr-orchestration, terlihat 20 Okt 2026); isi clientNamespaces + orchestration.url setelah dikonfirmasi.
+# Orkestrasi pusat (release Helm ocr-backend, pod ms-bribrain-nilam-ocr-orchestrator-api dan -worker) berjalan di
+# namespace yang sama, jadi diizinkan per label pod, bukan per namespace: clientNamespaces [bribrain-ocr-nilam]
+# akan membuka orchestrator NPWP untuk semua pod tim lain di namespace ini. Diminta tim Orkestrasi 23 Okt 2026.
+# orchestration.url (callback) masih kosong: itu arah sebaliknya, dari kita ke mereka.
 networkPolicy:
   clientNamespaces: []
+  clientPods:
+    - app.kubernetes.io/instance: ocr-backend
 
 service:
   public:
