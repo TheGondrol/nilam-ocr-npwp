@@ -6,7 +6,7 @@
 #
 # Database: Cloud SQL gc-bribrain-dev-sql-ocrkpr-01 (10.213.193.3, database nilam), DATABASE_URL di Secret
 # nilam-ocr-npwp-secrets. Status jaringan dari pod di cluster ini (20 Okt 2026): DB dan Nexus terjangkau;
-# Elastic APM (10.213.128.39:8200) dan Logstash belum.
+# Elastic APM di VM (10.213.128.39:8200) dan Logstash belum. APM memakai server di namespace ini (lihat apm di bawah).
 #
 # OCR: sejak 22 Okt 2026 service PaddleOCR PP-OCRv6 milik tim PaddleOCR di namespace yang sama
 # (ms-bribrain-nilam-ocr-paddle-ppocr-v6-service:80, POST /v1/ocr, GPU), kontrak response sama dengan /ocr di VM
@@ -40,10 +40,16 @@ commonEnv:
   PIPELINE_OUTBOX: "true"
   TESTING_ENDPOINTS: "true"
 
-# APM mati (serverUrl kosong): server APM dev belum terjangkau dari cluster ini; agen yang terus timeout hanya
-# membuang CPU. Isi lagi seperti values-ddb-dev.yaml begitu jaringannya dibuka.
+# Elastic APM di namespace yang sama (repo elastics-vm, release elastic-apm: ES + Kibana + APM Server 9.2.0), karena
+# server APM di VM (10.213.128.39:8200) tidak terjangkau dari cluster ini. Secret token = APM_SECRET_TOKEN di
+# elastics-vm, disalin ke Secret nilam-ocr-npwp-secrets (ELASTIC_APM_SECRET_TOKEN); tanpa itu server menolak (401).
+# Sama seperti values-ddb-dev.yaml: satu service name untuk kelima service, environment eksplisit (`environment` di
+# atas bernilai production).
 apm:
-  serverUrl: ""
+  serverUrl: http://ms-bribrain-nilam-elastic-apm-server.bribrain-ocr-nilam.svc.cluster.local:8200
+  serviceName: nilam-ocr-npwp
+  environment: dev
+  sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
 
 # Orkestrasi pusat (release Helm ocr-backend, pod ms-bribrain-nilam-ocr-orchestrator-api dan -worker) berjalan di
 # namespace yang sama, jadi diizinkan per label pod, bukan per namespace: clientNamespaces [bribrain-ocr-nilam]
