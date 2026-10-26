@@ -49,6 +49,9 @@ commonEnv:
 # `environment` di atas bernilai production.
 apm:
   serverUrl: http://ms-bribrain-nilam-elastic-apm-server.bribrain-ocr-nilam.svc.cluster.local:8200
+  # Eksplisit kosong: deploy.sh memakai --reset-then-reuse-values, jadi tanpa baris ini serviceName lama
+  # (nilam-ocr-npwp) dari release sebelumnya terbawa dan mengalahkan prefix.
+  serviceName: ""
   serviceNamePrefix: ms-bribrain-nilam-ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
