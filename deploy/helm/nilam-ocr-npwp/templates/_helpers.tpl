@@ -55,7 +55,7 @@ app.kubernetes.io/version: {{ include "nilam-ocr-npwp.imageTag" . | quote }}
 {{- end }}
 
 {{/*
-Isi ConfigMap satu service. Argumen: dict "root" $ "svc" <values service>.
+Isi ConfigMap satu service. Argumen: dict "root" $ "name" <nama service> "svc" <values service>.
 URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 */}}
 {{- define "nilam-ocr-npwp.serviceEnv" -}}
@@ -93,6 +93,8 @@ URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 {{- $_ := set $env "ELASTIC_APM_VERIFY_SERVER_CERT" (ternary "false" "true" (eq (toString .verifyServerCert) "false")) }}
 {{- if .serviceName }}
 {{- $_ := set $env "ELASTIC_APM_SERVICE_NAME" .serviceName }}
+{{- else if .serviceNamePrefix }}
+{{- $_ := set $env "ELASTIC_APM_SERVICE_NAME" (printf "%s-%s" .serviceNamePrefix $.name) }}
 {{- end }}
 {{- if .sanitizeFieldNames }}
 {{- $_ := set $env "ELASTIC_APM_SANITIZE_FIELD_NAMES" .sanitizeFieldNames }}

@@ -25,7 +25,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: {{ include "nilam-ocr-npwp.serviceEnv" (dict "root" $ "svc" $svc) | sha256sum }}
+        checksum/config: {{ include "nilam-ocr-npwp.serviceEnv" (dict "root" $ "name" $name "svc" $svc) | sha256sum }}
         {{- with $.Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

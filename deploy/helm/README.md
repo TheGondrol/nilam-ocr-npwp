@@ -195,7 +195,9 @@ lalu isi `apm.serverUrl` (dan kalau perlu `apm.environment`, `apm.transactionSam
 kelima service; token sudah di Secret sejak 7 Okt 2026). Tanpa token di Secret, server APM menolak setiap kiriman
 (401) walau service tetap jalan.
 
-Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>` (atau `apm.serviceName` kalau diisi):
+Yang terlihat di APM, dengan service name `nilam-ocr-npwp-<service>`, `<apm.serviceNamePrefix>-<service>` kalau
+prefix diisi (shared-dev: `ms-bribrain-nilam-ocr-npwp-<service>`, sama dengan nama Deployment-nya), atau satu
+`apm.serviceName` untuk kelima service kalau itu diisi (ddb-dev: `nilam-ocr-npwp`):
 
 - satu transaksi per request HTTP, dan satu transaksi `<STAGE> job` per job di latar belakang (yang berjalan
   sesudah jawaban `202`), hasilnya `done` / `failed` / `interrupted`;

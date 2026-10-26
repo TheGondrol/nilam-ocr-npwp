@@ -8,6 +8,6 @@ metadata:
   labels:
     {{- include "nilam-ocr-npwp.componentLabels" (dict "root" $ "name" $name "svc" $svc) | nindent 4 }}
 data:
-  {{- include "nilam-ocr-npwp.serviceEnv" (dict "root" $ "svc" $svc) | indent 2 }}
+  {{- include "nilam-ocr-npwp.serviceEnv" (dict "root" $ "name" $name "svc" $svc) | indent 2 }}
 {{- end }}
 {{- end }}

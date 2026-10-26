@@ -43,12 +43,13 @@ commonEnv:
 # Elastic APM di namespace yang sama (repo elastics-vm, release elastic-apm: ES + Kibana + APM Server 9.2.0), karena
 # server APM di VM (10.213.128.39:8200) tidak terjangkau dari cluster ini. Secret token = APM_SECRET_TOKEN di
 # elastics-vm, disalin ke Secret nilam-ocr-npwp-secrets (ELASTIC_APM_SECRET_TOKEN); tanpa itu server menolak (401).
-# serviceName kosong = satu service name per service, nilam-ocr-npwp-<service> (26 Okt 2026, beda dengan ddb-dev):
-# tiap service punya halaman sendiri di Kibana APM dan Service Map menggambar alurnya; per dokumen dilihat lewat
-# Service group `service.name : nilam-ocr-npwp-*`. environment diisi eksplisit: `environment` di atas bernilai
-# production.
+# Satu service name per service, sama dengan nama Deployment-nya: ms-bribrain-nilam-ocr-npwp-<service> (26 Okt 2026,
+# beda dengan ddb-dev): tiap service punya halaman sendiri di Kibana APM dan Service Map menggambar alurnya; per
+# dokumen dilihat lewat Service group `service.name : ms-bribrain-nilam-ocr-npwp-*`. environment diisi eksplisit:
+# `environment` di atas bernilai production.
 apm:
   serverUrl: http://ms-bribrain-nilam-elastic-apm-server.bribrain-ocr-nilam.svc.cluster.local:8200
+  serviceNamePrefix: ms-bribrain-nilam-ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
 
