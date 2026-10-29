@@ -7,7 +7,13 @@ from ocr_common.errors import BadRequest
 from ocr_common.web.app import create_app
 from ocr_common.web.envelope import envelope
 from ocr_common.web.intake import FileField, FileUrlField, read_image
-from ocr_common.web.request_id import REQUEST_ID_HEADER, adopt_request_id, get_request_id, reset_request_id
+from ocr_common.web.request_id import (
+    REQUEST_ID_HEADER,
+    adopt_request_id,
+    current_request_id,
+    get_request_id,
+    reset_request_id,
+)
 from ocr_common.web.security import verify_api_key
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -177,6 +183,34 @@ def test_an_adopted_request_id_is_in_the_error_envelope_and_the_response_header(
     assert response.status_code == 400
     assert response.json()["request_id"] == "OCR_from_form"
     assert response.headers[REQUEST_ID_HEADER] == "OCR_from_form"
+
+
+def _bound_while_the_response_starts(app, path, **kwargs):
+    """The request_id bound when the response starts, where uvicorn writes its access line, and after."""
+    seen = []
+
+    async def server(scope, receive, send):
+        async def access_log(message):
+            if message["type"] == "http.response.start":
+                seen.append(current_request_id())
+            await send(message)
+
+        await app(scope, receive, access_log)
+
+    TestClient(server, raise_server_exceptions=False).post(path, **kwargs)
+    return seen, current_request_id()
+
+
+def test_the_access_line_carries_the_request_id():
+    """The header's id, or the one the handler adopted from the body (the central orchestrator's)."""
+    file = {"file": ("a.jpg", b"x", "image/jpeg")}
+    adopting_app = create_app(settings=settings, title="Demo", description="demo", routers=[adopting])
+
+    header = {**AUTH, REQUEST_ID_HEADER: "OCR_1"}
+    assert _bound_while_the_response_starts(app, "/v1/echo", files=file, headers=header) == (["OCR_1"], None)
+    assert _bound_while_the_response_starts(
+        adopting_app, "/v1/adopt", data={"request_id": "OCR_from_form"}, headers={REQUEST_ID_HEADER: "REQ_from_header"}
+    ) == (["OCR_from_form"], None)
 
 
 def _app_with_health(health):
