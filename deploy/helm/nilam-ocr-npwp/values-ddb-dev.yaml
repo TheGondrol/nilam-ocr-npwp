@@ -43,15 +43,21 @@ commonEnv:
 # (deploy/helm/README.md, "Model dari GCS"). Opsi ambil-saat-start (gcpWif, *_MODEL_GCS_URI) tidak dipakai di dev.
 
 # Server Elastic APM dev (7 Okt 2026). Secret token di Secret nilam-ocr-npwp-secrets (ELASTIC_APM_SECRET_TOKEN),
-# bukan di sini. Satu service name untuk kelima service (permintaan 7 Okt 2026); service mana yang melayani
-# terlihat dari service.node.name (nama pod). environment diisi eksplisit: `environment` di atas bernilai production.
+# bukan di sini. Satu service name per service, sama dengan nama Deployment-nya: nilam-ocr-npwp-<service> (29 Okt
+# 2026, seperti shared-dev; sebelumnya satu nama nilam-ocr-npwp untuk kelima service, data lamanya tetap di bawah
+# nama itu): tiap service punya halaman sendiri di Kibana APM dan Service Map menggambar alurnya; per dokumen
+# dilihat lewat Service group `service.name : nilam-ocr-npwp-*`. environment diisi eksplisit: `environment` di atas
+# bernilai production.
 apm:
   serverUrl: http://10.213.128.39:8200
-  serviceName: nilam-ocr-npwp
+  # Eksplisit kosong: deploy.sh memakai --reset-then-reuse-values, jadi tanpa baris ini serviceName lama
+  # (nilam-ocr-npwp) dari release sebelumnya terbawa dan mengalahkan prefix.
+  serviceName: ""
+  serviceNamePrefix: nilam-ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
   # Log aplikasi ke Elasticsearch VM lewat server APM ini (OTLP, APM Server 9.2.0; 29 Okt 2026), sama seperti
-  # shared-dev: Discover logs-apm.app.nilam_ocr_npwp-*, atau halaman service APM tab Logs.
+  # shared-dev: Discover logs-apm.app.nilam_ocr_npwp_*, atau halaman service APM tab Logs.
   logSending: true
 
 # Orchestrator di IP publik internet (14 Okt 2026, permintaan tim): http://<EXTERNAL-IP>:8034/v1/extract-ocr dari
