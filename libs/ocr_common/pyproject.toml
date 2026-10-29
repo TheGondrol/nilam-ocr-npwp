@@ -16,6 +16,10 @@ dependencies = [
     # Elastic APM (ocr_common/web/apm.py), only loaded with ELASTIC_APM_SERVER_URL; psutil gives it CPU and memory.
     "elastic-apm>=6.26",
     "psutil>=5.9",
+    # The log to the same APM server over OTLP/HTTP (ocr_common/web/log_shipping.py), only loaded with
+    # ELASTIC_APM_LOG_SENDING; the central orchestrator ships its log this way too.
+    "opentelemetry-sdk>=1.45,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
 ]
 
 [project.optional-dependencies]

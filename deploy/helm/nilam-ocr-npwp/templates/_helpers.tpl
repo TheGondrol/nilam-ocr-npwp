@@ -99,6 +99,12 @@ URL antar service menunjuk ke Service per komponen (<release>-<nama>).
 {{- if .sanitizeFieldNames }}
 {{- $_ := set $env "ELASTIC_APM_SANITIZE_FIELD_NAMES" .sanitizeFieldNames }}
 {{- end }}
+{{- if .logSending }}
+{{- $_ := set $env "ELASTIC_APM_LOG_SENDING" "true" }}
+{{- end }}
+{{- if .logLevel }}
+{{- $_ := set $env "ELASTIC_APM_LOG_LEVEL" .logLevel }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- range $key, $value := $root.Values.commonEnv }}

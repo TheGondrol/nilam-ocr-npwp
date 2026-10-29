@@ -6,7 +6,9 @@
 #
 # Database: Cloud SQL gc-bribrain-dev-sql-ocrkpr-01 (10.213.193.3, database nilam), DATABASE_URL di Secret
 # nilam-ocr-npwp-secrets. Status jaringan dari pod di cluster ini (20 Okt 2026): DB dan Nexus terjangkau;
-# Elastic APM di VM (10.213.128.39:8200) dan Logstash belum. APM memakai server di namespace ini (lihat apm di bawah).
+# Elastic APM di VM (10.213.128.39:8200) dan Logstash (10.213.128.12:5040) belum. APM memakai server di namespace ini,
+# dan log aplikasi ikut dikirim ke server itu (apm.logSending di bawah): cluster ini tidak punya Filebeat, dan GKE
+# hanya mengumpulkan log sistem.
 #
 # OCR: sejak 22 Okt 2026 service PaddleOCR PP-OCRv6 milik tim PaddleOCR di namespace yang sama
 # (ms-bribrain-nilam-ocr-paddle-ppocr-v6-service:80, POST /v1/ocr, GPU), kontrak response sama dengan /ocr di VM
@@ -55,6 +57,9 @@ apm:
   serviceNamePrefix: ms-bribrain-nilam-ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
+  # Log aplikasi ke Elasticsearch lewat server APM ini (OTLP), seperti Orkestrasi pusat (29 Okt 2026); dilihat di
+  # Kibana: halaman service APM tab Logs, atau Discover logs-apm.app.ms_bribrain_nilam_ocr_npwp_*.
+  logSending: true
 
 # Orkestrasi pusat (release Helm ocr-backend, pod ms-bribrain-nilam-ocr-orchestrator-api dan -worker) berjalan di
 # namespace yang sama, jadi diizinkan per label pod, bukan per namespace: clientNamespaces [bribrain-ocr-nilam]

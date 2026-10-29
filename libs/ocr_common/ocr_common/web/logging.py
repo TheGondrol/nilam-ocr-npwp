@@ -5,10 +5,10 @@
 and that the pipeline binds for the duration of a background job, so a log line written deep inside a
 model client still says which request it was for.
 
-Deployed, the lines go to stderr only: the cluster's Filebeat DaemonSet collects every container's output and
-ships it to Elasticsearch (deploy/helm/README.md, "Log ke Elasticsearch"), so no service talks to Elasticsearch
-itself. A record may carry structured fields for it (`log_event`), e.g. one event per outbox delivery; the access
-log of the probes (`/health`, `/ready`, `/metrics`, every few seconds per pod) is left out unless it failed."""
+Deployed, every line goes to stderr, and with `ELASTIC_APM_LOG_SENDING` also to Elasticsearch through the APM
+server (`log_shipping`, deploy/helm/README.md "Log ke Elasticsearch"): the shared cluster collects no workload
+output itself. A record may carry structured fields for it (`log_event`), e.g. one event per outbox delivery; the
+access log of the probes (`/health`, `/ready`, `/metrics`, every few seconds per pod) is left out unless it failed."""
 
 import json
 import logging
@@ -35,6 +35,12 @@ def log_event(logger: logging.Logger, level: int, message: str, /, **fields: Any
     stay objects, e.g. `event={"dataset": "outbox", "action": "delivered"}`), so they can be searched in
     Elasticsearch; the text format shows only the message. Never put document data (NPWP, names) in them."""
     logger.log(level, message, extra={_FIELDS: fields})
+
+
+def event_fields(record: logging.LogRecord) -> dict[str, Any]:
+    """The structured fields `log_event` put on `record` (empty for a plain record)."""
+    fields = getattr(record, _FIELDS, None)
+    return fields if isinstance(fields, dict) else {}
 
 
 class ProbeAccessFilter(logging.Filter):
@@ -78,10 +84,8 @@ class JsonFormatter(logging.Formatter):
         if self._service:
             entry["service"] = self._service
         entry.update(apm.trace_fields())  # `trace.id`, `transaction.id` while an APM transaction is active
-        fields = getattr(record, _FIELDS, None)
-        if isinstance(fields, dict):
-            # Never over the fixed fields: a search on `message` or `request_id` must mean the same everywhere.
-            entry.update({key: value for key, value in fields.items() if key not in entry})
+        # Never over the fixed fields: a search on `message` or `request_id` must mean the same everywhere.
+        entry.update({key: value for key, value in event_fields(record).items() if key not in entry})
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
@@ -104,3 +108,12 @@ def configure_logging(*, fmt: LogFormat, level: str, service: str | None = None)
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers = []
         uvicorn_logger.propagate = True
+
+
+def add_handler(handler: logging.Handler) -> None:
+    """Adds `handler` to the root logger next to the stderr one, with the same filters (`request_id` on every
+    record, no line for a successful probe); the next `configure_logging` removes it like its own."""
+    setattr(handler, _MARK, True)
+    handler.addFilter(RequestIdFilter())
+    handler.addFilter(ProbeAccessFilter())
+    logging.getLogger().addHandler(handler)

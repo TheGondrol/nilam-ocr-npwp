@@ -26,9 +26,20 @@ logger = logging.getLogger(__name__)
 _client: Any = None
 
 
-def start(settings: BaseServiceSettings, service_name: str) -> Any | None:
+def service_name(settings: BaseServiceSettings, default: str) -> str:
+    """The APM service name: `ELASTIC_APM_SERVICE_NAME`, else `default`. The log records of `log_shipping` go
+    under the same name, so Kibana shows them on the service's page."""
+    return settings.elastic_apm_service_name or default
+
+
+def environment(settings: BaseServiceSettings) -> str:
+    """The APM environment: `ELASTIC_APM_ENVIRONMENT`, else `ENVIRONMENT`."""
+    return settings.elastic_apm_environment or settings.environment
+
+
+def start(settings: BaseServiceSettings, default_service_name: str) -> Any | None:
     """The APM client for this process, made from the settings, or None (and nothing loaded) when
-    `ELASTIC_APM_SERVER_URL` is not set. `service_name` is the default of `ELASTIC_APM_SERVICE_NAME`."""
+    `ELASTIC_APM_SERVER_URL` is not set. `default_service_name` is the default of `ELASTIC_APM_SERVICE_NAME`."""
     global _client
     if not settings.elastic_apm_server_url:
         logger.info("Elastic APM off: ELASTIC_APM_SERVER_URL is not set")
@@ -36,9 +47,9 @@ def start(settings: BaseServiceSettings, service_name: str) -> Any | None:
     from elasticapm.contrib.starlette import make_apm_client
 
     config: dict[str, Any] = {
-        "SERVICE_NAME": settings.elastic_apm_service_name or service_name,
+        "SERVICE_NAME": service_name(settings, default_service_name),
         "SERVER_URL": settings.elastic_apm_server_url,
-        "ENVIRONMENT": settings.elastic_apm_environment or settings.environment,
+        "ENVIRONMENT": environment(settings),
         "TRANSACTION_SAMPLE_RATE": settings.elastic_apm_transaction_sample_rate,
         "VERIFY_SERVER_CERT": settings.elastic_apm_verify_server_cert,
         "CAPTURE_BODY": "off",
@@ -80,6 +91,25 @@ def trace_parent() -> str | None:
 
     Not `elasticapm.get_trace_parent_header()`: in a transaction that continues an incoming trace it still names
     the caller's span, so what follows would hang off the caller instead of this transaction."""
+    active = _active()
+    if active is None:
+        return None
+    transaction, span_id = active
+    return transaction.trace_parent.copy_from(span_id=span_id).to_string()
+
+
+def trace_ids() -> tuple[str, str] | None:
+    """The trace id and the id of the current span (the transaction's while no span is open) of the active
+    transaction, in hex, for a log record; None while APM is off or nothing is active."""
+    active = _active()
+    if active is None:
+        return None
+    transaction, span_id = active
+    return transaction.trace_parent.trace_id, span_id
+
+
+def _active() -> tuple[Any, str] | None:
+    """The active transaction and the id of its current span (its own id while no span is open)."""
     if _client is None:
         return None
     from elasticapm.traces import execution_context
@@ -88,7 +118,7 @@ def trace_parent() -> str | None:
     if transaction is None:
         return None
     span = execution_context.get_span()
-    return transaction.trace_parent.copy_from(span_id=span.id if span is not None else transaction.id).to_string()
+    return transaction, span.id if span is not None else transaction.id
 
 
 def _begin(client: Any, transaction_type: str, parent: str | None) -> None:

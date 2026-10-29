@@ -218,40 +218,62 @@ NPWP, nama, dan API key tidak keluar ke server APM.
 
 ## Log ke Elasticsearch
 
-Service tidak mengirim log ke Elasticsearch sendiri. Setiap service menulis satu baris JSON per log ke stderr,
-dan **Filebeat 7.17 milik cluster** (DaemonSet `filebeat` di `kube-system`, dikelola tim platform, bukan chart
-ini) mengambil output semua container di setiap node (`/var/log/containers/*.log`), menambahkan metadata
-Kubernetes (`kubernetes.namespace`, `kubernetes.pod.name`, `kubernetes.container.name`, ...), lalu mengirimnya ke
-Logstash `10.213.128.12:5040`, yang meneruskannya ke Elasticsearch. Tidak ada yang perlu dipasang atau
-dinyalakan di chart ini.
+Setiap service menulis satu baris JSON per log ke stderr. Shared cluster tidak mengumpulkan output container
+(tidak ada Filebeat, GKE hanya menyimpan log sistem), jadi dengan `apm.logSending: true` (aktif di
+`values-shared-dev.yaml`) setiap log **juga dikirim ke server APM di namespace** lewat OpenTelemetry (OTLP/HTTP
+`/v1/logs`, token yang sama dengan trace; `libs/ocr_common/ocr_common/web/log_shipping.py`). Server APM
+menyimpannya di Elasticsearch, data stream `logs-apm.app.ms_bribrain_nilam_ocr_npwp_<service>-default`. Jalur yang
+sama dipakai Orkestrasi pusat untuk lognya. Log stderr tetap ada (`kubectl logs`).
 
-Field tiap baris (`libs/ocr_common/ocr_common/web/logging.py`):
+Setiap log dikirim dengan service name APM service itu (`ms-bribrain-nilam-ocr-npwp-<service>`) dan trace / span
+transaksi APM yang sedang aktif, jadi di Kibana log tampil di halaman service APM (tab **Logs**) dan bisa dibuka
+dari trace-nya. Log dikirim per batch dari thread latar dan dibuang kalau antreannya penuh: request tidak pernah
+menunggu logging.
 
-| Field | Isi |
-|---|---|
-| `@timestamp`, `log.level` | waktu dan level (ECS); `time` dan `severity` sama, untuk Cloud Logging |
-| `message`, `logger`, `exception` | pesan, nama logger, stack trace kalau ada |
-| `service`, `request_id` | service asal dan request / job yang sedang dikerjakan (`-` di luar request) |
-| `trace.id`, `transaction.id` | trace Elastic APM yang aktif, untuk melompat dari log ke trace dan sebaliknya |
-| `event.dataset: outbox`, `event.action`, `event.outcome` | satu event per pengiriman outbox: `delivered`, `skipped`, `retry`, `dead`, atau `released` (dead letter dilepas) |
-| `outbox.*` | `id`, `kind` (callback / handoff), `stage`, `target` (tahap berikutnya / `orchestration`), `attempt`, `age_seconds`, dan saat gagal `error`, `status_code`, `retry_in_seconds` |
+Field (`libs/ocr_common/ocr_common/web/logging.py` untuk stderr, `log_shipping.py` untuk Elasticsearch):
+
+| stderr (JSON) | Elasticsearch | Isi |
+|---|---|---|
+| `@timestamp`, `log.level` | `@timestamp`, `log.level` | waktu dan level |
+| `message`, `exception` | `message`, `error.*` | pesan, exception dengan stack trace kalau ada |
+| `logger`, `request_id` | `labels.logger`, `labels.request_id` | nama logger, request / job yang sedang dikerjakan (`-` di luar request) |
+| `service` | `service.name`, `service.environment` | service asal |
+| `trace.id`, `transaction.id` | `trace.id`, `span.id` | trace Elastic APM yang aktif |
+| `event.dataset: outbox`, `event.action`, `event.outcome` | `labels.event_dataset`, `labels.event_action`, `labels.event_outcome` | satu event per pengiriman outbox: `delivered`, `skipped`, `retry`, `dead`, atau `released` (dead letter dilepas) |
+| `outbox.*` | `labels.outbox_*`, angka di `numeric_labels.outbox_*` | `id`, `kind` (callback / handoff), `stage`, `target` (tahap berikutnya / `orchestration`), `attempt`, `age_seconds`, dan saat gagal `error`, `status_code`, `retry_in_seconds` |
 
 Isi dokumen (payload callback / hand-off, NPWP, nama) tidak pernah masuk log. Akses log probe yang berhasil
 (`/health`, `/ready`, `/metrics`, beberapa detik sekali per pod) tidak ditulis, dan juga tidak menjadi transaksi APM.
 
-Contoh pencarian di Kibana (KQL):
+### Membuka Kibana
 
-```text
-kubernetes.namespace : "nilam-ocr-npwp" and request_id : "OCR_9cb01af2-..."     # semua log satu request
-event.dataset : "outbox" and event.outcome : "failure"                          # callback / hand-off yang gagal
-event.dataset : "outbox" and event.action : "dead"                              # dead letter, perlu dilepas
-event.dataset : "outbox" and outbox.target : "orchestration" and outbox.status_code >= 400
+Kibana (`ms-bribrain-nilam-elastic-kibana`, dari release `elastic-apm` repo elastics-vm) hanya ClusterIP. Dari
+laptop, lewat tunnel bastion yang sama dengan `deploy.sh`:
+
+```bash
+gcloud compute ssh gc-shared-dev-gce-bastion-01 --zone asia-southeast2-a --project shared-kubecluster-dev-01 \
+  --tunnel-through-iap -- -N -D 127.0.0.1:18090 &
+export KUBECONFIG=~/.kube/config-shared-kubecluster-dev-01   # dibuat deploy.sh, proxy-url socks5 ke tunnel di atas
+kubectl -n bribrain-ocr-nilam port-forward svc/ms-bribrain-nilam-elastic-kibana 5601:5601
 ```
 
-**Perlu dipastikan dengan tim platform** (belum diverifikasi dari sisi repo ini): index tempat Logstash menulis
-log namespace `nilam-ocr-npwp`, dan apakah Logstash mem-parse JSON di field `message`. Kalau tidak, field di atas
-ada sebagai teks di dalam `message`, bukan field yang bisa dicari; minta filter `json { source => "message" }`
-untuk namespace ini di pipeline Logstash (atau processor `decode_json_fields` di Filebeat).
+Lalu buka `http://localhost:5601`, login `elastic` dengan password dari Secret `ms-bribrain-nilam-elastic-secrets`
+(minta ke pemilik repo elastics-vm kalau tidak punya akses membaca Secret itu).
+
+- **Observability → APM → Services → `ms-bribrain-nilam-ocr-npwp-<service>` → Logs**: log satu service, dan dari
+  sebuah trace (Transactions → trace → Logs) log request itu saja.
+- **Discover**, data view `logs-apm.app.ms_bribrain_nilam_ocr_npwp_*`, contoh KQL:
+
+```text
+labels.request_id : "OCR_9cb01af2-..."                                       # semua log satu request, lima service
+log.level : "ERROR"                                                          # semua error
+labels.event_dataset : "outbox" and labels.event_outcome : "failure"         # callback / hand-off yang gagal
+labels.event_dataset : "outbox" and labels.event_action : "dead"             # dead letter, perlu dilepas
+labels.outbox_target : "orchestration" and numeric_labels.outbox_status_code >= 400
+```
+
+Di cluster ddb (tidak dipakai lagi sejak 22 Okt 2026) log diambil Filebeat milik cluster dan dikirim ke Logstash
+`10.213.128.12:5040`; Logstash itu tidak terjangkau dari shared cluster.
 
 ## Skema database
 

@@ -58,6 +58,10 @@ class BaseServiceSettings(BaseSettings):
     # Comma-separated, wildcards allowed (`*token`); unset = the agent's own list. Only applies to what is captured
     # at all, and bodies and headers never are.
     elastic_apm_sanitize_field_names: str | None = None
+    # The application log to the same APM server too, over OpenTelemetry (ocr_common/web/log_shipping.py), from
+    # ELASTIC_APM_LOG_LEVEL up (and never below LOG_LEVEL); stderr keeps every line either way.
+    elastic_apm_log_sending: bool = False
+    elastic_apm_log_level: str = "INFO"
 
     # GCP Workload Identity Federation with Entra ID (ocr_common/clients/gcp.py), for the models a service
     # downloads from GCS at start (*_MODEL_GCS_URI): the names of Tim SEA's guide; the secret comes from the Secret.
