@@ -77,8 +77,10 @@ service:
 # HPA dimatikan dan tiap service 1 replika, seperti service tim lain di cluster ini; semua Service ClusterIP, tanpa
 # LoadBalancer.
 #
-# Jatah per service dari tim: 250m CPU / 512Mi, request = limit (QoS Guaranteed: pod tidak pernah diusir lebih
-# dulu saat node penuh). Lima service = 1,25 CPU / 2,5 Gi.
+# Resources = nilai yang dipasang langsung di cluster dengan `kubectl set resources` pada 26 Okt 2026 (19:55 WIB),
+# disalin ke sini 29 Okt 2026 supaya Helm tidak bentrok lagi dengan field itu (server-side apply). Request di bawah
+# limit (QoS Burstable): lima service = 1 CPU / ~1,1 Gi request, 2,35 CPU / ~2 Gi limit. Sebelumnya 250m / 512Mi,
+# request = limit, per service. Jangan ubah resources lewat kubectl lagi: ubah di sini lalu deploy.
 # maxSurge 0: rollout tidak memesan pod tambahan di atas jatah; service mati sebentar selama pod baru menyala.
 # Pemakaian nyata di ddb (21 Okt 2026, idle): orchestrator ~150Mi, extraction ~95Mi, structuring ~120Mi,
 # scoring ~145Mi, guardrails ~400Mi. Guardrails paling mepet: kena OOMKilled -> naikkan memorinya saja.
@@ -92,13 +94,13 @@ services:
       maxUnavailable: 1
     resources:
       requests:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 100m
+        memory: 128Mi
       limits:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 300m
+        memory: 256Mi
     env:
-      # Tiap request menahan dokumennya (maks. 10 MB) selama menunggu pipeline: 20 x 10 MB masih di bawah 512Mi.
+      # Tiap request menahan dokumennya (maks. 10 MB) selama menunggu pipeline: 20 x 10 MB masih di bawah limit 256Mi.
       MAX_IN_FLIGHT_REQUESTS: "20"
   guardrails:
     autoscaling:
@@ -106,17 +108,17 @@ services:
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
-    # Memuat torch + model dengan 250m CPU lebih lambat: beri 180 dtk (90 x 2 dtk) sebelum pod dianggap gagal.
+    # Memuat torch + model dengan CPU sekecil ini lebih lambat: beri 180 dtk (90 x 2 dtk) sebelum pod dianggap gagal.
     startupFailureThreshold: 90
     resources:
       requests:
-        cpu: 250m
+        cpu: 500m
         memory: 512Mi
       limits:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 1
+        memory: 768Mi
     env:
-      # Satu dokumen dinilai sekali waktu: dua render PDF + inference bersamaan tidak muat di 512Mi.
+      # Satu dokumen dinilai sekali waktu: dua render PDF + inference bersamaan tidak muat di memorinya.
       GUARDRAILS_TORCH_THREADS: "1"
       GUARDRAILS_MAX_CONCURRENCY: "1"
       GUARDRAILS_MAX_QUEUE: "5"
@@ -126,11 +128,11 @@ services:
       maxUnavailable: 1
     resources:
       requests:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 150m
+        memory: 128Mi
       limits:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 400m
+        memory: 384Mi
     secretEnv:
       - name: EXTRACTION_OCR_API_KEY
         secret: ms-bribrain-nilam-ocr-paddle-ppocr-v6-secret
@@ -144,19 +146,19 @@ services:
       maxUnavailable: 1
     resources:
       requests:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 150m
+        memory: 128Mi
       limits:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 400m
+        memory: 256Mi
   scoring:
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
     resources:
       requests:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 100m
+        memory: 192Mi
       limits:
         cpu: 250m
-        memory: 512Mi
+        memory: 320Mi

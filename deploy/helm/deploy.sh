@@ -76,6 +76,10 @@ Opsi:
   --build-only    build + push saja, tanpa helm upgrade
   --install       izinkan instalasi pertama kali (release belum ada di namespace); butuh Secret
                   \$existingSecret (nilam-ocr-npwp-secrets) sudah dibuat di namespace itu
+  --force-conflicts
+                  ambil alih field yang diubah di luar Helm (mis. \`kubectl set resources\`): tanpa ini
+                  server-side apply Helm 4 menolak upgrade. Samakan dulu nilainya di values-*.yaml, karena
+                  nilai chart yang menang
   --update-pull-secret
                   tulis ulang pull secret Nexus \$PULL_SECRET dari \$NEXUS_ENV (mis. password Nexus berganti);
                   tanpa opsi ini pull secret yang sudah ada dibiarkan
@@ -114,6 +118,7 @@ REPLICAS=""
 RELEASE_EXISTS=1
 DRY_RUN=0
 ASSUME_YES=0
+FORCE_CONFLICTS=0
 SERVICES=()
 
 while [[ $# -gt 0 ]]; do
@@ -124,6 +129,7 @@ while [[ $# -gt 0 ]]; do
     --build-only) BUILD_ONLY=1; shift ;;
     --install) INSTALL=1; shift ;;
     --update-pull-secret) UPDATE_PULL_SECRET=1; shift ;;
+    --force-conflicts) FORCE_CONFLICTS=1; shift ;;
     --replicas) REPLICAS="${2:?--replicas butuh nilai}"; [[ "$REPLICAS" =~ ^[0-9]+$ ]] || die "--replicas harus angka: $REPLICAS"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
@@ -401,9 +407,11 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 if [[ "$(helm version --template '{{.Version}}')" == v3.* ]]; then
+  [[ $FORCE_CONFLICTS -eq 0 ]] || die "--force-conflicts butuh Helm 4 (server-side apply)"
   HELM_ARGS+=(--wait --atomic)
 else
   HELM_ARGS+=(--wait=watcher --rollback-on-failure)
+  [[ $FORCE_CONFLICTS -eq 1 ]] && HELM_ARGS+=(--force-conflicts)
 fi
 
 ensure_tunnel
