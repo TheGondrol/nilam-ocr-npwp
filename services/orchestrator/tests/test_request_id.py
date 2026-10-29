@@ -55,3 +55,22 @@ def test_an_error_raised_in_the_handler_answers_with_the_callers_request_id(clie
     assert response.status_code == 413
     assert response.json()["request_id"] == RID
     assert response.headers[REQUEST_ID_HEADER] == RID
+
+
+def test_a_request_refused_before_the_file_is_read_answers_with_the_callers_request_id(client, auth):
+    """A document_type, pipeline_name_sequence or threshold refused up front: the header (and the access line
+    logged with it) carries the central orchestrator's request_id too, not the middleware's."""
+    refused = {
+        "document_type": {"document_type": "ktp"},
+        "sequence": {"pipeline_name_sequence": '["extraction", "scoring"]'},
+        "threshold": {"column_confidence_threshold": '{"foo": 1}'},
+    }
+    for name, form in refused.items():
+        response = client.post(
+            "/v1/extract-ocr",
+            data={"request_id": RID, **form},
+            files={"file": ("npwp.jpg", JPEG, "image/jpeg")},
+            headers={**auth, REQUEST_ID_HEADER: "REQ_gateway_hop"},
+        )
+        assert response.status_code in (400, 422), name
+        assert (response.json()["request_id"], response.headers[REQUEST_ID_HEADER]) == (RID, RID), name

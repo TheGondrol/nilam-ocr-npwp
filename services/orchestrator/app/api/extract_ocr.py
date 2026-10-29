@@ -315,46 +315,45 @@ async def extract_ocr(
     service: ExtractOcrService = Depends(get_extract_service),
 ):
     received_at = time.monotonic()
-    if document_type != DOCUMENT_TYPE:
-        response.status_code = 400
-        return extract_body(
-            400,
-            f"Unsupported document_type: {document_type}. Supported: {DOCUMENT_TYPE}",
-            errors="UNSUPPORTED_DOCUMENT_TYPE",
-            request_id=request_id,
-            pipeline_last_stage=ENTRY,
-        )
-    try:
-        sequence = _parse_sequence(pipeline_name_sequence)
-        # For the response log (nilam_ocr_results): guardrails is null when the sequence leaves it out.
-        setattr(request.state, SEQUENCE_STATE, sequence)
-    except InvalidSequence as exc:
-        response.status_code = 422
-        return extract_body(
-            422,
-            f"Invalid pipeline_name_sequence: {exc}",
-            errors=INVALID_SEQUENCE_CODE,
-            request_id=request_id,
-            pipeline_last_stage=ENTRY,
-        )
-    try:
-        guardrails_threshold = guardrails_threshold_from_json(guardrails_confidence_threshold)
-        column_thresholds = column_thresholds_from_json(column_confidence_threshold)
-    except ValueError as exc:
-        response.status_code = 422
-        return extract_body(
-            422,
-            str(exc),
-            errors=INVALID_THRESHOLD_CODE,
-            request_id=request_id,
-            pipeline_last_stage=ENTRY,
-        )
-
     # The central orchestrator's request_id becomes the id of this request: in the envelope of an error raised
     # below (413, a bad file, an unreachable stage), in the X-Request-ID response header and outbound calls, and
-    # in our log lines, so one id follows the request through guardrails and every stage.
+    # in our log lines (the access line too), so one id follows the request through guardrails and every stage.
     token = adopt_request_id(request, request_id)
     try:
+        if document_type != DOCUMENT_TYPE:
+            response.status_code = 400
+            return extract_body(
+                400,
+                f"Unsupported document_type: {document_type}. Supported: {DOCUMENT_TYPE}",
+                errors="UNSUPPORTED_DOCUMENT_TYPE",
+                request_id=request_id,
+                pipeline_last_stage=ENTRY,
+            )
+        try:
+            sequence = _parse_sequence(pipeline_name_sequence)
+            # For the response log (nilam_ocr_results): guardrails is null when the sequence leaves it out.
+            setattr(request.state, SEQUENCE_STATE, sequence)
+        except InvalidSequence as exc:
+            response.status_code = 422
+            return extract_body(
+                422,
+                f"Invalid pipeline_name_sequence: {exc}",
+                errors=INVALID_SEQUENCE_CODE,
+                request_id=request_id,
+                pipeline_last_stage=ENTRY,
+            )
+        try:
+            guardrails_threshold = guardrails_threshold_from_json(guardrails_confidence_threshold)
+            column_thresholds = column_thresholds_from_json(column_confidence_threshold)
+        except ValueError as exc:
+            response.status_code = 422
+            return extract_body(
+                422,
+                str(exc),
+                errors=INVALID_THRESHOLD_CODE,
+                request_id=request_id,
+                pipeline_last_stage=ENTRY,
+            )
         content, filename, content_type = await read_image(request, file, file_url)
         outcome = await service.submit(
             request_id,

@@ -185,8 +185,9 @@ def test_an_adopted_request_id_is_in_the_error_envelope_and_the_response_header(
     assert response.headers[REQUEST_ID_HEADER] == "OCR_from_form"
 
 
-def _bound_while_the_response_starts(app, path, **kwargs):
-    """The request_id bound when the response starts, where uvicorn writes its access line, and after."""
+def _bound_while_the_response_starts(app, path, *, hold_back=False, **kwargs):
+    """The request_id bound when the response starts, where uvicorn writes its access line, and after.
+    `hold_back`: behind a middleware that sends the start only once the body is there (the orchestrator's)."""
     seen = []
 
     async def server(scope, receive, send):
@@ -195,21 +196,41 @@ def _bound_while_the_response_starts(app, path, **kwargs):
                 seen.append(current_request_id())
             await send(message)
 
-        await app(scope, receive, access_log)
+        start = None
+
+        async def held_back(message):
+            nonlocal start
+            if message["type"] == "http.response.start":
+                start = message
+                return
+            if start is not None:
+                await access_log(start)
+                start = None
+            await access_log(message)
+
+        await app(scope, receive, held_back if hold_back else access_log)
 
     TestClient(server, raise_server_exceptions=False).post(path, **kwargs)
     return seen, current_request_id()
 
 
-def test_the_access_line_carries_the_request_id():
+@pytest.mark.parametrize("hold_back", [False, True])
+def test_the_access_line_carries_the_request_id(hold_back):
     """The header's id, or the one the handler adopted from the body (the central orchestrator's)."""
     file = {"file": ("a.jpg", b"x", "image/jpeg")}
     adopting_app = create_app(settings=settings, title="Demo", description="demo", routers=[adopting])
 
     header = {**AUTH, REQUEST_ID_HEADER: "OCR_1"}
-    assert _bound_while_the_response_starts(app, "/v1/echo", files=file, headers=header) == (["OCR_1"], None)
+    assert _bound_while_the_response_starts(app, "/v1/echo", hold_back=hold_back, files=file, headers=header) == (
+        ["OCR_1"],
+        None,
+    )
     assert _bound_while_the_response_starts(
-        adopting_app, "/v1/adopt", data={"request_id": "OCR_from_form"}, headers={REQUEST_ID_HEADER: "REQ_from_header"}
+        adopting_app,
+        "/v1/adopt",
+        hold_back=hold_back,
+        data={"request_id": "OCR_from_form"},
+        headers={REQUEST_ID_HEADER: "REQ_from_header"},
     ) == (["OCR_from_form"], None)
 
 

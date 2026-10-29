@@ -57,7 +57,8 @@ class RequestIdMiddleware:
 
     Plain ASGI, not `BaseHTTPMiddleware`: that one sends the response after its `dispatch` returned, when the id
     is no longer bound, and uvicorn writes its access line while the response starts. Here the id is bound
-    around the start of the response too, so the access line carries it like every other line of the request."""
+    around every message of the response, so the access line carries it like every other line of the request,
+    also behind a middleware that holds the start back until the body is there (the orchestrator's response log)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -72,12 +73,10 @@ class RequestIdMiddleware:
         state["request_id"] = request_id
 
         async def send_with_request_id(message: Message) -> None:
-            if message["type"] != "http.response.start":
-                await send(message)
-                return
             # The handler may have adopted the caller's own request_id; echo and log that one.
             final = state.get("request_id") or request_id
-            MutableHeaders(scope=message)[REQUEST_ID_HEADER] = final
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)[REQUEST_ID_HEADER] = final
             token = bind_request_id(final)
             try:
                 await send(message)
