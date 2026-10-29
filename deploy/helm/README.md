@@ -237,7 +237,8 @@ Field (`libs/ocr_common/ocr_common/web/logging.py` untuk stderr, `log_shipping.p
 | `@timestamp`, `log.level` | `@timestamp`, `log.level` | waktu dan level |
 | `message`, `exception` | `message`, `error.*` | pesan, exception dengan stack trace kalau ada |
 | `logger`, `request_id` | `labels.logger`, `labels.request_id` | nama logger, request / job yang sedang dikerjakan (`-` di luar request) |
-| `service` | `service.name`, `service.environment` | service asal |
+| `service` | `labels.service`; `service.name`, `service.environment` | komponen asal (`orchestrator`, `guardrails`, ...); service name APM (`<prefix>-<komponen>`) dan environment-nya |
+| - | `kubernetes.node.name`, `host.name` | node tempat pod berjalan (`K8S_NODE_NAME`, Downward API) |
 | `trace.id`, `transaction.id` | `trace.id`, `span.id` | trace Elastic APM yang aktif |
 | `event.dataset: outbox`, `event.action`, `event.outcome` | `labels.event_dataset`, `labels.event_action`, `labels.event_outcome` | satu event per pengiriman outbox: `delivered`, `skipped`, `retry`, `dead`, atau `released` (dead letter dilepas) |
 | `outbox.*` | `labels.outbox_*`, angka di `numeric_labels.outbox_*` | `id`, `kind` (callback / handoff), `stage`, `target` (tahap berikutnya / `orchestration`), `attempt`, `age_seconds`, dan saat gagal `error`, `status_code`, `retry_in_seconds` |
