@@ -50,11 +50,18 @@ apm:
   serviceName: nilam-ocr-npwp
   environment: dev
   sanitizeFieldNames: password,passwd,pwd,secret,key,*token,session,credit,card,auth,principal,set-cookie,signature,credential
+  # Log aplikasi ke Elasticsearch VM lewat server APM ini (OTLP, APM Server 9.2.0; 29 Okt 2026), sama seperti
+  # shared-dev: Discover logs-apm.app.nilam_ocr_npwp-*, atau halaman service APM tab Logs.
+  logSending: true
 
 # Orchestrator di IP publik internet (14 Okt 2026, permintaan tim): http://<EXTERNAL-IP>:8034/v1/extract-ocr dari
 # mana saja, sengaja tanpa batas IP asal. HTTP tanpa TLS, hanya X-API-Key yang menjaga, dan endpoint -test
 # (TESTING_ENDPOINTS) ikut terbuka. IP: kubectl -n nilam-ocr-npwp get svc nilam-ocr-npwp-public.
 service:
+  # Alamat lama pintu masuk (sebelum 20 Okt 2026) tetap hidup di cluster ini, supaya Orkestrasi di ocr-dev yang
+  # masih memanggil http://nilam-ocr-npwp.nilam-ocr-npwp.svc.cluster.local:8034 tidak putus (29 Okt 2026).
+  entrypoint:
+    aliases: [nilam-ocr-npwp]
   public:
     enabled: true
 

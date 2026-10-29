@@ -25,33 +25,35 @@ spec:
 {{- end }}
 {{- end }}
 {{- if .Values.service.entrypoint.enabled }}
+{{- range $serviceName := prepend (.Values.service.entrypoint.aliases | default list) (printf "%s-orchestrator" (include "nilam-ocr-npwp.fullname" $)) }}
 ---
 # Pintu masuk: alamat dalam cluster yang dipublikasikan ke Orkestrasi pusat (integration.md), satu nama untuk semua
-# service ber-entrypoint. Selector-nya mencakup semua pod release; tiap port hanya sampai ke pod yang punya
-# port bernama itu, karena Kubernetes melewatkan pod tanpa nama port tersebut.
+# service ber-entrypoint, plus nama lama di service.entrypoint.aliases. Selector-nya mencakup semua pod release;
+# tiap port hanya sampai ke pod yang punya port bernama itu, karena Kubernetes melewatkan pod tanpa nama port tersebut.
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "nilam-ocr-npwp.fullname" . }}-orchestrator
+  name: {{ $serviceName }}
   labels:
-    {{- include "nilam-ocr-npwp.labels" . | nindent 4 }}
+    {{- include "nilam-ocr-npwp.labels" $ | nindent 4 }}
     app.kubernetes.io/component: entrypoint
-  {{- with .Values.service.annotations }}
+  {{- with $.Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ $.Values.service.type }}
   selector:
-    {{- include "nilam-ocr-npwp.selectorLabels" . | nindent 4 }}
+    {{- include "nilam-ocr-npwp.selectorLabels" $ | nindent 4 }}
   ports:
-    {{- range $name, $svc := .Values.services }}
+    {{- range $name, $svc := $.Values.services }}
     {{- if and $svc.enabled $svc.entrypoint }}
     - name: {{ $name }}
       port: {{ $svc.port }}
       targetPort: {{ $name }}
     {{- end }}
     {{- end }}
+{{- end }}
 {{- end }}
 {{- if .Values.service.public.enabled }}
 ---

@@ -296,6 +296,9 @@ service:
   # (`<release>-<service>`) hanya untuk panggilan internal pipeline, jadi orchestrator tidak punya.
   entrypoint:
     enabled: true
+    # Nama Service tambahan dengan isi yang sama, untuk pemanggil yang masih memakai alamat lama (mis. ddb-dev:
+    # nilam-ocr-npwp, nama entry Service sebelum 20 Okt 2026). Kosong = hanya `<release>-orchestrator`.
+    aliases: []
   # Service `<release>-public` bertipe LoadBalancer dengan port yang sama (orchestrator, 8034), untuk pemanggil
   # di luar cluster. Tanpa annotation: IP publik internet, HTTP tanpa TLS, dijaga X-API-Key saja. Untuk IP
   # internal VPC: annotations {networking.gke.io/load-balancer-type: Internal}. loadBalancerSourceRanges kosong =
