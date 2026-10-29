@@ -157,7 +157,7 @@ def create_app(
         from elasticapm.contrib.starlette import ElasticAPM
 
         app.add_middleware(ElasticAPM, client=apm_client)  # added last = outermost: spans the whole request
-    log_shipping.start(settings, apm.service_name(settings, default_apm_name), version)
+    log_shipping.start(settings, apm.service_name(settings, default_apm_name), version, service_name)
     _register_exception_handlers(app)
     app.include_router(
         _health_router(

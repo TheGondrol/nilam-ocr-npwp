@@ -62,6 +62,8 @@ class BaseServiceSettings(BaseSettings):
     # ELASTIC_APM_LOG_LEVEL up (and never below LOG_LEVEL); stderr keeps every line either way.
     elastic_apm_log_sending: bool = False
     elastic_apm_log_level: str = "INFO"
+    # The node the pod runs on (Helm: Downward API spec.nodeName), sent with every log record as k8s.node.name.
+    k8s_node_name: str | None = None
 
     # GCP Workload Identity Federation with Entra ID (ocr_common/clients/gcp.py), for the models a service
     # downloads from GCS at start (*_MODEL_GCS_URI): the names of Tim SEA's guide; the secret comes from the Secret.

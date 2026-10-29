@@ -57,6 +57,11 @@ spec:
             - configMapRef:
                 name: {{ include "nilam-ocr-npwp.componentName" $component }}
           env:
+            # Node tempat pod berjalan, ikut di setiap log yang dikirim ke APM (k8s.node.name).
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

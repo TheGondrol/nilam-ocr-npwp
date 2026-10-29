@@ -7,12 +7,12 @@ on stderr is only in `kubectl logs`. Off unless `ELASTIC_APM_LOG_SENDING=true` w
 OpenTelemetry SDK is not even imported; stderr keeps every line either way.
 
 A record goes under the APM service name and with the trace and span of the active APM transaction, so Kibana
-shows it on the service's Logs tab and next to its trace. `logger`, `request_id` and the `log_event` fields are
-attributes, nested ones flattened (`outbox.status_code`); the APM server keeps them as `labels.*` /
-`numeric_labels.*`. The rules of stderr apply: no record for a successful probe, never document data. Records are
-sent in batches from a background thread and dropped when its queue is full, so a request never waits for the
-log; what is left at exit is flushed. TLS to the server is always verified (`ELASTIC_APM_VERIFY_SERVER_CERT` is
-the agent's).
+shows it on the service's Logs tab and next to its trace; the node the pod runs on is a resource attribute,
+`k8s.node.name`. `service` (the component), `logger`, `request_id` and the `log_event` fields are attributes,
+nested ones flattened (`outbox.status_code`); the APM server keeps them as `labels.*` / `numeric_labels.*`.
+The rules of stderr apply: no record for a successful probe, never document data. Records are sent in batches
+from a background thread and dropped when its queue is full, so a request never waits for the log; what is left
+at exit is flushed. TLS to the server is always verified (`ELASTIC_APM_VERIFY_SERVER_CERT` is the agent's).
 """
 
 import logging
@@ -35,10 +35,13 @@ _provider: Any = None
 _handler: logging.Handler | None = None
 
 
-def start(settings: BaseServiceSettings, service_name: str, version: str | None = None) -> logging.Handler | None:
+def start(
+    settings: BaseServiceSettings, service_name: str, version: str | None = None, component: str | None = None
+) -> logging.Handler | None:
     """Sends the log to the APM server from now on, under `service_name` (the APM service name): the handler
     added to the root logger, or None (and nothing loaded) without `ELASTIC_APM_SERVER_URL` or with
-    `ELASTIC_APM_LOG_SENDING` off. A second call replaces the first."""
+    `ELASTIC_APM_LOG_SENDING` off. `component` (`scoring`, ...) goes on every record as `service`, like on
+    stderr, and the node the pod runs on (`K8S_NODE_NAME`) as `k8s.node.name`. A second call replaces the first."""
     global _provider, _handler
     if not (settings.elastic_apm_server_url and settings.elastic_apm_log_sending):
         return None
@@ -56,9 +59,11 @@ def start(settings: BaseServiceSettings, service_name: str, version: str | None 
     }
     if version:
         resource["service.version"] = version
+    if settings.k8s_node_name:
+        resource["k8s.node.name"] = settings.k8s_node_name
     provider = LoggerProvider(resource=Resource.create(resource))
     provider.add_log_record_processor(BatchLogRecordProcessor(_exporter(settings)))
-    handler = OtlpLogHandler(provider, settings.elastic_apm_log_level.upper())
+    handler = OtlpLogHandler(provider, settings.elastic_apm_log_level.upper(), component)
     add_handler(handler)
     _provider, _handler = provider, handler
     logger.info("Log sending on: service %s, server %s", service_name, settings.elastic_apm_server_url)
@@ -99,20 +104,21 @@ class OtlpLogHandler(logging.Handler):
     `LoggingHandler` (deprecated since 1.45), which takes the trace from OpenTelemetry's own context: that one is
     empty here, the traces come from the Elastic agent."""
 
-    def __init__(self, provider: Any, level: int | str = logging.NOTSET) -> None:
+    def __init__(self, provider: Any, level: int | str = logging.NOTSET, component: str | None = None) -> None:
         super().__init__(level)
         self._provider = provider
+        self._component = component
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.name.split(".", 1)[0] in _OWN_LOGGERS:
             return
         try:
-            self._provider.get_logger(record.name).emit(log_record(record))
+            self._provider.get_logger(record.name).emit(log_record(record, self._component))
         except Exception:
             self.handleError(record)
 
 
-def log_record(record: logging.LogRecord) -> Any:
+def log_record(record: logging.LogRecord, component: str | None = None) -> Any:
     """`record` as an OpenTelemetry log record, in the trace and span of the active APM transaction, if any."""
     from opentelemetry._logs import LogRecord
 
@@ -123,7 +129,7 @@ def log_record(record: logging.LogRecord) -> Any:
         severity_text=record.levelname,
         severity_number=_severity(record.levelno),
         body=record.getMessage(),
-        attributes=attributes(record),
+        attributes=attributes(record, component),
     )
 
 
@@ -158,10 +164,12 @@ def _severity(levelno: int) -> Any:
     return SeverityNumber.TRACE
 
 
-def attributes(record: logging.LogRecord) -> dict[str, Any]:
-    """The attributes of `record`'s log record: `logger`, `request_id`, the `log_event` fields flattened, and the
-    exception, if any. A field never replaces `logger` or `request_id`."""
+def attributes(record: logging.LogRecord, component: str | None = None) -> dict[str, Any]:
+    """The attributes of `record`'s log record: `service` (the component), `logger`, `request_id`, the
+    `log_event` fields flattened, and the exception, if any. A field never replaces the first three."""
     fixed = {"logger": record.name, "request_id": getattr(record, "request_id", None) or "-"}
+    if component:
+        fixed["service"] = component
     result = {key: value for key, value in _flatten(event_fields(record)) if key not in fixed}
     result.update(fixed)
     if record.exc_info and record.exc_info[0] is not None:

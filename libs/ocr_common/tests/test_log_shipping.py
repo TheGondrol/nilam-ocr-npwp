@@ -88,6 +88,24 @@ def test_the_service_name_and_environment_follow_the_apm_settings(exported):
     assert (sent.log_record.severity_text, sent.log_record.severity_number.name) == ("WARNING", "WARN")
 
 
+def test_records_name_their_component_and_node(exported):
+    create_app(settings=_on(k8s_node_name="gke-node-a"), title="t", description="d", service_name="scoring")
+    _emit("test.ship", logging.INFO, "hello")
+
+    [sent] = exported(with_resource=True)
+    assert sent.log_record.attributes["service"] == "scoring", "the component, as `service` on stderr"
+    assert sent.resource.attributes["k8s.node.name"] == "gke-node-a"
+
+
+def test_without_a_node_name_or_component_neither_is_sent(exported):
+    log_shipping.start(_on(), "s")
+    log_event(logging.getLogger("test.ship"), logging.INFO, "hello", service="forged")
+
+    [sent] = exported(with_resource=True)
+    assert "k8s.node.name" not in sent.resource.attributes
+    assert sent.log_record.attributes["service"] == "forged", "no component: a field may carry its own"
+
+
 def test_the_server_credential_is_sent_as_the_agent_sends_it():
     assert log_shipping.auth_headers(_on(elastic_apm_secret_token="t")) == {"Authorization": "Bearer t"}
     assert log_shipping.auth_headers(_on(elastic_apm_secret_token="t", elastic_apm_api_key="a")) == {
