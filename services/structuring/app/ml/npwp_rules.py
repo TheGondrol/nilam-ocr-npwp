@@ -200,6 +200,12 @@ class NpwpRulesStructurer:
                 name = page
             candidate_count += page["npwp_candidate_count"]
 
+        # A company (PT, CV, ... see `is_badan`) is registered under a company NPWP, not a NIK: its digits
+        # carry no province, kecamatan, birthdate or KPP code to check, so the number is returned as read.
+        # A misread letter still applies.
+        if name is not None and is_badan(name["name"]):
+            number_signals.update(dict.fromkeys(NUMBER_SIGNALS, False))
+
         if number is None or name is None:
             guardrail_triggered = True
             flag_reason = flag_reason or FLAG_BLANK
