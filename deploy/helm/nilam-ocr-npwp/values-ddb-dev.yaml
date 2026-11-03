@@ -83,7 +83,7 @@ services:
       enabled: false
   extraction:
     env:
-      EXTRACTION_OCR_URL: http://10.213.128.67:8070
+      EXTRACTION_OCR_URL: http://10.213.128.67:8010
   guardrails:
     # HPA (aktif di values.yaml) mati di dev: cluster penuh, replika kedua tidak akan dapat node.
     autoscaling:
