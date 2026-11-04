@@ -376,7 +376,8 @@ def test_missing_api_key_returns_401_envelope(client):
         (["guardrails"], None, 200, None),
         (["guardrails", "extraction"], WaitOutcome("OCR", "DONE", results={"OCR": {"blocks": []}}), 200, None),
         (None, WaitOutcome("OCR", "FAILED", "OCR model is unavailable"), 422, "extraction"),
-        (None, WaitOutcome("STRUCTURING", STATUS_REJECTED, "Kode provinsi pada NPWP tidak valid"), 400, "structuring"),
+        (None, WaitOutcome("STRUCTURING", "FAILED", "No text lines to structure"), 422, "structuring"),
+        (None, WaitOutcome("STRUCTURING", STATUS_REJECTED, "Kode provinsi pada NPWP tidak valid"), 400, "guardrails"),
         (None, WaitOutcome("STRUCTURING", "PROCESSING"), 202, None),
     ],
 )

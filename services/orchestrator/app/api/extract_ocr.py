@@ -89,7 +89,7 @@ _CONTRACT_TABLE = (
     "| null | null |\n"
     "| Still running | 202 | null | null | null | null |\n"
     f"| Rejected by the guardrails model | 400 | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
-    f"| Rejected by the structuring rules | 400 | null | `1` | `{REJECTED_CODE}` | `structuring` |\n"
+    f"| Rejected by the structuring rules | 400 | null | `1` | `{REJECTED_CODE}` | `guardrails` |\n"
     "| A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or "
     "`SCORING_FAILED` | the service that failed |\n\n"
     "The HTTP status (also in `status_code`) says where the request is: 200 finished, 202 still running, "
@@ -417,15 +417,14 @@ async def extract_ocr(
         400: {
             "model": ExtractOcrResponse,
             "description": (
-                f"Rejected by the structuring rules, or by the guardrails model (`{REJECTED_CODE}`, `guardrails: 1`; "
-                "`pipeline_last_stage` says which)"
+                f"Rejected by the structuring rules, or by the guardrails model (`{REJECTED_CODE}`, `guardrails: 1`, "
+                "`pipeline_last_stage: guardrails`; `message` says why)"
             ),
             "content": {
                 "application/json": {
                     "example": {
                         **_REJECTED,
                         "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
-                        "pipeline_last_stage": "structuring",
                     }
                 }
             },
