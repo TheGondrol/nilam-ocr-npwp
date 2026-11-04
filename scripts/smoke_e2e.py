@@ -259,7 +259,7 @@ def _sequence_cut_short(client: httpx.Client, sequence: list[str], data_key: str
         f"{' -> '.join(sequence)}: {response.status_code} "
         f"pipeline_last_stage={body.get('pipeline_last_stage')} errors={body.get('errors')}"
     )
-    rejected = response.status_code == 400 and body.get("pipeline_last_stage") == "structuring"
+    rejected = response.status_code == 400 and body.get("pipeline_last_stage") == "guardrails"
     if rejected:
         # Aturan structuring tetap menolak (mis. KPP acak dari OCR mock); tetap bukti structuring jalan dan berhenti.
         print(f"  ditolak aturan structuring: {body.get('message')!r}")

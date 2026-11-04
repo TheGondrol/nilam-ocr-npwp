@@ -61,7 +61,7 @@ def test_a_rejection_callback_is_the_400_answer():
         "data": None,
         "errors": REJECTED_CODE,
         "guardrails": 1,
-        "pipeline_last_stage": "structuring",
+        "pipeline_last_stage": "guardrails",
     }
 
 

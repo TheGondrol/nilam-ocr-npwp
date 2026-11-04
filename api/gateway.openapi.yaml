@@ -87,7 +87,7 @@ paths:
         | Rejected by the guardrails model | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
         |
 
-        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
+        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
         |
 
         | A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
@@ -366,7 +366,7 @@ paths:
         | Rejected by the guardrails model | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
         |
 
-        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `structuring`
+        | Rejected by the structuring rules | 400 | null | `1` | `DOWNSTREAM_VALIDATION_ERROR` | `guardrails`
         |
 
         | A stage failed | 422 | null | as on 200 | `OCR_FAILED`, `STRUCTURING_FAILED` or `SCORING_FAILED`
@@ -473,7 +473,7 @@ paths:
                 $ref: '#/components/schemas/ExtractOcrResponse'
         '400':
           description: 'Rejected by the structuring rules, or by the guardrails model (`DOWNSTREAM_VALIDATION_ERROR`,
-            `guardrails: 1`; `pipeline_last_stage` says which)'
+            `guardrails: 1`, `pipeline_last_stage: guardrails`; `message` says why)'
           content:
             application/json:
               example:
@@ -482,7 +482,7 @@ paths:
                 message: Kode provinsi pada NPWP tidak valid, mohon dicek kembali
                 errors: DOWNSTREAM_VALIDATION_ERROR
                 request_id: OCR_9cb01af2-493d-446d-b191-af120333f6d0
-                pipeline_last_stage: structuring
+                pipeline_last_stage: guardrails
                 guardrails: 1
               schema:
                 $ref: '#/components/schemas/ExtractOcrResponse'

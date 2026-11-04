@@ -288,12 +288,14 @@ Ditolak model guardrails, **400**; tidak ada yang jalan dan tidak ada callback:
 
 Ditolak aturan structuring ML engineer (23 Sep 2026), juga **400** dengan bentuk yang sama;
 `message` adalah alasan penolakan pertama dari aturan itu (bukan alasan flag yang ditoleransi),
-dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan terjadi di tahap structuring, jadi scoring tidak jalan:
+dalam bahasa Indonesia, dan bisa langsung ditampilkan ke pengguna. Penolakan terjadi di tahap structuring, jadi scoring tidak jalan.
+Karena ini validasi dokumen, `pipeline_last_stage` berisi `guardrails` (sama seperti penolakan model guardrails;
+`message` yang membedakan); `structuring` hanya dipakai kalau tahap structuring sendiri gagal (422 `STRUCTURING_FAILED`):
 
     {"status_code": 400, "status_desc": "Bad Request",
      "message": "Kode provinsi pada NPWP tidak valid, mohon dicek kembali",
      "data": null, "errors": "DOWNSTREAM_VALIDATION_ERROR", "request_id": "REQ_001",
-     "pipeline_last_stage": "structuring", "guardrails": 1}
+     "pipeline_last_stage": "guardrails", "guardrails": 1}
 
 Alasan yang menolak: dokumen blur / blank, bukan format standar NPWP, dokumen lain terdeteksi,
 screenshot cek NPWP online, jumlah halaman melebihi batas, serta kode provinsi, kecamatan, tanggal
@@ -352,7 +354,7 @@ tidak datang.
 |---|---|---|---|
 | selesai | 200 | `data` | null |
 | masih berjalan | 202 | – | null |
-| ditolak aturan structuring | 400 | `guardrails: 1`, `pipeline_last_stage: structuring` | `DOWNSTREAM_VALIDATION_ERROR` |
+| ditolak aturan structuring | 400 | `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
 | ditolak model guardrails (hanya kalau `guardrails_confidence_threshold` dikirim) | 400 | `guardrails: 1`, `pipeline_last_stage: guardrails` | `DOWNSTREAM_VALIDATION_ERROR` |
 | `[guardrails]` saja, lolos | 200 | laporan guardrails sebagai `data` | null |
 | satu tahap gagal | 422 | `pipeline_last_stage`: tahap yang gagal | `OCR_FAILED` / `STRUCTURING_FAILED` / `SCORING_FAILED` |

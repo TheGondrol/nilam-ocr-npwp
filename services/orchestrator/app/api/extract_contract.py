@@ -30,11 +30,14 @@ def extract_body(
 
 
 def last_stage(outcome: dict[str, Any]) -> str | None:
-    """The pipeline service an error answer comes from: guardrails when it rejected, else the stage the
-    pipeline reached (the one that failed or rejected). A success answer (200, 202) does not name one."""
+    """The pipeline service an error answer comes from: guardrails when the document was rejected, by the guardrails
+    model or by the structuring rules (both judge the document, not the stage), else the stage the pipeline reached
+    (the one that failed). A success answer (200, 202) does not name one."""
     if not outcome["passed"]:
         return GUARDRAILS
     pipeline = outcome.get("pipeline")
+    if pipeline and pipeline.get("status") == STATUS_REJECTED:
+        return GUARDRAILS
     if pipeline:
         return SERVICE_OF_STAGE.get(pipeline["stage"])
     return EXTRACTION if outcome.get("job") else None

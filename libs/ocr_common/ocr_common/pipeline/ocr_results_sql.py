@@ -63,8 +63,8 @@ def callback_row(body: dict[str, Any]) -> dict[str, Any] | None:
     """The row of a per-stage callback body that ends the request, as the extract-ocr answer of the same outcome:
     completed 200 with the result as `data` and the callback's `guardrails` (0, or the accepted probability), rejected
     400 `DOWNSTREAM_VALIDATION_ERROR` (`guardrails` 1), failed 422 `<STAGE>_FAILED`. `pipeline_last_stage` is the
-    service whose callback it is (on a failed hand-off, the stage that never received the job). None for a body that
-    does not end the request."""
+    service whose callback it is (on a failed hand-off, the stage that never received the job), and guardrails on a
+    rejection, as the orchestrator answers it. None for a body that does not end the request."""
     sent = result_callback_body(body)
     if sent is None:
         return None
@@ -74,6 +74,7 @@ def callback_row(body: dict[str, Any]) -> dict[str, Any] | None:
         status_code, message, errors, guardrails = 200, COMPLETED_MESSAGE, None, sent["guardrails"]
     elif sent["status"] == RESULT_COMPLETED:
         status_code, message, errors, guardrails = 400, sent.get("message"), sent.get("error_code"), GUARDRAILS_REJECTED
+        service = GUARDRAILS
     else:
         status_code, message, errors, guardrails = 422, sent.get("message"), sent.get("error_code"), GUARDRAILS_PASSED
     return {

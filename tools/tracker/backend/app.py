@@ -541,14 +541,15 @@ def stop_watcher(request_id: str) -> None:
 
 
 async def rejected_by(request_id: str) -> str:
-    """Siapa yang menolak sebuah 400 DOWNSTREAM_VALIDATION_ERROR, dibaca dari GET status orchestrator:
-    404 = tidak ada tahap yang punya job (model guardrails), 400 = aturan structuring."""
+    """Siapa yang menolak sebuah 400 DOWNSTREAM_VALIDATION_ERROR. Jawaban orchestrator tidak membedakannya
+    (pipeline_last_stage `guardrails` untuk keduanya), jadi dibaca dari job structuring: ada = aturan structuring,
+    404 = model guardrails (structuring tidak pernah jalan)."""
     try:
-        r = await http.get(f"{ORCHESTRATOR_URL}/v1/extract-ocr/{request_id}")
+        r = await http.get(f"{SERVICES['STRUCTURING']}{JOB_PATHS['STRUCTURING']}/{request_id}")
     except httpx.HTTPError as exc:
         log.warning("status %s: %s", request_id, exc)
         return "guardrails"
-    return "structuring" if r.status_code == 400 else "guardrails"
+    return "structuring" if r.status_code == 200 else "guardrails"
 
 
 async def poll_stages(request_id: str, stages: list[str]) -> None:
@@ -689,8 +690,8 @@ async def run_request(
     }
     rejector = None
     if r.status_code == 400 and body.get("errors") == REJECTED_CODE:
-        # Orchestrator lama tanpa pipeline_last_stage: baca penolaknya dari GET status.
-        rejector = last_service if last_service in ("guardrails", "structuring") else await rejected_by(request_id)
+        # pipeline_last_stage `guardrails` juga untuk penolakan aturan structuring: penolaknya dibaca dari job-nya.
+        rejector = await rejected_by(request_id)
     await emit(
         request_id,
         "GUARDRAILS",
